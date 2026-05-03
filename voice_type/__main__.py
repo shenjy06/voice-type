@@ -68,6 +68,7 @@ class Application:
         self._processing_worker = None
         self._saved_hwnd = 0
         self._cancelled = False
+        self._quitting = False
 
         self._init_ui()
         self._init_hotkey()
@@ -164,10 +165,13 @@ class Application:
 
         self.window.set_processing()
 
-        # Show window again
-        self.window.show()
-        self.window.raise_()
-        self.window.activateWindow()
+        # Show the window WITHOUT stealing focus from the target window.
+        # SW_SHOWNA = show without activating. This keeps the original
+        # foreground window intact so SetForegroundWindow succeeds later.
+        from ctypes import windll
+        SW_SHOWNA = 4
+        hwnd = int(self.window.winId())
+        windll.user32.ShowWindow(hwnd, SW_SHOWNA)
 
         # Save audio and process in background thread
         try:
@@ -175,6 +179,7 @@ class Application:
         except ValueError:
             self.window.set_error("No audio recorded")
             self.tray.show_message("Error", "No audio was recorded")
+            self.window.show()
             return
 
         self._start_processing(audio_path)
@@ -251,18 +256,26 @@ class Application:
         self.window.activateWindow()
 
     def _quit(self):
-        logger.info("Quitting application")
-        if hasattr(self, '_quitting'):
+        if self._quitting:
             return
         self._quitting = True
+        logger.info("Quitting application")
         self.hotkey_manager.stop()
         self.audio_recorder.stop()
         self.audio_recorder.cleanup()
-        if self._processing_thread and self._processing_thread.isRunning():
-            self._processing_thread.quit()
-            self._processing_thread.wait(1000)
+        try:
+            if self._processing_thread and self._processing_thread.isRunning():
+                self._processing_thread.quit()
+                self._processing_thread.wait(1000)
+        except RuntimeError:
+            # Thread already deleted by deleteLater
+            pass
+        finally:
+            self._processing_thread = None
+            self._processing_worker = None
         self.tray.hide()
-        self.app.exit(0)
+        self.window.close()
+        self.app.quit()
 
     def run(self):
         sys.exit(self.app.exec())
