@@ -19,3 +19,6 @@ Thumbs.db
 
 # User config (contains API keys)
 config.json
+
+# Local scripts
+start-claude.bat
