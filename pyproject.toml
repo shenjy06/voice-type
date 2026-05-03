@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "voice-type"
+version = "0.1.0"
+description = "Voice-to-text dictation tool with AI refinement"
+requires-python = ">=3.10"
+dependencies = [
+    "PySide6>=6.6",
+    "sounddevice>=0.4",
+    "numpy>=1.24",
+    "scipy>=1.11",
+    "openai>=1.0",
+    "pyperclip>=1.8",
+    "pynput>=1.7",
+]
+
+[project.scripts]
+voice-type = "voice_type.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["voice_type*"]
