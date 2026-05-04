@@ -2,6 +2,8 @@
 
 Windows voice-to-text dictation tool. Record voice → Speech recognition → Text refinement → Auto-paste to cursor position.
 
+Licensed under [GPL-3.0](LICENSE).
+
 ## Features
 
 - **Voice Recording**: One-key record/stop/cancel via global hotkeys without stealing focus from the target application

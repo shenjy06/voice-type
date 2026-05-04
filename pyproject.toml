@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "voice-type"
 version = "0.1.0"
 description = "Voice-to-text dictation tool with AI refinement"
+license = {text = "GPL-3.0-or-later"}
 requires-python = ">=3.10"
 dependencies = [
     "PySide6>=6.6",
