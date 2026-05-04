@@ -1,17 +1,8 @@
 """Tests for voice_type.polisher — TextPolisher."""
 
 from unittest.mock import MagicMock, patch
-from voice_type.config import AppConfig
 from voice_type.polisher import TextPolisher, SYSTEM_PROMPT
-
-
-def _make_config(**overrides):
-    cfg = AppConfig()
-    for k, v in overrides.items():
-        if k == "polish":
-            for k2, v2 in v.items():
-                setattr(cfg.polish, k2, v2)
-    return cfg
+from tests.conftest import make_config
 
 
 class TestTextPolisher:
@@ -24,7 +15,7 @@ class TestTextPolisher:
         mock_client.chat.completions.create.return_value = mock_resp
 
         with patch("voice_type.polisher.OpenAI", return_value=mock_client):
-            cfg = _make_config(polish={"api_key": "sk", "base_url": "https://api", "model": "gpt-4o"})
+            cfg = make_config(polish={"api_key": "sk", "base_url": "https://api", "model": "gpt-4o"})
             polisher = TextPolisher(cfg)
             result = polisher.polish("hello world")
 
@@ -39,7 +30,7 @@ class TestTextPolisher:
         mock_client.chat.completions.create.return_value = mock_resp
 
         with patch("voice_type.polisher.OpenAI", return_value=mock_client):
-            cfg = _make_config(polish={"api_key": "sk", "base_url": "https://api", "model": "gpt-4o"})
+            cfg = make_config(polish={"api_key": "sk", "base_url": "https://api", "model": "gpt-4o"})
             polisher = TextPolisher(cfg)
             polisher.polish("test input")
 
@@ -57,7 +48,7 @@ class TestTextPolisher:
         mock_client.chat.completions.create.return_value = mock_resp
 
         with patch("voice_type.polisher.OpenAI", return_value=mock_client):
-            cfg = _make_config(polish={"api_key": "sk", "base_url": "https://api", "model": "gpt-4o"})
+            cfg = make_config(polish={"api_key": "sk", "base_url": "https://api", "model": "gpt-4o"})
             polisher = TextPolisher(cfg)
             polisher.polish("my raw text")
 
@@ -75,7 +66,7 @@ class TestTextPolisher:
         mock_client.chat.completions.create.return_value = mock_resp
 
         with patch("voice_type.polisher.OpenAI", return_value=mock_client):
-            cfg = _make_config(polish={"api_key": "sk", "base_url": "https://api", "model": "gpt-4o"})
+            cfg = make_config(polish={"api_key": "sk", "base_url": "https://api", "model": "gpt-4o"})
             polisher = TextPolisher(cfg)
             polisher.polish("text")
 
@@ -91,7 +82,7 @@ class TestTextPolisher:
         mock_client.chat.completions.create.return_value = mock_resp
 
         with patch("voice_type.polisher.OpenAI", return_value=mock_client):
-            cfg = _make_config(polish={"api_key": "sk", "base_url": "https://api", "model": "qwen-plus"})
+            cfg = make_config(polish={"api_key": "sk", "base_url": "https://api", "model": "qwen-plus"})
             polisher = TextPolisher(cfg)
             polisher.polish("text")
 
@@ -104,7 +95,7 @@ class TestTextPolisher:
         mock_client.chat.completions.create.side_effect = Exception("Rate limited")
 
         with patch("voice_type.polisher.OpenAI", return_value=mock_client):
-            cfg = _make_config(polish={"api_key": "sk", "base_url": "https://api", "model": "gpt-4o"})
+            cfg = make_config(polish={"api_key": "sk", "base_url": "https://api", "model": "gpt-4o"})
             polisher = TextPolisher(cfg)
 
             try:
@@ -118,7 +109,7 @@ class TestTextPolisher:
         mock_client.chat.completions.create.return_value = MagicMock()
         mock_openai = mocker.patch("voice_type.polisher.OpenAI", return_value=mock_client)
 
-        cfg = _make_config(polish={"api_key": "sk", "base_url": "https://api"})
+        cfg = make_config(polish={"api_key": "sk", "base_url": "https://api"})
         TextPolisher(cfg)
 
         mock_openai.assert_called_once_with(api_key="sk", base_url="https://api", timeout=60)
@@ -134,7 +125,7 @@ class TestTextPolisher:
         mock_client.chat.completions.create.return_value = mock_resp
 
         with patch("voice_type.polisher.OpenAI", return_value=mock_client):
-            cfg = _make_config(polish={"api_key": "sk", "base_url": "https://api", "model": "gpt-4o"})
+            cfg = make_config(polish={"api_key": "sk", "base_url": "https://api", "model": "gpt-4o"})
             polisher = TextPolisher(cfg)
             result = polisher.polish("text")
 

@@ -1,35 +1,27 @@
 """Tests for voice_type.ui.settings_dialog — SettingsDialog."""
 
-import pytest
 from PySide6.QtWidgets import QDialogButtonBox, QDialog
+from voice_type.config import AppConfig, AsrConfig, PolishApiConfig, RecordingConfig
+from voice_type.ui.settings_dialog import SettingsDialog
 
 
 class TestSettingsDialogCreation:
     def test_dialog_creates(self, qtbot):
-        from voice_type.ui.settings_dialog import SettingsDialog
-        from voice_type.config import AppConfig
-        cfg = AppConfig()
-        dlg = SettingsDialog(cfg)
+        dlg = SettingsDialog(AppConfig())
         qtbot.addWidget(dlg)
         assert dlg.windowTitle() == "Settings"
 
     def test_stt_model_combo_populated(self, qtbot):
-        from voice_type.ui.settings_dialog import SettingsDialog
-        from voice_type.config import AppConfig
         dlg = SettingsDialog(AppConfig())
         qtbot.addWidget(dlg)
         assert dlg.stt_model_combo.count() >= 2  # SenseVoiceSmall, whisper-1
 
     def test_polish_model_combo_populated(self, qtbot):
-        from voice_type.ui.settings_dialog import SettingsDialog
-        from voice_type.config import AppConfig
         dlg = SettingsDialog(AppConfig())
         qtbot.addWidget(dlg)
         assert dlg.polish_model_combo.count() >= 7
 
     def test_language_combo_populated(self, qtbot):
-        from voice_type.ui.settings_dialog import SettingsDialog
-        from voice_type.config import AppConfig
         dlg = SettingsDialog(AppConfig())
         qtbot.addWidget(dlg)
         langs = [dlg.stt_lang_combo.itemText(i) for i in range(dlg.stt_lang_combo.count())]
@@ -40,8 +32,6 @@ class TestSettingsDialogCreation:
 
 class TestSettingsDialogLoadConfig:
     def test_load_config_populates_fields(self, qtbot):
-        from voice_type.ui.settings_dialog import SettingsDialog
-        from voice_type.config import AppConfig, AsrConfig, PolishApiConfig
         cfg = AppConfig(
             asr=AsrConfig(api_key="sk-stt", base_url="https://stt.api", model="whisper-1", language="en"),
             polish=PolishApiConfig(api_key="sk-polish", base_url="https://polish.api", model="gpt-4o-mini"),
@@ -55,16 +45,12 @@ class TestSettingsDialogLoadConfig:
 
     def test_load_config_with_custom_model_not_in_list(self, qtbot):
         """Custom model sets the edit text."""
-        from voice_type.ui.settings_dialog import SettingsDialog
-        from voice_type.config import AppConfig, AsrConfig
         cfg = AppConfig(asr=AsrConfig(model="custom-unknown-model"))
         dlg = SettingsDialog(cfg)
         qtbot.addWidget(dlg)
         assert dlg.stt_model_combo.currentText() == "custom-unknown-model"
 
     def test_load_hotkey_row_empty_mods(self, qtbot):
-        from voice_type.ui.settings_dialog import SettingsDialog
-        from voice_type.config import AppConfig, RecordingConfig
         cfg = AppConfig(recording=RecordingConfig(
             start_hotkey_modifiers=[],
             start_hotkey_key="x",
@@ -78,8 +64,6 @@ class TestSettingsDialogLoadConfig:
 
 class TestSettingsDialogSave:
     def test_save_hotkey_row_both_none(self, qtbot):
-        from voice_type.ui.settings_dialog import SettingsDialog
-        from voice_type.config import AppConfig
         dlg = SettingsDialog(AppConfig())
         qtbot.addWidget(dlg)
         dlg.start_mod1.setCurrentText("none")
@@ -88,8 +72,6 @@ class TestSettingsDialogSave:
         assert result == []
 
     def test_save_hotkey_row_one_modifier(self, qtbot):
-        from voice_type.ui.settings_dialog import SettingsDialog
-        from voice_type.config import AppConfig
         dlg = SettingsDialog(AppConfig())
         qtbot.addWidget(dlg)
         dlg.start_mod1.setCurrentText("alt")
@@ -98,8 +80,6 @@ class TestSettingsDialogSave:
         assert result == ["alt"]
 
     def test_save_hotkey_row_two_modifiers(self, qtbot):
-        from voice_type.ui.settings_dialog import SettingsDialog
-        from voice_type.config import AppConfig
         dlg = SettingsDialog(AppConfig())
         qtbot.addWidget(dlg)
         dlg.stop_mod1.setCurrentText("ctrl")
@@ -109,8 +89,6 @@ class TestSettingsDialogSave:
 
     def test_save_and_close_with_network_available(self, qtbot, mocker):
         """When network is available, config is saved and dialog accepted."""
-        from voice_type.ui.settings_dialog import SettingsDialog
-        from voice_type.config import AppConfig
         mocker.patch("voice_type.ui.settings_dialog.check_network_available", return_value=True)
         mock_toast = mocker.patch("voice_type.ui.settings_dialog.Toast")
 
@@ -125,8 +103,6 @@ class TestSettingsDialogSave:
 
     def test_save_and_close_with_network_unavailable(self, qtbot, mocker):
         """When network is unavailable, toast is shown and config is NOT saved."""
-        from voice_type.ui.settings_dialog import SettingsDialog
-        from voice_type.config import AppConfig
         mocker.patch("voice_type.ui.settings_dialog.check_network_available", return_value=False)
         mock_toast = mocker.patch("voice_type.ui.settings_dialog.Toast")
 
@@ -147,8 +123,6 @@ class TestSettingsDialogSave:
 
     def test_save_and_close_empty_base_url_defaults(self, qtbot, mocker):
         """Empty base_url defaults to https://api.openai.com/v1."""
-        from voice_type.ui.settings_dialog import SettingsDialog
-        from voice_type.config import AppConfig
         mocker.patch("voice_type.ui.settings_dialog.check_network_available", return_value=True)
 
         cfg = AppConfig()
@@ -168,8 +142,6 @@ class TestSettingsDialogSave:
 
     def test_save_strips_whitespace_from_api_key(self, qtbot, mocker):
         """API key inputs are stripped."""
-        from voice_type.ui.settings_dialog import SettingsDialog
-        from voice_type.config import AppConfig
         mocker.patch("voice_type.ui.settings_dialog.check_network_available", return_value=True)
 
         cfg = AppConfig()
@@ -186,8 +158,6 @@ class TestSettingsDialogSave:
 
     def test_save_and_close_accepts_dialog(self, qtbot, mocker):
         """_save_and_close calls accept() to close the dialog."""
-        from voice_type.ui.settings_dialog import SettingsDialog
-        from voice_type.config import AppConfig
         mocker.patch("voice_type.ui.settings_dialog.check_network_available", return_value=True)
 
         cfg = AppConfig()
@@ -201,8 +171,6 @@ class TestSettingsDialogSave:
 
 class TestSettingsDialogCancel:
     def test_cancel_rejects_dialog(self, qtbot):
-        from voice_type.ui.settings_dialog import SettingsDialog
-        from voice_type.config import AppConfig
         dlg = SettingsDialog(AppConfig())
         qtbot.addWidget(dlg)
         dlg.reject()

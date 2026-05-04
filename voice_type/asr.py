@@ -20,11 +20,11 @@ class Transcriber:
         logger.info("Transcribing audio: %s", audio_path)
         kwargs = {
             "model": self.config.asr.model,
-            "file": open(audio_path, "rb"),
         }
         if self.config.asr.language and self.config.asr.language != "auto":
             kwargs["language"] = self.config.asr.language
-        response = self._client.audio.transcriptions.create(**kwargs)
+        with open(audio_path, "rb") as f:
+            response = self._client.audio.transcriptions.create(file=f, **kwargs)
         text = response.text.strip()
         logger.info("Transcription complete: %d chars", len(text))
         return text

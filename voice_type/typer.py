@@ -162,7 +162,6 @@ class TextTyper:
             # Use keybd_event for Ctrl+V
             VK_CONTROL = 0x11
             VK_V = 0x56
-            KEYEVENTF_KEYUP = 0x0002
 
             # Press Ctrl
             user32.keybd_event(VK_CONTROL, 0, 0, 0)

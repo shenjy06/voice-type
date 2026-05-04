@@ -1,20 +1,19 @@
 """Tests for voice_type.ui.main_window — FloatingRecordingWindow, PulsingDot, Toast."""
 
-import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QCloseEvent
+from voice_type.ui.main_window import FloatingRecordingWindow, PulsingDot, Toast, WM_HOTKEY
+from voice_type.ui.system_tray import HotkeyManager
 
 
 class TestPulsingDot:
     def test_start_sets_recording_and_timer(self, qtbot):
-        from voice_type.ui.main_window import PulsingDot
         dot = PulsingDot()
         dot.start()
         assert dot._recording is True
         assert dot._timer.isActive()
 
     def test_stop_resets_opacity(self, qtbot):
-        from voice_type.ui.main_window import PulsingDot
         dot = PulsingDot()
         dot.start()
         dot.stop()
@@ -23,7 +22,6 @@ class TestPulsingDot:
         assert not dot._timer.isActive()
 
     def test_pulse_decreases_then_increases(self, qtbot):
-        from voice_type.ui.main_window import PulsingDot
         dot = PulsingDot()
         dot._growing = True
         dot._opacity = 1.0
@@ -39,28 +37,23 @@ class TestPulsingDot:
 
 class TestFloatingRecordingWindow:
     def test_init_always_on_top(self, qtbot):
-        from voice_type.ui.main_window import FloatingRecordingWindow
         win = FloatingRecordingWindow(always_on_top=True)
         qtbot.addWidget(win)
         flags = win.windowFlags()
         assert flags & Qt.WindowStaysOnTopHint
 
     def test_init_not_always_on_top(self, qtbot):
-        from voice_type.ui.main_window import FloatingRecordingWindow
         win = FloatingRecordingWindow(always_on_top=False)
         qtbot.addWidget(win)
-        # WindowStaysOnTopHint from _init_ui is still set, but the extra flag isn't added again
         flags = win.windowFlags()
         assert flags & Qt.FramelessWindowHint
 
     def test_initial_state_is_idle(self, qtbot):
-        from voice_type.ui.main_window import FloatingRecordingWindow
         win = FloatingRecordingWindow()
         qtbot.addWidget(win)
         assert win._state == win.STATE_IDLE
 
     def test_start_recording_emits_signal(self, qtbot):
-        from voice_type.ui.main_window import FloatingRecordingWindow
         win = FloatingRecordingWindow()
         qtbot.addWidget(win)
         with qtbot.waitSignal(win.recording_started):
@@ -69,7 +62,6 @@ class TestFloatingRecordingWindow:
         assert win._state == win.STATE_RECORDING
 
     def test_start_recording_when_already_recording_noop(self, qtbot):
-        from voice_type.ui.main_window import FloatingRecordingWindow
         win = FloatingRecordingWindow()
         qtbot.addWidget(win)
         win.start_recording()
@@ -80,7 +72,6 @@ class TestFloatingRecordingWindow:
         assert emitted == []
 
     def test_stop_recording_emits_signal(self, qtbot):
-        from voice_type.ui.main_window import FloatingRecordingWindow
         win = FloatingRecordingWindow()
         qtbot.addWidget(win)
         win.start_recording()
@@ -90,7 +81,6 @@ class TestFloatingRecordingWindow:
         assert win._state == win.STATE_IDLE
 
     def test_stop_recording_when_not_recording_noop(self, qtbot):
-        from voice_type.ui.main_window import FloatingRecordingWindow
         win = FloatingRecordingWindow()
         qtbot.addWidget(win)
         emitted = []
@@ -99,7 +89,6 @@ class TestFloatingRecordingWindow:
         assert emitted == []
 
     def test_toggle_from_idle_starts(self, qtbot):
-        from voice_type.ui.main_window import FloatingRecordingWindow
         win = FloatingRecordingWindow()
         qtbot.addWidget(win)
         with qtbot.waitSignal(win.recording_started):
@@ -107,7 +96,6 @@ class TestFloatingRecordingWindow:
         assert win.is_recording() is True
 
     def test_toggle_from_recording_stops(self, qtbot):
-        from voice_type.ui.main_window import FloatingRecordingWindow
         win = FloatingRecordingWindow()
         qtbot.addWidget(win)
         win.start_recording()
@@ -116,7 +104,6 @@ class TestFloatingRecordingWindow:
         assert win.is_recording() is False
 
     def test_set_processing(self, qtbot):
-        from voice_type.ui.main_window import FloatingRecordingWindow
         win = FloatingRecordingWindow()
         qtbot.addWidget(win)
         win.set_processing()
@@ -124,42 +111,36 @@ class TestFloatingRecordingWindow:
         assert win.is_recording() is False
 
     def test_set_done(self, qtbot):
-        from voice_type.ui.main_window import FloatingRecordingWindow
         win = FloatingRecordingWindow()
         qtbot.addWidget(win)
         win.set_done()
         assert win._state == win.STATE_DONE
 
     def test_set_error(self, qtbot):
-        from voice_type.ui.main_window import FloatingRecordingWindow
         win = FloatingRecordingWindow()
         qtbot.addWidget(win)
         win.set_error("No speech")
         assert win._state == win.STATE_ERROR
 
     def test_set_status_processing(self, qtbot):
-        from voice_type.ui.main_window import FloatingRecordingWindow
         win = FloatingRecordingWindow()
         qtbot.addWidget(win)
         win.set_status("Processing...")
         assert win._state == win.STATE_PROCESSING
 
     def test_set_status_error(self, qtbot):
-        from voice_type.ui.main_window import FloatingRecordingWindow
         win = FloatingRecordingWindow()
         qtbot.addWidget(win)
         win.set_status("Error occurred")
         assert win._state == win.STATE_ERROR
 
     def test_set_status_done(self, qtbot):
-        from voice_type.ui.main_window import FloatingRecordingWindow
         win = FloatingRecordingWindow()
         qtbot.addWidget(win)
         win.set_status("Done")
         assert win._state == win.STATE_DONE
 
     def test_close_event_emits_quit(self, qtbot):
-        from voice_type.ui.main_window import FloatingRecordingWindow
         win = FloatingRecordingWindow()
         qtbot.addWidget(win)
         with qtbot.waitSignal(win.quit_requested):
@@ -168,8 +149,6 @@ class TestFloatingRecordingWindow:
             assert event.isAccepted()
 
     def test_native_event_wm_hotkey_dispatches(self, qtbot, mocker):
-        from voice_type.ui.main_window import FloatingRecordingWindow, WM_HOTKEY
-        from voice_type.ui.system_tray import HotkeyManager
         win = FloatingRecordingWindow()
         qtbot.addWidget(win)
         mock_mgr = mocker.MagicMock(spec=HotkeyManager)
@@ -186,17 +165,14 @@ class TestFloatingRecordingWindow:
         mock_mgr.handle_hotkey.assert_called_once_with(1)
 
     def test_native_event_other_event_returns_false(self, qtbot):
-        from voice_type.ui.main_window import FloatingRecordingWindow
         win = FloatingRecordingWindow()
         qtbot.addWidget(win)
         result = win.nativeEvent(b"other_event", None)
         assert result == (False, 0)
 
     def test_native_event_no_hotkey_manager_returns_false(self, qtbot):
-        from voice_type.ui.main_window import FloatingRecordingWindow, WM_HOTKEY
         win = FloatingRecordingWindow()
         qtbot.addWidget(win)
-        # _hotkey_manager is None by default
         import ctypes.wintypes
         msg_mock = ctypes.wintypes.MSG()
         msg_mock.message = WM_HOTKEY
@@ -206,7 +182,6 @@ class TestFloatingRecordingWindow:
         assert result == (False, 0)
 
     def test_set_hotkey_manager(self, qtbot):
-        from voice_type.ui.main_window import FloatingRecordingWindow
         win = FloatingRecordingWindow()
         qtbot.addWidget(win)
         mgr = object()
@@ -214,7 +189,6 @@ class TestFloatingRecordingWindow:
         assert win._hotkey_manager is mgr
 
     def test_is_recording_in_different_states(self, qtbot):
-        from voice_type.ui.main_window import FloatingRecordingWindow
         win = FloatingRecordingWindow()
         qtbot.addWidget(win)
         assert win.is_recording() is False  # IDLE
@@ -225,7 +199,6 @@ class TestFloatingRecordingWindow:
 
     def test_state_transitions_full_cycle(self, qtbot):
         """IDLE -> RECORDING -> PROCESSING -> DONE -> IDLE."""
-        from voice_type.ui.main_window import FloatingRecordingWindow
         win = FloatingRecordingWindow()
         qtbot.addWidget(win)
         assert win._state == win.STATE_IDLE
@@ -245,25 +218,21 @@ class TestFloatingRecordingWindow:
 
 class TestToast:
     def test_toast_shows_with_text(self, qtbot):
-        from voice_type.ui.main_window import Toast
         toast = Toast("Test message")
         qtbot.addWidget(toast)
         assert toast._text == "Test message"
 
     def test_toast_custom_duration(self, qtbot):
-        from voice_type.ui.main_window import Toast
         toast = Toast("Quick", duration_ms=500)
         qtbot.addWidget(toast)
         assert toast._duration_ms == 500
 
     def test_toast_default_duration(self, qtbot):
-        from voice_type.ui.main_window import Toast
         toast = Toast("Normal")
         qtbot.addWidget(toast)
         assert toast._duration_ms == 1500
 
     def test_toast_size_depends_on_text(self, qtbot):
-        from voice_type.ui.main_window import Toast
         toast_short = Toast("Hi")
         toast_long = Toast("This is a much longer message that should make a wider toast")
         qtbot.addWidget(toast_short)

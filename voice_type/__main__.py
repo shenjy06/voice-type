@@ -1,9 +1,12 @@
 """Voice Type — Entry point and application orchestrator."""
 
 import logging
+import os
 import sys
+from ctypes import windll
+import pyperclip
 from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import QThread, Signal, QObject, QTimer
+from PySide6.QtCore import QThread, Signal, QObject
 from voice_type.config import AppConfig
 from voice_type.audio import AudioRecorder
 from voice_type.asr import Transcriber
@@ -39,7 +42,6 @@ class ProcessingWorker(QObject):
             transcript = transcriber.transcribe(self.audio_path)
             # Delete audio file immediately after STT
             try:
-                import os
                 os.remove(self.audio_path)
                 logger.info("Deleted temp audio: %s", self.audio_path)
             except OSError as e:
@@ -174,7 +176,6 @@ class Application:
         # Show the window WITHOUT stealing focus from the target window.
         # SW_SHOWNA = show without activating. This keeps the original
         # foreground window intact so SetForegroundWindow succeeds later.
-        from ctypes import windll
         SW_SHOWNA = 4
         hwnd = int(self.window.winId())
         windll.user32.ShowWindow(hwnd, SW_SHOWNA)
@@ -213,7 +214,6 @@ class Application:
         if self.config.output.auto_paste:
             self.typer.output_text(refined_text, self._saved_hwnd)
         else:
-            import pyperclip
             pyperclip.copy(refined_text)
 
         # Cleanup temp audio and reset to idle

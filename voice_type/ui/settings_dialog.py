@@ -2,10 +2,10 @@
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QComboBox, QFormLayout, QGroupBox, QMessageBox,
-    QSpinBox, QCheckBox, QDialogButtonBox, QTabWidget, QWidget,
+    QComboBox, QFormLayout, QGroupBox, QSpinBox, QCheckBox,
+    QDialogButtonBox, QTabWidget, QWidget,
 )
-from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtCore import Qt, Signal
 from voice_type.config import AppConfig
 from voice_type.network import check_network_available
 from voice_type.ui.main_window import Toast
@@ -241,8 +241,15 @@ class SettingsDialog(QDialog):
             self._toast.show()
             return
 
+        api_key = self.stt_api_key_input.text().strip()
+        polish_key = self.polish_api_key_input.text().strip()
+        if not api_key and not polish_key:
+            self._toast = Toast("At least one API Key is required", parent=self)
+            self._toast.show()
+            return
+
         # STT
-        self.config.asr.api_key = self.stt_api_key_input.text().strip()
+        self.config.asr.api_key = api_key
         self.config.asr.base_url = self.stt_base_url_input.text().strip() or "https://api.openai.com/v1"
         self.config.asr.model = self.stt_model_combo.currentText()
         self.config.asr.language = self.stt_lang_combo.currentText()

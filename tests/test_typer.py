@@ -1,8 +1,6 @@
 """Tests for voice_type.typer — TextTyper and helper functions."""
 
-from unittest.mock import MagicMock, patch
 import pyperclip
-from voice_type.config import AppConfig
 from voice_type.typer import (
     TextTyper,
     _tap_alt,
@@ -12,15 +10,7 @@ from voice_type.typer import (
     set_foreground_window,
     user32,
 )
-
-
-def _make_config(**overrides):
-    cfg = AppConfig()
-    for k, v in overrides.items():
-        if k == "output":
-            for k2, v2 in v.items():
-                setattr(cfg.output, k2, v2)
-    return cfg
+from tests.conftest import make_config
 
 
 class TestTapAlt:
@@ -141,7 +131,7 @@ class TestSetForegroundWindow:
 class TestTextTyperOutputText:
     def test_empty_text_returns_false(self, mocker):
         """Empty string returns False."""
-        cfg = _make_config()
+        cfg = make_config()
         typer = TextTyper(cfg)
         mocker.patch("voice_type.typer.time.sleep")
 
@@ -149,22 +139,21 @@ class TestTextTyperOutputText:
 
     def test_calls_set_foreground_window_with_hwnd(self, mocker):
         """Non-zero saved_hwnd triggers set_foreground_window."""
-        cfg = _make_config()
+        cfg = make_config()
         typer = TextTyper(cfg)
         mocker.patch("voice_type.typer.time.sleep")
-        mocker.patch("voice_type.typer.set_foreground_window", return_value=True)
+        mock_sfw = mocker.patch("voice_type.typer.set_foreground_window", return_value=True)
         mocker.patch.object(typer, "_send_paste", return_value=True)
         mocker.patch("pyperclip.paste", return_value="")
         mocker.patch("pyperclip.copy")
 
         typer.output_text("hello", saved_hwnd=123)
 
-        from voice_type.typer import set_foreground_window as sfw
-        sfw.assert_called_with(123)
+        mock_sfw.assert_called_with(123)
 
     def test_paste_success_returns_true(self, mocker):
         """Successful paste returns True."""
-        cfg = _make_config()
+        cfg = make_config()
         typer = TextTyper(cfg)
         mocker.patch("voice_type.typer.time.sleep")
         mocker.patch("voice_type.typer.set_foreground_window", return_value=True)
@@ -179,7 +168,7 @@ class TestTextTyperOutputText:
 
     def test_paste_failure_restores_clipboard(self, mocker):
         """Failed paste restores original clipboard content."""
-        cfg = _make_config()
+        cfg = make_config()
         typer = TextTyper(cfg)
         mocker.patch("voice_type.typer.time.sleep")
         mocker.patch("voice_type.typer.set_foreground_window", return_value=True)
@@ -194,7 +183,7 @@ class TestTextTyperOutputText:
 
     def test_clipboard_get_failure_uses_empty(self, mocker):
         """If pyperclip.paste() raises, uses empty string as original."""
-        cfg = _make_config()
+        cfg = make_config()
         typer = TextTyper(cfg)
         mocker.patch("voice_type.typer.time.sleep")
         mocker.patch("voice_type.typer.set_foreground_window", return_value=True)
@@ -210,11 +199,11 @@ class TestTextTyperOutputText:
         """sleep is called with paste_delay_ms / 1000."""
         mock_sleep = mocker.patch("voice_type.typer.time.sleep")
         mocker.patch("voice_type.typer.set_foreground_window", return_value=True)
-        mocker.patch.object(typer_cls := TextTyper, "_send_paste", return_value=True)
+        mocker.patch.object(TextTyper, "_send_paste", return_value=True)
         mocker.patch("pyperclip.paste", return_value="")
         mocker.patch("pyperclip.copy")
 
-        cfg = _make_config(output={"paste_delay_ms": 500})
+        cfg = make_config(output={"paste_delay_ms": 500})
         typer = TextTyper(cfg)
         typer.output_text("text")
 
@@ -227,7 +216,7 @@ class TestTextTyperSendPaste:
         mock_user32 = mocker.patch("voice_type.typer.user32")
         mocker.patch("voice_type.typer.time.sleep")
 
-        cfg = _make_config()
+        cfg = make_config()
         typer = TextTyper(cfg)
         assert typer._send_paste() is True
 
@@ -239,6 +228,6 @@ class TestTextTyperSendPaste:
         mock_user32 = mocker.patch("voice_type.typer.user32")
         mock_user32.keybd_event.side_effect = Exception("access denied")
 
-        cfg = _make_config()
+        cfg = make_config()
         typer = TextTyper(cfg)
         assert typer._send_paste() is False

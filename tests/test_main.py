@@ -1,8 +1,5 @@
 """Tests for voice_type.__main__ — ProcessingWorker and Application."""
 
-import pytest
-from unittest.mock import MagicMock
-
 
 class TestProcessingWorker:
     def test_success_path(self, qtbot, mocker):
@@ -116,7 +113,7 @@ class TestProcessingWorker:
 
 
 class TestApplication:
-    def _make_application(self, qtbot, mocker):
+    def _make_application(self, qtbot, mocker, is_configured=True):
         """Create an Application with all dependencies mocked."""
         mocker.patch("voice_type.__main__.QApplication")
         mock_config = mocker.patch("voice_type.__main__.AppConfig")
@@ -133,7 +130,7 @@ class TestApplication:
             output=mocker.MagicMock(auto_paste=True, paste_delay_ms=300),
             window=mocker.MagicMock(show_on_start=False, always_on_top=True),
         )
-        mock_cfg.is_configured.return_value = True
+        mock_cfg.is_configured.return_value = is_configured
         mock_config.load.return_value = mock_cfg
 
         mocker.patch("voice_type.__main__.AudioRecorder")
@@ -302,65 +299,17 @@ class TestApplication:
 
     def test_shows_settings_when_not_configured(self, qtbot, mocker):
         """When no API key is set, settings dialog is shown on startup."""
-        mocker.patch("voice_type.__main__.QApplication")
-        mock_config = mocker.patch("voice_type.__main__.AppConfig")
-        mock_cfg = mocker.MagicMock(
-            recording=mocker.MagicMock(
-                sample_rate=16000,
-                start_hotkey_modifiers=["alt"],
-                start_hotkey_key="s",
-                stop_hotkey_modifiers=["alt"],
-                stop_hotkey_key="e",
-                cancel_hotkey_modifiers=["alt"],
-                cancel_hotkey_key="c",
-            ),
-            output=mocker.MagicMock(auto_paste=True, paste_delay_ms=300),
-            window=mocker.MagicMock(show_on_start=False, always_on_top=True),
-        )
-        mock_cfg.is_configured.return_value = False
-        mock_config.load.return_value = mock_cfg
-        mocker.patch("voice_type.__main__.AudioRecorder")
-        mocker.patch("voice_type.__main__.TextTyper")
-        mocker.patch("voice_type.__main__.FloatingRecordingWindow")
-        mocker.patch("voice_type.__main__.TrayIcon")
-        mocker.patch("voice_type.__main__.HotkeyManager")
-
         mock_dialog = mocker.MagicMock()
         mocker.patch("voice_type.__main__.SettingsDialog", return_value=mock_dialog)
 
-        from voice_type.__main__ import Application
-        app = Application()
+        self._make_application(qtbot, mocker, is_configured=False)
 
         mock_dialog.exec.assert_called_once()
 
     def test_skips_settings_when_configured(self, qtbot, mocker):
         """When API key is set, settings dialog is NOT shown on startup."""
-        mocker.patch("voice_type.__main__.QApplication")
-        mock_config = mocker.patch("voice_type.__main__.AppConfig")
-        mock_cfg = mocker.MagicMock(
-            recording=mocker.MagicMock(
-                sample_rate=16000,
-                start_hotkey_modifiers=["alt"],
-                start_hotkey_key="s",
-                stop_hotkey_modifiers=["alt"],
-                stop_hotkey_key="e",
-                cancel_hotkey_modifiers=["alt"],
-                cancel_hotkey_key="c",
-            ),
-            output=mocker.MagicMock(auto_paste=True, paste_delay_ms=300),
-            window=mocker.MagicMock(show_on_start=False, always_on_top=True),
-        )
-        mock_cfg.is_configured.return_value = True
-        mock_config.load.return_value = mock_cfg
-        mocker.patch("voice_type.__main__.AudioRecorder")
-        mocker.patch("voice_type.__main__.TextTyper")
-        mocker.patch("voice_type.__main__.FloatingRecordingWindow")
-        mocker.patch("voice_type.__main__.TrayIcon")
-        mocker.patch("voice_type.__main__.HotkeyManager")
-
         mock_dialog_cls = mocker.patch("voice_type.__main__.SettingsDialog")
 
-        from voice_type.__main__ import Application
-        app = Application()
+        self._make_application(qtbot, mocker, is_configured=True)
 
         mock_dialog_cls.assert_not_called()

@@ -1,7 +1,6 @@
 """Configuration management — loads/saves user settings from JSON."""
 
 import json
-import os
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
