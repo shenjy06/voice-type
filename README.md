@@ -1,67 +1,67 @@
 # Voice Type
 
-Windows 语音转文字速记工具。录制语音 → 语音识别 → 文本润色 → 自动粘贴到光标位置。
+Windows voice-to-text dictation tool. Record voice → Speech recognition → Text refinement → Auto-paste to cursor position.
 
-## 功能特性
+## Features
 
-- **语音录制**: 全局热键一键录制/停止/取消，不抢占目标应用焦点
-- **语音识别 (STT)**: 将录制的音频转录为文本（支持 OpenAI 兼容协议）
-- **智能润色**: LLM 自动去除语气词、修正语法、提升表达清晰度
-- **文本注入**: 恢复原始焦点窗口，将润色后的文本粘贴到光标位置
-- **浮动控制窗口**: 始终置顶的迷你窗口，支持拖拽移动，带脉冲红点动画
-- **系统托盘**: 托盘图标提供录制切换、设置、退出等功能
-- **全局热键**: 使用 Windows 原生热键 API，在任何应用中均可响应
-- **网络检测**: 保存设置时自动检测网络可用性，避免无效配置
-- **启动检查**: 首次启动时自动检测 API 配置，未配置时弹出设置引导
+- **Voice Recording**: One-key record/stop/cancel via global hotkeys without stealing focus from the target application
+- **Speech Recognition (STT)**: Transcribe recorded audio to text (OpenAI-compatible protocol)
+- **Smart Refinement**: LLM automatically removes filler words, fixes grammar, and improves clarity
+- **Text Injection**: Restores the original foreground window and pastes the refined text at the cursor position
+- **Floating Control Window**: Always-on-top mini window with drag support and pulsing red dot animation
+- **System Tray**: Tray icon provides recording toggle, settings, and quit functions
+- **Global Hotkeys**: Uses native Windows `RegisterHotKey` API, responsive in any application
+- **Network Detection**: Automatically checks network availability on settings save to prevent invalid configurations
+- **Startup Check**: Automatically detects API configuration on first launch and shows setup wizard if unconfigured
 
-## 技术栈
+## Tech Stack
 
-| 组件 | 技术 |
-|------|------|
+| Component | Technology |
+|-----------|------------|
 | GUI | PySide6 (Qt 6) |
-| 音频录制 | sounddevice + numpy |
-| 音频编码 | soundfile (OGG/Vorbis) |
-| 语音识别 | OpenAI 兼容协议 (ASR API) |
-| 文本润色 | OpenAI 兼容协议 (Chat Completions API) |
-| 全局热键 | Windows RegisterHotKey (ctypes) |
-| 文本注入 | pyperclip (剪贴板) + ctypes (窗口管理) |
+| Audio Recording | sounddevice + numpy |
+| Audio Encoding | soundfile (OGG/Vorbis) |
+| Speech Recognition | OpenAI-compatible protocol (ASR API) |
+| Text Refinement | OpenAI-compatible protocol (Chat Completions API) |
+| Global Hotkeys | Windows RegisterHotKey (ctypes) |
+| Text Injection | pyperclip (clipboard) + ctypes (window management) |
 
-## 安装
+## Installation
 
 ```bash
-# 克隆项目
+# Clone the project
 cd voice-type
 
-# 安装依赖
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-### 依赖说明
+### Dependencies
 
-- `PySide6` — Qt GUI 框架
-- `sounddevice` — 跨平台音频录制
-- `numpy` — 音频数据处理
-- `soundfile` — OGG/Vorbis 音频文件编码
-- `openai` — 调用兼容 OpenAI API 协议的 STT 和 LLM 服务
-- `pyperclip` — 跨平台剪贴板操作
+- `PySide6` — Qt GUI framework
+- `sounddevice` — Cross-platform audio recording
+- `numpy` — Audio data processing
+- `soundfile` — OGG/Vorbis audio file encoding
+- `openai` — Client for OpenAI-compatible STT and LLM services
+- `pyperclip` — Cross-platform clipboard operations
 
-> 注：Windows 热键和窗口管理使用标准库 `ctypes`，无需额外依赖。
+> Note: Windows hotkeys and window management use the standard library `ctypes`, no extra dependencies required.
 
-## 运行
+## Running
 
 ```bash
 python -m voice_type
 ```
 
-## 打包为 EXE
+## Packaging as EXE
 
-项目提供一键构建脚本，双击即可打包：
+The project provides a one-click build script — just double-click to package:
 
 ```bash
 build.bat
 ```
 
-或使用命令行：
+Or use the command line:
 
 ```bash
 pyinstaller --clean --name="VoiceType" --windowed --noconfirm --onefile \
@@ -69,56 +69,56 @@ pyinstaller --clean --name="VoiceType" --windowed --noconfirm --onefile \
     voice_type/__main__.py
 ```
 
-生成的 `dist/VoiceType.exe` 为独立可执行文件，无需安装 Python 环境。
+The generated `dist/VoiceType.exe` is a standalone executable — no Python environment required.
 
-## 设置
+## Settings
 
-点击浮动窗口右上角的齿轮图标打开设置页面，或通过系统托盘菜单进入设置。设置页面分为四个标签页：STT、Polish、Output、Hotkeys。
+Click the gear icon in the upper-right corner of the floating window, or access settings via the system tray menu. The settings dialog has four tabs: STT, Polish, Output, and Hotkeys.
 
-### STT（语音识别）配置
+### STT (Speech-to-Text) Configuration
 
-| 字段 | 说明 | 示例 |
-|------|------|------|
-| API Key | STT 服务的认证密钥 | `sk-...` |
-| Base URL | STT 服务的 API 地址 | `https://api.siliconflow.cn/v1` |
-| Model | 语音识别模型 | `FunAudioLLM/SenseVoiceSmall` |
-| Language | 识别语言 | `zh` / `en` / `auto` |
-| Sample Rate | 录制采样率 | `16000` Hz |
+| Field | Description | Example |
+|-------|-------------|---------|
+| API Key | Authentication key for STT service | `sk-...` |
+| Base URL | API address of STT service | `https://api.siliconflow.cn/v1` |
+| Model | Speech recognition model | `FunAudioLLM/SenseVoiceSmall` |
+| Language | Recognition language | `zh` / `en` / `auto` |
+| Sample Rate | Recording sample rate | `16000` Hz |
 
-### Polish（文本润色）配置
+### Polish (Text Refinement) Configuration
 
-| 字段 | 说明 | 示例 |
-|------|------|------|
-| API Key | LLM 服务的认证密钥 | `sk-...` |
-| Base URL | LLM 服务的 API 地址 | `https://api.siliconflow.cn/v1` |
-| Model | 文本润色模型 | `gpt-4o` / `deepseek-chat` / `qwen-plus` |
+| Field | Description | Example |
+|-------|-------------|---------|
+| API Key | Authentication key for LLM service | `sk-...` |
+| Base URL | API address of LLM service | `https://api.siliconflow.cn/v1` |
+| Model | Text refinement model | `gpt-4o` / `deepseek-chat` / `qwen-plus` |
 
-### 热键配置
+### Hotkey Configuration
 
-在设置中可以分别配置开始录制、停止录制和取消录制的热键：
+You can separately configure the hotkeys for start recording, stop recording, and cancel recording in the settings:
 
-| 热键 | 默认 | 说明 |
-|------|------|------|
-| 开始录制 | `Alt + S` | 开始录制语音 |
-| 停止录制 | `Alt + E` | 停止录制并进入识别/润色流程 |
-| 取消录制 | `Alt + C` | 停止录制并丢弃音频，不进行后续处理 |
+| Hotkey | Default | Description |
+|--------|---------|-------------|
+| Start Recording | `Alt + S` | Start voice recording |
+| Stop Recording | `Alt + E` | Stop recording and enter transcription/refinement pipeline |
+| Cancel Recording | `Alt + C` | Stop recording and discard audio, skip subsequent processing |
 
-支持 `alt`、`ctrl`、`shift`、`super`、`none` 修饰键，最多两个修饰键组合。
+Supports `alt`, `ctrl`, `shift`, `super`, `none` modifiers, with up to two modifier key combinations.
 
-### 输出配置
+### Output Configuration
 
-| 字段 | 说明 | 默认值 |
-|------|------|--------|
-| Paste Delay | 粘贴前延迟（毫秒） | `300 ms` |
-| Auto-paste | 是否自动粘贴到光标位置 | 开启 |
+| Field | Description | Default |
+|-------|-------------|---------|
+| Paste Delay | Delay before pasting (milliseconds) | `300 ms` |
+| Auto-paste | Whether to auto-paste to cursor position | Enabled |
 
-## API 密钥配置
+## API Key Configuration
 
-Voice Type 使用 OpenAI 兼容协议的 API，支持多种服务商。以下是常用的配置示例：
+Voice Type uses OpenAI-compatible APIs and supports multiple providers. Below are common configuration examples:
 
-### SiliconFlow（硅基流动）
+### SiliconFlow
 
-注册地址: https://cloud.siliconflow.cn
+Register: https://cloud.siliconflow.cn
 
 ```json
 {
@@ -138,7 +138,7 @@ Voice Type 使用 OpenAI 兼容协议的 API，支持多种服务商。以下是
 
 ### OpenAI
 
-注册地址: https://platform.openai.com
+Register: https://platform.openai.com
 
 ```json
 {
@@ -156,37 +156,37 @@ Voice Type 使用 OpenAI 兼容协议的 API，支持多种服务商。以下是
 }
 ```
 
-### 自定义兼容 OpenAI API 的服务商
+### Custom OpenAI-Compatible Providers
 
-任何支持 OpenAI 兼容协议的 API 均可使用（DashScope、火山引擎、本地部署的 Ollama/vLLM 等）。只需在设置中填写对应的 Base URL 和 API Key，并确保模型名称正确。
+Any API that supports the OpenAI-compatible protocol can be used (DashScope, Volcano Engine, locally deployed Ollama/vLLM, etc.). Simply fill in the corresponding Base URL and API Key in the settings, and ensure the model name is correct.
 
-## 使用流程
+## Usage
 
-1. 启动程序，首次运行时会自动弹出设置引导页面
-2. 在设置中配置好 API Key 和模型
-3. 将光标放在需要输入的位置
-4. 按 `Alt + S` 开始录制（窗口保持显示，脉冲红点亮起）
-5. 说话完毕后，按 `Alt + E` 停止录制
-6. 等待处理完成，润色后的文本将自动出现在光标位置
-7. 如需放弃本次录制，按 `Alt + C` 取消（音频将被丢弃）
+1. Launch the app — the setup wizard appears automatically on first run if no API key is configured
+2. Configure your API Key and models in Settings
+3. Place your cursor at the desired input position
+4. Press `Alt + S` to start recording (the pulsing red dot lights up)
+5. When finished speaking, press `Alt + E` to stop recording
+6. Wait for processing — the refined text will automatically appear at the cursor position
+7. To discard the current recording, press `Alt + C` to cancel (audio will be discarded)
 
-## 项目结构
+## Project Structure
 
 ```
 voice-type/
 ├── voice_type/
-│   ├── __main__.py              # 入口：Application 类，连接所有组件
-│   ├── config.py                # 配置管理：dataclass + JSON 序列化/持久化
-│   ├── audio.py                 # 音频录制：sounddevice 异步录制 + soundfile 编码为 OGG
-│   ├── asr.py                   # 语音识别：OpenAI 兼容 API
-│   ├── polisher.py              # 文本润色：LLM API + 系统提示词
-│   ├── typer.py                 # 文本注入：窗口管理 + 剪贴板
-│   ├── network.py               # 网络检测：HTTP 连通性检查
+│   ├── __main__.py              # Entry point: Application class, wires all components
+│   ├── config.py                # Config management: dataclass + JSON serialization/persistence
+│   ├── audio.py                 # Audio recording: sounddevice async recording + soundfile OGG encoding
+│   ├── asr.py                   # Speech recognition: OpenAI-compatible API
+│   ├── polisher.py              # Text refinement: LLM API + system prompt
+│   ├── typer.py                 # Text injection: window management + clipboard
+│   ├── network.py               # Network detection: HTTP connectivity check
 │   └── ui/
-│       ├── main_window.py       # 浮动录制窗口 + 脉冲红点动画 + Toast 通知
-│       ├── settings_dialog.py   # 设置对话框（STT/Polish/Output/Hotkeys 四标签页）
-│       └── system_tray.py       # 系统托盘 + 全局热键管理
-├── tests/                       # 单元测试（178 项，覆盖全部模块）
+│       ├── main_window.py       # Floating recording window + pulsing red dot animation + Toast notifications
+│       ├── settings_dialog.py   # Settings dialog (STT/Polish/Output/Hotkeys four-tab layout)
+│       └── system_tray.py       # System tray + global hotkey management
+├── tests/                       # Unit tests (178, covering all modules)
 │   ├── conftest.py
 │   ├── test_audio.py
 │   ├── test_asr.py
@@ -199,27 +199,27 @@ voice-type/
 │       ├── test_main_window.py
 │       ├── test_settings_dialog.py
 │       └── test_system_tray.py
-├── build.bat                    # 一键构建脚本
+├── build.bat                    # One-click build script
 ├── requirements.txt
 ├── pyproject.toml
 └── README.md
 ```
 
-## 运行测试
+## Running Tests
 
 ```bash
 pip install -e ".[dev]"
 pytest tests/ -v
 ```
 
-## 配置文件
+## Configuration File
 
-用户配置存储在 `%USERPROFILE%\.voice-type\config.json`。首次启动时如果未检测到配置，会自动弹出设置页面引导配置。
+User configuration is stored at `%USERPROFILE%\.voice-type\config.json`. On first launch, if no configuration is detected, the settings dialog will automatically appear to guide the user through setup.
 
-## 注意事项
+## Notes
 
-- 语音识别需要网络连接和有效的 API 密钥
-- 全局热键仅在 Windows 系统上可用
-- 保存设置时会自动检测网络连通性，网络不可用时不会保存
-- 录制时建议保持浮动窗口可见，避免在安全敏感应用（如密码管理器）中使用
-- 文本注入依赖剪贴板，请勿在粘贴期间复制其他内容
+- Speech recognition requires an internet connection and a valid API key
+- Global hotkeys are only available on Windows
+- Settings save automatically checks network connectivity and will not save if the network is unavailable
+- Keep the floating window visible during recording; avoid using in security-sensitive applications (e.g., password managers)
+- Text injection relies on the clipboard — do not copy other content during the paste operation
