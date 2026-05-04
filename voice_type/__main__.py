@@ -71,6 +71,12 @@ class Application:
         self._quitting = False
 
         self._init_ui()
+
+        # Check config on first launch — show settings if no API key is set
+        if not self.config.is_configured():
+            logger.info("No API key configured, showing settings dialog")
+            self._show_settings()
+
         self._init_hotkey()
 
     def _init_ui(self):

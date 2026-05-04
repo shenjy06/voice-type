@@ -127,6 +127,10 @@ class AppConfig:
             return cls.from_dict(data)
         return cls()
 
+    def is_configured(self) -> bool:
+        """Return True if at least one API key has been set."""
+        return bool(self.asr.api_key or self.polish.api_key)
+
     def save(self) -> None:
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:

@@ -7,6 +7,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal, QTimer
 from voice_type.config import AppConfig
+from voice_type.network import check_network_available
+from voice_type.ui.main_window import Toast
 
 
 class SettingsDialog(QDialog):
@@ -234,6 +236,11 @@ class SettingsDialog(QDialog):
         key_input.setText(key)
 
     def _save_and_close(self):
+        if not check_network_available():
+            self._toast = Toast("Network unavailable, settings not saved", parent=self)
+            self._toast.show()
+            return
+
         # STT
         self.config.asr.api_key = self.stt_api_key_input.text().strip()
         self.config.asr.base_url = self.stt_base_url_input.text().strip() or "https://api.openai.com/v1"

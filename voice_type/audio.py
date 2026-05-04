@@ -1,4 +1,4 @@
-"""Audio recording — start/stop/save WAV via sounddevice."""
+"""Audio recording — start/stop/save OGG via sounddevice."""
 
 import logging
 import tempfile
@@ -6,7 +6,7 @@ from pathlib import Path
 from threading import Thread
 import numpy as np
 import sounddevice as sd
-from scipy.io import wavfile
+import soundfile as sf
 
 logger = logging.getLogger(__name__)
 
@@ -55,10 +55,8 @@ class AudioRecorder:
         if not self._frames:
             raise ValueError("No audio data recorded")
         data = np.concatenate(self._frames)
-        # Convert float32 [-1, 1] to int16 for WAV
-        audio_int16 = np.clip(data * 32767, -32768, 32767).astype(np.int16)
-        self._temp_file = Path(tempfile.mktemp(suffix=".wav", prefix="voice_"))
-        wavfile.write(str(self._temp_file), self.sample_rate, audio_int16)
+        self._temp_file = Path(tempfile.mktemp(suffix=".ogg", prefix="voice_"))
+        sf.write(str(self._temp_file), data, self.sample_rate, format="OGG", subtype="VORBIS")
         logger.info("Audio saved to %s (%.1f seconds)", self._temp_file, len(data) / self.sample_rate)
         return self._temp_file
 
