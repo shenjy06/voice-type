@@ -12,7 +12,7 @@ Licensed under [GPL-3.0](LICENSE).
 - **Text Injection**: Restores the original foreground window and pastes the refined text at the cursor position
 - **Floating Control Window**: Always-on-top mini window with drag support and pulsing red dot animation
 - **System Tray**: Tray icon provides recording toggle, settings, and quit functions
-- **Global Hotkeys**: Uses native Windows `RegisterHotKey` API, responsive in any application
+- **Global Hotkeys**: Uses `pynput` keyboard listener for global hotkey detection — responsive in any application
 - **Network Detection**: Automatically checks network availability on settings save to prevent invalid configurations
 - **Startup Check**: Automatically detects API configuration on first launch and shows setup wizard if unconfigured
 
@@ -25,7 +25,7 @@ Licensed under [GPL-3.0](LICENSE).
 | Audio Encoding | soundfile (OGG/Vorbis) |
 | Speech Recognition | OpenAI-compatible protocol (ASR API) |
 | Text Refinement | OpenAI-compatible protocol (Chat Completions API) |
-| Global Hotkeys | Windows RegisterHotKey (ctypes) |
+| Global Hotkeys | pynput keyboard listener |
 | Text Injection | pyperclip (clipboard) + ctypes (window management) |
 
 ## Installation
@@ -46,6 +46,7 @@ pip install -r requirements.txt
 - `soundfile` — OGG/Vorbis audio file encoding
 - `openai` — Client for OpenAI-compatible STT and LLM services
 - `pyperclip` — Cross-platform clipboard operations
+- `pynput` — Cross-platform keyboard/mouse listener for global hotkeys
 
 > Note: Windows hotkeys and window management use the standard library `ctypes`, no extra dependencies required.
 
@@ -97,15 +98,12 @@ Click the gear icon in the upper-right corner of the floating window, or access 
 
 ### Hotkey Configuration
 
-You can separately configure the hotkeys for start recording, stop recording, and cancel recording in the settings:
-
 | Hotkey | Default | Description |
 |--------|---------|-------------|
-| Start Recording | `Alt + S` | Start voice recording |
-| Stop Recording | `Alt + E` | Stop recording and enter transcription/refinement pipeline |
+| Toggle Recording | `Left Alt` (tap) | Start recording on first tap, stop on second tap |
 | Cancel Recording | `Alt + C` | Stop recording and discard audio, skip subsequent processing |
 
-Supports `alt`, `ctrl`, `shift`, `super`, `none` modifiers, with up to two modifier key combinations.
+The Left Alt hotkey distinguishes between a tap (start/stop toggle) and modifier use (e.g. `Alt+Tab` will not trigger recording).
 
 ### Output Configuration
 
@@ -167,8 +165,8 @@ Any API that supports the OpenAI-compatible protocol can be used (DashScope, Vol
 1. Launch the app — the setup wizard appears automatically on first run if no API key is configured
 2. Configure your API Key and models in Settings
 3. Place your cursor at the desired input position
-4. Press `Alt + S` to start recording (the pulsing red dot lights up)
-5. When finished speaking, press `Alt + E` to stop recording
+4. Press `Left Alt` (tap once) to start recording (the pulsing red dot lights up)
+5. When finished speaking, press `Left Alt` (tap again) to stop recording
 6. Wait for processing — the refined text will automatically appear at the cursor position
 7. To discard the current recording, press `Alt + C` to cancel (audio will be discarded)
 
@@ -177,19 +175,24 @@ Any API that supports the OpenAI-compatible protocol can be used (DashScope, Vol
 ```
 voice-type/
 ├── voice_type/
-│   ├── __main__.py              # Entry point: Application class, wires all components
-│   ├── config.py                # Config management: dataclass + JSON serialization/persistence
-│   ├── audio.py                 # Audio recording: sounddevice async recording + soundfile OGG encoding
-│   ├── asr.py                   # Speech recognition: OpenAI-compatible API
-│   ├── polisher.py              # Text refinement: LLM API + system prompt
-│   ├── typer.py                 # Text injection: window management + clipboard
+│   ├── __main__.py              # Entry point: Application orchestrator
+│   ├── api_client.py            # Base OpenAI-compatible API client wrapper
+│   ├── config.py                # Config management: dataclass + JSON persistence
+│   ├── audio.py                 # Audio recording: sounddevice + soundfile OGG encoding
+│   ├── asr.py                   # Speech recognition: OpenAI-compatible transcriptions API
+│   ├── polisher.py              # Text refinement: LLM chat completions API
+│   ├── typer.py                 # Text output: clipboard + Ctrl+V paste
+│   ├── window_manager.py        # Windows foreground control: ctypes window/keyboard APIs
 │   ├── network.py               # Network detection: HTTP connectivity check
+│   ├── state.py                 # Application state enum (RecorderState)
 │   └── ui/
-│       ├── main_window.py       # Floating recording window + pulsing red dot animation + Toast notifications
-│       ├── settings_dialog.py   # Settings dialog (STT/Polish/Output/Hotkeys four-tab layout)
-│       └── system_tray.py       # System tray + global hotkey management
-├── tests/                       # Unit tests (178, covering all modules)
+│       ├── main_window.py       # Floating recording window + pulsing dot + Toast
+│       ├── settings_dialog.py   # Settings dialog (STT/Polish/Output/Hotkeys)
+│       ├── system_tray.py       # System tray icon + pynput hotkey manager
+│       └── icon_utils.py        # Shared icon creation (circle + centered text)
+├── tests/                       # Unit tests (171, covering all modules)
 │   ├── conftest.py
+│   ├── test_api_client.py
 │   ├── test_audio.py
 │   ├── test_asr.py
 │   ├── test_config.py
@@ -197,6 +200,7 @@ voice-type/
 │   ├── test_network.py
 │   ├── test_polisher.py
 │   ├── test_typer.py
+│   ├── test_window_manager.py
 │   └── ui/
 │       ├── test_main_window.py
 │       ├── test_settings_dialog.py

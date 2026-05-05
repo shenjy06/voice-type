@@ -1,7 +1,8 @@
 """Tests for voice_type.ui.system_tray — TrayIcon and HotkeyManager."""
 
 from PySide6.QtWidgets import QSystemTrayIcon
-from voice_type.ui.system_tray import TrayIcon, HotkeyManager, MOD_ALT, MOD_CONTROL
+from pynput import keyboard
+from voice_type.ui.system_tray import TrayIcon, HotkeyManager
 
 
 class TestTrayIcon:
@@ -83,75 +84,98 @@ class TestTrayIcon:
 
 
 class TestHotkeyManager:
-    def test_register_increments_id(self, qtbot):
+    def test_start_creates_listener(self, qtbot, mocker):
+        mock_listener_cls = mocker.patch("voice_type.ui.system_tray.keyboard.Listener")
         mgr = HotkeyManager()
-        mgr.register(["alt"], "s", "start")
-        mgr.register(["ctrl"], "e", "stop")
-        # Two registrations, IDs should be 1 and 2
-        assert len(mgr._registered) == 2
-        assert mgr._registered[0][0] == 1
-        assert mgr._registered[1][0] == 2
+        mgr.start()
+        mock_listener_cls.assert_called_once()
+        mock_listener_cls.return_value.start.assert_called_once()
 
-    def test_register_with_none_modifier(self, qtbot):
-        """'none' modifier is ignored."""
+    def test_stop_stops_listener(self, qtbot, mocker):
+        mock_listener_cls = mocker.patch("voice_type.ui.system_tray.keyboard.Listener")
+        mock_listener = mock_listener_cls.return_value
         mgr = HotkeyManager()
-        mgr.register(["none"], "s", "start")
-        assert mgr._registered[0][1] == 0  # mod_value is 0
+        mgr.start()
+        mgr.stop()
+        mock_listener.stop.assert_called_once()
+        assert mgr._listener is None
 
-    def test_register_unknown_key_skips(self, qtbot, caplog):
-        """Unknown key is skipped with warning."""
+    def test_stop_without_start(self, qtbot):
+        """Calling stop() without start() should not raise."""
         mgr = HotkeyManager()
-        mgr.register(["alt"], "!", "start")
-        assert len(mgr._registered) == 0
-        assert "Unknown hotkey" in caplog.text
+        mgr.stop()  # should be safe
 
-    def test_register_multiple_modifiers(self, qtbot):
-        """Multiple modifiers are ORed together."""
+    def test_start_idempotent(self, qtbot, mocker):
+        mock_listener_cls = mocker.patch("voice_type.ui.system_tray.keyboard.Listener")
         mgr = HotkeyManager()
-        mgr.register(["alt", "ctrl"], "s", "start")
-        assert mgr._registered[0][1] == (MOD_ALT | MOD_CONTROL)
+        mgr.start()
+        mgr.start()
+        # Listener should only be created once
+        mock_listener_cls.assert_called_once()
 
-    def test_handle_hotkey_start(self, qtbot):
-        """handle_hotkey with start callback emits start_recording."""
+    def test_alt_tap_emits_toggle(self, qtbot):
+        """Tapping Left Alt alone emits toggle_recording."""
         mgr = HotkeyManager()
-        mgr.register(["alt"], "s", "start")
-        with qtbot.waitSignal(mgr.start_recording):
-            mgr.handle_hotkey(1)
+        # Simulate Alt tap
+        mgr._on_press(keyboard.Key.alt_l)
+        with qtbot.waitSignal(mgr.toggle_recording):
+            mgr._on_release(keyboard.Key.alt_l)
 
-    def test_handle_hotkey_stop(self, qtbot):
-        """handle_hotkey with stop callback emits stop_recording."""
+    def test_alt_combo_does_not_emit(self, qtbot):
+        """Alt + another key does NOT emit toggle."""
         mgr = HotkeyManager()
-        mgr.register(["alt"], "e", "stop")
-        with qtbot.waitSignal(mgr.stop_recording):
-            mgr.handle_hotkey(1)
-
-    def test_handle_hotkey_cancel(self, qtbot):
-        """handle_hotkey with cancel callback emits cancel_recording."""
-        mgr = HotkeyManager()
-        mgr.register(["alt"], "c", "cancel")
-        with qtbot.waitSignal(mgr.cancel_recording):
-            mgr.handle_hotkey(1)
-
-    def test_handle_hotkey_nonexistent_id(self, qtbot):
-        """handle_hotkey with no matching ID emits nothing."""
-        mgr = HotkeyManager()
-        mgr.register(["alt"], "s", "start")
         emitted = []
-        mgr.start_recording.connect(lambda: emitted.append("start"))
-        mgr.handle_hotkey(999)
+        mgr.toggle_recording.connect(lambda: emitted.append(True))
+        # Simulate Alt + S (S is a KeyCode, not a Key)
+        from pynput.keyboard import KeyCode
+        mgr._on_press(keyboard.Key.alt_l)
+        mgr._on_press(KeyCode.from_char("s"))
+        mgr._on_release(KeyCode.from_char("s"))
+        mgr._on_release(keyboard.Key.alt_l)
         assert emitted == []
 
-    def test_stop_clears_registered(self, qtbot):
-        """stop() clears the registered list and resets ID counter."""
+    def test_alt_r_not_treated_as_left_alt(self, qtbot):
+        """Right Alt release does not trigger toggle."""
         mgr = HotkeyManager()
-        mgr.register(["alt"], "s", "start")
-        mgr.stop()
-        assert mgr._registered == []
-        assert mgr._hotkey_id == 0
+        emitted = []
+        mgr.toggle_recording.connect(lambda: emitted.append(True))
+        mgr._on_press(keyboard.Key.alt_r)
+        mgr._on_release(keyboard.Key.alt_r)
+        assert emitted == []
 
-    def test_update_calls_stop(self, qtbot, mocker):
-        """update() calls stop()."""
+    def test_release_without_press_does_not_emit(self, qtbot):
+        """Release event without prior press does nothing."""
         mgr = HotkeyManager()
-        mock_stop = mocker.patch.object(mgr, "stop")
-        mgr.update()
-        mock_stop.assert_called_once()
+        emitted = []
+        mgr.toggle_recording.connect(lambda: emitted.append(True))
+        mgr._on_release(keyboard.Key.alt_l)
+        assert emitted == []
+
+    def test_alt_c_emits_cancel(self, qtbot):
+        """Alt+C emits cancel_recording signal."""
+        from pynput.keyboard import KeyCode
+        mgr = HotkeyManager()
+        mgr._on_press(keyboard.Key.alt_l)
+        with qtbot.waitSignal(mgr.cancel_recording):
+            mgr._on_press(KeyCode.from_char("c"))
+
+    def test_alt_c_does_not_emit_toggle(self, qtbot):
+        """Alt+C should NOT also emit toggle_recording."""
+        from pynput.keyboard import KeyCode
+        mgr = HotkeyManager()
+        toggle_emitted = []
+        mgr.toggle_recording.connect(lambda: toggle_emitted.append(True))
+        # Simulate Alt+C
+        mgr._on_press(keyboard.Key.alt_l)
+        mgr._on_press(KeyCode.from_char("c"))
+        mgr._on_release(KeyCode.from_char("c"))
+        mgr._on_release(keyboard.Key.alt_l)
+        assert toggle_emitted == []
+
+    def test_alt_uppercase_c_emits_cancel(self, qtbot):
+        """Alt+Shift+C (uppercase C) also emits cancel."""
+        from pynput.keyboard import KeyCode
+        mgr = HotkeyManager()
+        mgr._on_press(keyboard.Key.alt_l)
+        with qtbot.waitSignal(mgr.cancel_recording):
+            mgr._on_press(KeyCode.from_char("C"))

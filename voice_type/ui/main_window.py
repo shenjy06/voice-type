@@ -7,20 +7,48 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QTimer, Signal, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QCursor, QCloseEvent
-import ctypes.wintypes
+from voice_type.state import RecorderState
 
 logger = logging.getLogger(__name__)
 
-WM_HOTKEY = 0x0312
+# Button style descriptors keyed by RecorderState
+_BUTTON_STYLES = {
+    RecorderState.RECORDING: (
+        "QPushButton { background: #dc2626; color: white; "
+        "border: none; border-radius: 8px; font-size: 14px; font-weight: bold; }"
+        "QPushButton:hover { background: #ef4444; }"
+        "QPushButton:pressed { background: #b91c1c; }"
+    ),
+    RecorderState.PROCESSING: (
+        "QPushButton { background: #d97706; color: white; "
+        "border: none; border-radius: 8px; font-size: 14px; font-weight: bold; }"
+        "QPushButton:hover { background: #f59e0b; }"
+        "QPushButton:pressed { background: #b45309; }"
+    ),
+}
+
+_BUTTON_TEXTS = {
+    RecorderState.RECORDING: "Recording...",
+    RecorderState.PROCESSING: "Processing...",
+    RecorderState.IDLE: "Record",
+    RecorderState.DONE: "Record",
+    RecorderState.ERROR: "Record",
+}
 
 
 class PulsingDot(QWidget):
     """A small red dot that pulses when recording."""
 
+    _OPAQUE = 1.0
+    _TRANSPARENT = 0.3
+    _STEP = 0.05
+    _TIMER_MS = 50
+    _SIZE = 10
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedSize(10, 10)
-        self._opacity = 1.0
+        self.setFixedSize(self._SIZE, self._SIZE)
+        self._opacity = self._OPAQUE
         self._growing = True
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._pulse)
@@ -28,27 +56,27 @@ class PulsingDot(QWidget):
 
     def start(self):
         self._recording = True
-        self._timer.start(50)
+        self._timer.start(self._TIMER_MS)
 
     def stop(self):
         self._recording = False
         self._timer.stop()
-        self._opacity = 1.0
+        self._opacity = self._OPAQUE
         self.update()
 
     def _pulse(self):
         if self._growing:
-            self._opacity -= 0.05
-            if self._opacity <= 0.3:
+            self._opacity -= self._STEP
+            if self._opacity <= self._TRANSPARENT:
                 self._growing = False
         else:
-            self._opacity += 0.05
-            if self._opacity >= 1.0:
+            self._opacity += self._STEP
+            if self._opacity >= self._OPAQUE:
                 self._growing = True
         self.update()
 
     def paintEvent(self, event):
-        if not self._recording and self._opacity == 1.0:
+        if not self._recording and self._opacity == self._OPAQUE:
             return
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
@@ -56,7 +84,7 @@ class PulsingDot(QWidget):
         color.setAlphaF(self._opacity)
         painter.setBrush(color)
         painter.setPen(Qt.NoPen)
-        painter.drawEllipse(0, 0, 10, 10)
+        painter.drawEllipse(0, 0, self._SIZE, self._SIZE)
 
 
 class FloatingRecordingWindow(QWidget):
@@ -67,15 +95,9 @@ class FloatingRecordingWindow(QWidget):
     settings_requested = Signal()
     quit_requested = Signal()
 
-    STATE_IDLE = "idle"
-    STATE_RECORDING = "recording"
-    STATE_PROCESSING = "processing"
-    STATE_DONE = "done"
-    STATE_ERROR = "error"
-
     def __init__(self, always_on_top: bool = True):
         super().__init__()
-        self._state = self.STATE_IDLE
+        self._state = RecorderState.IDLE
         self._hotkey_manager = None
         self._init_ui()
         if always_on_top:
@@ -138,23 +160,12 @@ class FloatingRecordingWindow(QWidget):
         layout.addWidget(self.record_btn)
 
     def _update_record_button(self):
-        if self._state == self.STATE_RECORDING:
-            self.record_btn.setStyleSheet(
-                "QPushButton { background: #dc2626; color: white; "
-                "border: none; border-radius: 8px; font-size: 14px; font-weight: bold; }"
-                "QPushButton:hover { background: #ef4444; }"
-                "QPushButton:pressed { background: #b91c1c; }"
-            )
-            self.record_btn.setText("Recording...")
-        elif self._state == self.STATE_PROCESSING:
-            self.record_btn.setStyleSheet(
-                "QPushButton { background: #d97706; color: white; "
-                "border: none; border-radius: 8px; font-size: 14px; font-weight: bold; }"
-                "QPushButton:hover { background: #f59e0b; }"
-                "QPushButton:pressed { background: #b45309; }"
-            )
-            self.record_btn.setText("Processing...")
-            self.record_btn.setEnabled(False)
+        style = _BUTTON_STYLES.get(self._state)
+        text = _BUTTON_TEXTS.get(self._state, "Record")
+        enabled = self._state != RecorderState.PROCESSING
+
+        if style:
+            self.record_btn.setStyleSheet(style)
         else:
             self.record_btn.setStyleSheet(
                 "QPushButton { background: #2563eb; color: white; "
@@ -162,33 +173,28 @@ class FloatingRecordingWindow(QWidget):
                 "QPushButton:hover { background: #3b82f6; }"
                 "QPushButton:pressed { background: #1d4ed8; }"
             )
-            self.record_btn.setText("Record")
-            self.record_btn.setEnabled(True)
+        self.record_btn.setText(text)
+        self.record_btn.setEnabled(enabled)
 
-    def _toggle_recording(self):
-        if self._state == self.STATE_RECORDING:
-            self._state = self.STATE_IDLE
+    def _transition_to(self, new_state: RecorderState):
+        """Centralized state transition — updates button and emits signals."""
+        old_state = self._state
+        self._state = new_state
+
+        if old_state == RecorderState.RECORDING and new_state == RecorderState.IDLE:
             self.dot.stop()
-            self._update_record_button()
             self.recording_stopped.emit()
-        else:
-            self._state = self.STATE_RECORDING
+        elif new_state == RecorderState.RECORDING:
             self.dot.start()
-            self._update_record_button()
             self.recording_started.emit()
 
-    def set_status(self, text: str):
-        """Update state — text parameter is ignored, state derived from text mapping."""
-        # Map old STATUS_* constants to new states
-        if "Processing" in text:
-            self._state = self.STATE_PROCESSING
-        elif "Error" in text:
-            self._state = self.STATE_ERROR
-        elif text == self.STATE_DONE or "Done" in text:
-            self._state = self.STATE_DONE
-        else:
-            self._state = self.STATE_IDLE
         self._update_record_button()
+
+    def _toggle_recording(self):
+        if self._state == RecorderState.RECORDING:
+            self._transition_to(RecorderState.IDLE)
+        else:
+            self._transition_to(RecorderState.RECORDING)
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -208,26 +214,26 @@ class FloatingRecordingWindow(QWidget):
             event.accept()
 
     def start_recording(self):
-        if self._state != self.STATE_RECORDING:
-            self._toggle_recording()
+        if self._state != RecorderState.RECORDING:
+            self._transition_to(RecorderState.RECORDING)
 
     def stop_recording(self):
-        if self._state == self.STATE_RECORDING:
-            self._toggle_recording()
+        if self._state == RecorderState.RECORDING:
+            self._transition_to(RecorderState.IDLE)
 
     def is_recording(self) -> bool:
-        return self._state == self.STATE_RECORDING
+        return self._state == RecorderState.RECORDING
 
     def set_processing(self):
-        self._state = self.STATE_PROCESSING
+        self._state = RecorderState.PROCESSING
         self._update_record_button()
 
     def set_done(self):
-        self._state = self.STATE_DONE
+        self._state = RecorderState.DONE
         self._update_record_button()
 
     def set_error(self, msg: str = "Error"):
-        self._state = self.STATE_ERROR
+        self._state = RecorderState.ERROR
         self._update_record_button()
 
     def closeEvent(self, event: QCloseEvent):
@@ -237,18 +243,17 @@ class FloatingRecordingWindow(QWidget):
     def set_hotkey_manager(self, manager):
         self._hotkey_manager = manager
 
-    def nativeEvent(self, eventType, message):
-        if eventType == b"windows_generic_MSG" and self._hotkey_manager:
-            msg = ctypes.wintypes.MSG.from_address(message.__int__())
-            if msg.message == WM_HOTKEY:
-                hotkey_id = msg.wParam
-                self._hotkey_manager.handle_hotkey(hotkey_id)
-                return True, 0
-        return False, 0
-
 
 class Toast(QWidget):
     """A brief toast-style notification that appears at screen bottom center and auto-dismisses."""
+
+    _FONT_FAMILY = "Microsoft YaHei"
+    _FONT_SIZE = 13
+    _FADE_IN_MS = 150
+    _FADE_OUT_MS = 200
+    _TARGET_OPACITY = 0.9
+    _BOTTOM_MARGIN = 60
+    _H_PADDING = 48
 
     def __init__(self, text: str, duration_ms: int = 1500, parent=None):
         super().__init__(parent)
@@ -263,9 +268,9 @@ class Toast(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
 
-        fm = QFontMetrics(QFont("Microsoft YaHei", 13))
+        fm = QFontMetrics(QFont(self._FONT_FAMILY, self._FONT_SIZE))
         text_w = fm.horizontalAdvance(self._text)
-        w = text_w + 48
+        w = text_w + self._H_PADDING
         h = 40
         self.setFixedSize(w, h)
 
@@ -273,14 +278,14 @@ class Toast(QWidget):
         if screen:
             geo = screen.availableGeometry()
             x = geo.center().x() - w // 2
-            y = geo.bottom() - h - 60
+            y = geo.bottom() - h - self._BOTTOM_MARGIN
             self.move(x, y)
 
         self.setWindowOpacity(0)
         self._fade_in = QPropertyAnimation(self, b"windowOpacity")
-        self._fade_in.setDuration(150)
+        self._fade_in.setDuration(self._FADE_IN_MS)
         self._fade_in.setStartValue(0)
-        self._fade_in.setEndValue(0.9)
+        self._fade_in.setEndValue(self._TARGET_OPACITY)
         self._fade_in.setEasingCurve(QEasingCurve.OutQuad)
         self._fade_in.start()
 
@@ -288,8 +293,8 @@ class Toast(QWidget):
 
     def _fade_out_and_close(self):
         anim = QPropertyAnimation(self, b"windowOpacity")
-        anim.setDuration(200)
-        anim.setStartValue(0.9)
+        anim.setDuration(self._FADE_OUT_MS)
+        anim.setStartValue(self._TARGET_OPACITY)
         anim.setEndValue(0)
         anim.setEasingCurve(QEasingCurve.InQuad)
         anim.finished.connect(self.close)
@@ -304,5 +309,5 @@ class Toast(QWidget):
         painter.setPen(QColor(75, 85, 99))
         painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 8, 8)
         painter.setPen(QColor(229, 231, 235))
-        painter.setFont(QFont("Microsoft YaHei", 13))
+        painter.setFont(QFont(self._FONT_FAMILY, self._FONT_SIZE))
         painter.drawText(self.rect(), Qt.AlignCenter, self._text)

@@ -8,6 +8,7 @@ from voice_type.config import (
     PolishApiConfig,
     RecordingConfig,
     WindowConfig,
+    HotkeyConfig,
     get_default_config,
     DEFAULTS,
 )
@@ -30,12 +31,11 @@ class TestDefaultConfigs:
     def test_recording_config_defaults(self):
         cfg = RecordingConfig()
         assert cfg.sample_rate == 16000
-        assert cfg.start_hotkey_modifiers == ["alt"]
-        assert cfg.start_hotkey_key == "s"
-        assert cfg.stop_hotkey_modifiers == ["alt"]
-        assert cfg.stop_hotkey_key == "e"
-        assert cfg.cancel_hotkey_modifiers == ["alt"]
-        assert cfg.cancel_hotkey_key == "c"
+
+    def test_hotkey_config_defaults(self):
+        cfg = HotkeyConfig()
+        assert cfg.toggle_enabled is True
+        assert cfg.toggle_hotkey == "left_alt"
 
     def test_output_config_defaults(self):
         cfg = OutputConfig()
@@ -114,19 +114,18 @@ class TestAppConfigFromDict:
         data = {
             "polish": {"base_url": "https://example.com", "api_key": "sk-1", "model": "gpt-4"},
             "asr": {"base_url": "https://asr.com", "api_key": "sk-2", "model": "whisper", "language": "en"},
-            "recording": {"sample_rate": 44100, "start_hotkey_modifiers": ["ctrl"], "start_hotkey_key": "r",
-                          "stop_hotkey_modifiers": ["ctrl"], "stop_hotkey_key": "t",
-                          "cancel_hotkey_modifiers": ["shift"], "cancel_hotkey_key": "x"},
+            "recording": {"sample_rate": 44100},
             "output": {"paste_delay_ms": 100, "auto_paste": False},
             "window": {"show_on_start": False, "always_on_top": False},
+            "hotkey": {"toggle_enabled": False},
         }
         cfg = AppConfig.from_dict(data)
         assert cfg.polish.base_url == "https://example.com"
         assert cfg.asr.language == "en"
         assert cfg.recording.sample_rate == 44100
-        assert cfg.recording.start_hotkey_modifiers == ["ctrl"]
         assert cfg.output.auto_paste is False
         assert cfg.window.show_on_start is False
+        assert cfg.hotkey.toggle_enabled is False
 
     def test_from_dict_empty_sections_use_defaults(self):
         data = {}
@@ -144,40 +143,35 @@ class TestAppConfigFromDict:
         # Polish uses defaults since not specified
         assert cfg.polish.model == "gpt-4o"
 
-    def test_from_dict_migration_legacy_hotkey(self):
-        """Old config with hotkey_modifiers/hotkey_key is migrated to start_hotkey_*."""
+    def test_from_dict_ignores_legacy_hotkey_fields(self):
+        """Old start/stop/cancel hotkey fields in recording section are ignored."""
         data = {
             "recording": {
                 "sample_rate": 16000,
-                "hotkey_modifiers": ["ctrl"],
-                "hotkey_key": "q",
+                "start_hotkey_modifiers": ["ctrl"],
+                "start_hotkey_key": "q",
+                "stop_hotkey_modifiers": ["alt"],
+                "stop_hotkey_key": "e",
             },
         }
         cfg = AppConfig.from_dict(data)
-        assert cfg.recording.start_hotkey_modifiers == ["ctrl"]
-        assert cfg.recording.start_hotkey_key == "q"
-        # Stop and cancel get defaults
-        assert cfg.recording.stop_hotkey_modifiers == ["alt"]
-        assert cfg.recording.stop_hotkey_key == "e"
-        assert cfg.recording.cancel_hotkey_modifiers == ["alt"]
-        assert cfg.recording.cancel_hotkey_key == "c"
+        # Only sample_rate should be read; hotkey uses defaults
+        assert cfg.recording.sample_rate == 16000
+        assert cfg.hotkey.toggle_enabled is True  # default
 
-    def test_from_dict_cancel_hotkey_backfill(self):
-        """Config saved before cancel hotkey was added gets defaults for cancel."""
+    def test_from_dict_hotkey_config(self):
+        """Hotkey config is read from the 'hotkey' section."""
         data = {
-            "recording": {
-                "sample_rate": 16000,
-                "start_hotkey_modifiers": ["shift"],
-                "start_hotkey_key": "a",
-                "stop_hotkey_modifiers": ["shift"],
-                "stop_hotkey_key": "b",
-            },
+            "recording": {},
+            "polish": {},
+            "asr": {},
+            "output": {},
+            "window": {},
+            "hotkey": {"toggle_enabled": False, "toggle_hotkey": "left_alt"},
         }
         cfg = AppConfig.from_dict(data)
-        assert cfg.recording.cancel_hotkey_modifiers == ["alt"]
-        assert cfg.recording.cancel_hotkey_key == "c"
-        # Existing fields preserved
-        assert cfg.recording.start_hotkey_modifiers == ["shift"]
+        assert cfg.hotkey.toggle_enabled is False
+        assert cfg.hotkey.toggle_hotkey == "left_alt"
 
     def test_from_dict_api_key_backcompat(self):
         """Config with 'api' key (instead of 'polish') maps to PolishApiConfig."""

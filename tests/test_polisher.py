@@ -5,6 +5,13 @@ from voice_type.polisher import TextPolisher, SYSTEM_PROMPT
 from tests.conftest import make_config
 
 
+def _mock_api_client(mocker, mock_client):
+    """Patch ApiClient to return a mock client wrapper."""
+    mock_api = MagicMock()
+    mock_api.client = mock_client
+    return mocker.patch("voice_type.polisher.ApiClient", return_value=mock_api)
+
+
 class TestTextPolisher:
     def test_polish_returns_refined_text(self, mocker):
         """Normal polish returns the refined text, stripped."""
@@ -13,11 +20,10 @@ class TestTextPolisher:
         mock_resp.choices[0].message.content = "  Hello, world!  \n"
         mock_client = MagicMock()
         mock_client.chat.completions.create.return_value = mock_resp
-
-        with patch("voice_type.polisher.OpenAI", return_value=mock_client):
-            cfg = make_config(polish={"api_key": "sk", "base_url": "https://api", "model": "gpt-4o"})
-            polisher = TextPolisher(cfg)
-            result = polisher.polish("hello world")
+        _mock_api_client(mocker, mock_client)
+        cfg = make_config(polish={"api_key": "sk", "base_url": "https://api", "model": "gpt-4o"})
+        polisher = TextPolisher(cfg)
+        result = polisher.polish("hello world")
 
         assert result == "Hello, world!"
 
@@ -28,11 +34,10 @@ class TestTextPolisher:
         mock_resp.choices[0].message.content = "ok"
         mock_client = MagicMock()
         mock_client.chat.completions.create.return_value = mock_resp
-
-        with patch("voice_type.polisher.OpenAI", return_value=mock_client):
-            cfg = make_config(polish={"api_key": "sk", "base_url": "https://api", "model": "gpt-4o"})
-            polisher = TextPolisher(cfg)
-            polisher.polish("test input")
+        _mock_api_client(mocker, mock_client)
+        cfg = make_config(polish={"api_key": "sk", "base_url": "https://api", "model": "gpt-4o"})
+        polisher = TextPolisher(cfg)
+        polisher.polish("test input")
 
         call_kwargs = mock_client.chat.completions.create.call_args[1]
         messages = call_kwargs["messages"]
@@ -46,11 +51,10 @@ class TestTextPolisher:
         mock_resp.choices[0].message.content = "refined"
         mock_client = MagicMock()
         mock_client.chat.completions.create.return_value = mock_resp
-
-        with patch("voice_type.polisher.OpenAI", return_value=mock_client):
-            cfg = make_config(polish={"api_key": "sk", "base_url": "https://api", "model": "gpt-4o"})
-            polisher = TextPolisher(cfg)
-            polisher.polish("my raw text")
+        _mock_api_client(mocker, mock_client)
+        cfg = make_config(polish={"api_key": "sk", "base_url": "https://api", "model": "gpt-4o"})
+        polisher = TextPolisher(cfg)
+        polisher.polish("my raw text")
 
         call_kwargs = mock_client.chat.completions.create.call_args[1]
         messages = call_kwargs["messages"]
@@ -64,11 +68,10 @@ class TestTextPolisher:
         mock_resp.choices[0].message.content = "ok"
         mock_client = MagicMock()
         mock_client.chat.completions.create.return_value = mock_resp
-
-        with patch("voice_type.polisher.OpenAI", return_value=mock_client):
-            cfg = make_config(polish={"api_key": "sk", "base_url": "https://api", "model": "gpt-4o"})
-            polisher = TextPolisher(cfg)
-            polisher.polish("text")
+        _mock_api_client(mocker, mock_client)
+        cfg = make_config(polish={"api_key": "sk", "base_url": "https://api", "model": "gpt-4o"})
+        polisher = TextPolisher(cfg)
+        polisher.polish("text")
 
         call_kwargs = mock_client.chat.completions.create.call_args[1]
         assert call_kwargs["temperature"] == 0.3
@@ -80,11 +83,10 @@ class TestTextPolisher:
         mock_resp.choices[0].message.content = "ok"
         mock_client = MagicMock()
         mock_client.chat.completions.create.return_value = mock_resp
-
-        with patch("voice_type.polisher.OpenAI", return_value=mock_client):
-            cfg = make_config(polish={"api_key": "sk", "base_url": "https://api", "model": "qwen-plus"})
-            polisher = TextPolisher(cfg)
-            polisher.polish("text")
+        _mock_api_client(mocker, mock_client)
+        cfg = make_config(polish={"api_key": "sk", "base_url": "https://api", "model": "qwen-plus"})
+        polisher = TextPolisher(cfg)
+        polisher.polish("text")
 
         call_kwargs = mock_client.chat.completions.create.call_args[1]
         assert call_kwargs["model"] == "qwen-plus"
@@ -93,26 +95,27 @@ class TestTextPolisher:
         """API exceptions bubble up to the caller."""
         mock_client = MagicMock()
         mock_client.chat.completions.create.side_effect = Exception("Rate limited")
+        _mock_api_client(mocker, mock_client)
+        cfg = make_config(polish={"api_key": "sk", "base_url": "https://api", "model": "gpt-4o"})
+        polisher = TextPolisher(cfg)
 
-        with patch("voice_type.polisher.OpenAI", return_value=mock_client):
-            cfg = make_config(polish={"api_key": "sk", "base_url": "https://api", "model": "gpt-4o"})
-            polisher = TextPolisher(cfg)
-
-            try:
-                polisher.polish("text")
-            except Exception as e:
-                assert "Rate limited" in str(e)
+        try:
+            polisher.polish("text")
+        except Exception as e:
+            assert "Rate limited" in str(e)
 
     def test_polisher_client_timeout_60(self, mocker):
-        """OpenAI client is created with timeout=60."""
+        """ApiClient is created with timeout=60."""
         mock_client = MagicMock()
         mock_client.chat.completions.create.return_value = MagicMock()
-        mock_openai = mocker.patch("voice_type.polisher.OpenAI", return_value=mock_client)
+        mock_api = MagicMock()
+        mock_api.client = mock_client
+        mock_api_cls = mocker.patch("voice_type.polisher.ApiClient", return_value=mock_api)
 
         cfg = make_config(polish={"api_key": "sk", "base_url": "https://api"})
         TextPolisher(cfg)
 
-        mock_openai.assert_called_once_with(api_key="sk", base_url="https://api", timeout=60)
+        mock_api_cls.assert_called_once_with(api_key="sk", base_url="https://api", timeout=60)
 
     def test_polish_uses_first_choice(self, mocker):
         """Uses choices[0] from the response."""
@@ -123,10 +126,9 @@ class TestTextPolisher:
         ]
         mock_client = MagicMock()
         mock_client.chat.completions.create.return_value = mock_resp
-
-        with patch("voice_type.polisher.OpenAI", return_value=mock_client):
-            cfg = make_config(polish={"api_key": "sk", "base_url": "https://api", "model": "gpt-4o"})
-            polisher = TextPolisher(cfg)
-            result = polisher.polish("text")
+        _mock_api_client(mocker, mock_client)
+        cfg = make_config(polish={"api_key": "sk", "base_url": "https://api", "model": "gpt-4o"})
+        polisher = TextPolisher(cfg)
+        result = polisher.polish("text")
 
         assert result == "first choice"

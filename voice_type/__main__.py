@@ -11,7 +11,8 @@ from voice_type.config import AppConfig
 from voice_type.audio import AudioRecorder
 from voice_type.asr import Transcriber
 from voice_type.polisher import TextPolisher
-from voice_type.typer import TextTyper, get_foreground_window
+from voice_type.typer import TextTyper
+from voice_type.window_manager import get_foreground_window
 from voice_type.ui.main_window import FloatingRecordingWindow, Toast
 from voice_type.ui.settings_dialog import SettingsDialog
 from voice_type.ui.system_tray import TrayIcon, HotkeyManager
@@ -105,34 +106,11 @@ class Application:
 
     def _init_hotkey(self):
         self.hotkey_manager = HotkeyManager(self.window)
-        self.hotkey_manager.start_recording.connect(self._start_recording)
-        self.hotkey_manager.stop_recording.connect(self._stop_recording)
+        self.hotkey_manager.toggle_recording.connect(self._toggle_recording)
         self.hotkey_manager.cancel_recording.connect(self._cancel_recording)
         self.window.set_hotkey_manager(self.hotkey_manager)
-        self.hotkey_manager.register(
-            modifiers=self.config.recording.start_hotkey_modifiers,
-            key=self.config.recording.start_hotkey_key,
-            callback="start",
-        )
-        self.hotkey_manager.register(
-            modifiers=self.config.recording.stop_hotkey_modifiers,
-            key=self.config.recording.stop_hotkey_key,
-            callback="stop",
-        )
-        self.hotkey_manager.register(
-            modifiers=self.config.recording.cancel_hotkey_modifiers,
-            key=self.config.recording.cancel_hotkey_key,
-            callback="cancel",
-        )
-        self.hotkey_manager.start()
-
-    def _start_recording(self):
-        if not self.window.is_recording():
-            self.window.start_recording()
-
-    def _stop_recording(self):
-        if self.window.is_recording():
-            self.window.stop_recording()
+        if self.config.hotkey.toggle_enabled:
+            self.hotkey_manager.start()
 
     def _cancel_recording(self):
         """Cancel recording and delete audio file."""
@@ -140,7 +118,6 @@ class Application:
         if self.window.is_recording():
             self.window.stop_recording()
         else:
-            # Already stopped, clean up
             self.audio_recorder.cleanup()
             self.tray.set_recording(False)
             self.window.set_done()
@@ -235,22 +212,8 @@ class Application:
     def _on_settings_saved(self):
         """Reload config and update hotkeys."""
         self.hotkey_manager.stop()
-        self.hotkey_manager.register(
-            modifiers=self.config.recording.start_hotkey_modifiers,
-            key=self.config.recording.start_hotkey_key,
-            callback="start",
-        )
-        self.hotkey_manager.register(
-            modifiers=self.config.recording.stop_hotkey_modifiers,
-            key=self.config.recording.stop_hotkey_key,
-            callback="stop",
-        )
-        self.hotkey_manager.register(
-            modifiers=self.config.recording.cancel_hotkey_modifiers,
-            key=self.config.recording.cancel_hotkey_key,
-            callback="cancel",
-        )
-        self.hotkey_manager.start()
+        if self.config.hotkey.toggle_enabled:
+            self.hotkey_manager.start()
         self.audio_recorder.sample_rate = self.config.recording.sample_rate
         # Show toast from main window (which is guaranteed to be alive)
         self._toast = Toast("Settings saved", parent=self.window)

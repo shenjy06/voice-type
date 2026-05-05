@@ -1,7 +1,7 @@
 """Text polishing via LLM API."""
 
 import logging
-from openai import OpenAI
+from voice_type.api_client import ApiClient
 from voice_type.config import AppConfig
 
 logger = logging.getLogger(__name__)
@@ -22,11 +22,11 @@ Rules — STRICTLY follow ALL of them:
 class TextPolisher:
     def __init__(self, config: AppConfig):
         self.config = config
-        self._client = OpenAI(
+        self._client = ApiClient(
             api_key=config.polish.api_key,
             base_url=config.polish.base_url,
             timeout=60,
-        )
+        ).client
 
     def polish(self, text: str) -> str:
         """Refine text using the LLM."""

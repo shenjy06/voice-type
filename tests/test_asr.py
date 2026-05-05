@@ -5,6 +5,13 @@ from voice_type.asr import Transcriber
 from tests.conftest import make_config
 
 
+def _mock_api_client(mocker, mock_client):
+    """Patch ApiClient to return a mock client wrapper."""
+    mock_api = MagicMock()
+    mock_api.client = mock_client
+    return mocker.patch("voice_type.asr.ApiClient", return_value=mock_api)
+
+
 class TestTranscriber:
     def test_transcribe_language_auto(self, mocker):
         """When language='auto', no 'language' kwarg is sent to the API."""
@@ -13,10 +20,10 @@ class TestTranscriber:
         mock_client = MagicMock()
         mock_client.audio.transcriptions.create.return_value = mock_resp
         mocker.patch("builtins.open", mocker.mock_open(read_data=b"audio"))
-        with patch("voice_type.asr.OpenAI", return_value=mock_client):
-            cfg = make_config(asr={"language": "auto", "model": "whisper-1", "api_key": "sk", "base_url": "https://api"})
-            transcriber = Transcriber(cfg)
-            result = transcriber.transcribe("/path/to/audio.wav")
+        _mock_api_client(mocker, mock_client)
+        cfg = make_config(asr={"language": "auto", "model": "whisper-1", "api_key": "sk", "base_url": "https://api"})
+        transcriber = Transcriber(cfg)
+        result = transcriber.transcribe("/path/to/audio.wav")
 
         call_kwargs = mock_client.audio.transcriptions.create.call_args[1]
         assert "language" not in call_kwargs
@@ -30,10 +37,10 @@ class TestTranscriber:
         mock_client = MagicMock()
         mock_client.audio.transcriptions.create.return_value = mock_resp
         mocker.patch("builtins.open", mocker.mock_open(read_data=b"audio"))
-        with patch("voice_type.asr.OpenAI", return_value=mock_client):
-            cfg = make_config(asr={"language": "zh", "model": "whisper-1", "api_key": "sk", "base_url": "https://api"})
-            transcriber = Transcriber(cfg)
-            transcriber.transcribe("/path/to/audio.wav")
+        _mock_api_client(mocker, mock_client)
+        cfg = make_config(asr={"language": "zh", "model": "whisper-1", "api_key": "sk", "base_url": "https://api"})
+        transcriber = Transcriber(cfg)
+        transcriber.transcribe("/path/to/audio.wav")
 
         call_kwargs = mock_client.audio.transcriptions.create.call_args[1]
         assert call_kwargs["language"] == "zh"
@@ -46,10 +53,10 @@ class TestTranscriber:
             mock_client = MagicMock()
             mock_client.audio.transcriptions.create.return_value = mock_resp
             mocker.patch("builtins.open", mocker.mock_open(read_data=b"audio"))
-            with patch("voice_type.asr.OpenAI", return_value=mock_client):
-                cfg = make_config(asr={"language": lang, "model": "whisper-1", "api_key": "sk", "base_url": "https://api"})
-                transcriber = Transcriber(cfg)
-                transcriber.transcribe("/path/to/audio.wav")
+            _mock_api_client(mocker, mock_client)
+            cfg = make_config(asr={"language": lang, "model": "whisper-1", "api_key": "sk", "base_url": "https://api"})
+            transcriber = Transcriber(cfg)
+            transcriber.transcribe("/path/to/audio.wav")
 
             call_kwargs = mock_client.audio.transcriptions.create.call_args[1]
             assert call_kwargs["language"] == lang
@@ -61,10 +68,10 @@ class TestTranscriber:
         mock_client = MagicMock()
         mock_client.audio.transcriptions.create.return_value = mock_resp
         mocker.patch("builtins.open", mocker.mock_open(read_data=b"audio"))
-        with patch("voice_type.asr.OpenAI", return_value=mock_client):
-            cfg = make_config(asr={"api_key": "sk", "base_url": "https://api"})
-            transcriber = Transcriber(cfg)
-            result = transcriber.transcribe("/path/to/audio.wav")
+        _mock_api_client(mocker, mock_client)
+        cfg = make_config(asr={"api_key": "sk", "base_url": "https://api"})
+        transcriber = Transcriber(cfg)
+        result = transcriber.transcribe("/path/to/audio.wav")
 
         assert result == "hello world"
 
@@ -75,10 +82,10 @@ class TestTranscriber:
         mock_client = MagicMock()
         mock_client.audio.transcriptions.create.return_value = mock_resp
         mock_open_func = mocker.patch("builtins.open", mocker.mock_open(read_data=b"audio"))
-        with patch("voice_type.asr.OpenAI", return_value=mock_client):
-            cfg = make_config(asr={"api_key": "sk", "base_url": "https://api"})
-            transcriber = Transcriber(cfg)
-            transcriber.transcribe("/path/to/audio.wav")
+        _mock_api_client(mocker, mock_client)
+        cfg = make_config(asr={"api_key": "sk", "base_url": "https://api"})
+        transcriber = Transcriber(cfg)
+        transcriber.transcribe("/path/to/audio.wav")
 
         mock_open_func.assert_called_once_with("/path/to/audio.wav", "rb")
 
@@ -87,22 +94,24 @@ class TestTranscriber:
         mock_client = MagicMock()
         mock_client.audio.transcriptions.create.side_effect = Exception("API rate limit exceeded")
         mocker.patch("builtins.open", mocker.mock_open(read_data=b"audio"))
-        with patch("voice_type.asr.OpenAI", return_value=mock_client):
-            cfg = make_config(asr={"api_key": "sk", "base_url": "https://api"})
-            transcriber = Transcriber(cfg)
+        _mock_api_client(mocker, mock_client)
+        cfg = make_config(asr={"api_key": "sk", "base_url": "https://api"})
+        transcriber = Transcriber(cfg)
 
-            try:
-                transcriber.transcribe("/path/to/audio.wav")
-            except Exception as e:
-                assert "API rate limit" in str(e)
+        try:
+            transcriber.transcribe("/path/to/audio.wav")
+        except Exception as e:
+            assert "API rate limit" in str(e)
 
     def test_transcriber_uses_config_api_key_and_base_url(self, mocker):
-        """Transcriber creates OpenAI client with config.asr.api_key and base_url."""
+        """Transcriber creates ApiClient with config.asr.api_key and base_url."""
         mock_client = MagicMock()
         mock_client.audio.transcriptions.create.return_value = MagicMock(text="x")
-        mock_openai = mocker.patch("voice_type.asr.OpenAI", return_value=mock_client)
+        mock_api = MagicMock()
+        mock_api.client = mock_client
+        mock_api_cls = mocker.patch("voice_type.asr.ApiClient", return_value=mock_api)
 
         cfg = make_config(asr={"api_key": "my-key", "base_url": "https://my-api.com/v1"})
         Transcriber(cfg)
 
-        mock_openai.assert_called_once_with(api_key="my-key", base_url="https://my-api.com/v1")
+        mock_api_cls.assert_called_once_with(api_key="my-key", base_url="https://my-api.com/v1", timeout=30)

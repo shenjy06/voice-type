@@ -26,10 +26,6 @@ DEFAULTS = {
     },
     "recording": {
         "sample_rate": 16000,
-        "start_hotkey_modifiers": ["alt"],
-        "start_hotkey_key": "s",
-        "stop_hotkey_modifiers": ["alt"],
-        "stop_hotkey_key": "e",
     },
     "output": {
         "paste_delay_ms": 300,
@@ -58,14 +54,14 @@ class AsrConfig:
 
 
 @dataclass
+class HotkeyConfig:
+    toggle_enabled: bool = True
+    toggle_hotkey: str = "left_alt"
+
+
+@dataclass
 class RecordingConfig:
     sample_rate: int = 16000
-    start_hotkey_modifiers: list = field(default_factory=lambda: ["alt"])
-    start_hotkey_key: str = "s"
-    stop_hotkey_modifiers: list = field(default_factory=lambda: ["alt"])
-    stop_hotkey_key: str = "e"
-    cancel_hotkey_modifiers: list = field(default_factory=lambda: ["alt"])
-    cancel_hotkey_key: str = "c"
 
 
 @dataclass
@@ -87,6 +83,7 @@ class AppConfig:
     recording: RecordingConfig = field(default_factory=RecordingConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
     window: WindowConfig = field(default_factory=WindowConfig)
+    hotkey: HotkeyConfig = field(default_factory=HotkeyConfig)
 
     # Back-compat alias
     @property
@@ -99,23 +96,19 @@ class AppConfig:
     @classmethod
     def from_dict(cls, data: dict) -> "AppConfig":
         rec_data = data.get("recording", {})
-        # Migrate old hotkey fields to new start/stop/cancel format
-        if "hotkey_modifiers" in rec_data and "hotkey_key" in rec_data:
-            rec_data.setdefault("start_hotkey_modifiers", rec_data.pop("hotkey_modifiers"))
-            rec_data.setdefault("start_hotkey_key", rec_data.pop("hotkey_key"))
-            rec_data.setdefault("stop_hotkey_modifiers", ["alt"])
-            rec_data.setdefault("stop_hotkey_key", "e")
-            rec_data.setdefault("cancel_hotkey_modifiers", ["alt"])
-            rec_data.setdefault("cancel_hotkey_key", "c")
-        # Ensure cancel hotkey exists for configs saved before cancel was added
-        rec_data.setdefault("cancel_hotkey_modifiers", ["alt"])
-        rec_data.setdefault("cancel_hotkey_key", "c")
+        # Migrate old hotkey fields: if start_hotkey_modifiers exists in recording,
+        # the user had hotkeys configured — preserve them by enabling the toggle
+        if "start_hotkey_modifiers" in rec_data or "hotkey_modifiers" in rec_data:
+            hotkey_data = {"toggle_enabled": True}
+        else:
+            hotkey_data = data.get("hotkey", {})
         return cls(
             polish=PolishApiConfig(**data.get("polish", data.get("api", {}))),
             asr=AsrConfig(**data.get("asr", {})),
-            recording=RecordingConfig(**rec_data),
+            recording=RecordingConfig(sample_rate=rec_data.get("sample_rate", 16000)),
             output=OutputConfig(**data.get("output", {})),
             window=WindowConfig(**data.get("window", {})),
+            hotkey=HotkeyConfig(**hotkey_data),
         )
 
     @classmethod

@@ -118,17 +118,10 @@ class TestApplication:
         mocker.patch("voice_type.__main__.QApplication")
         mock_config = mocker.patch("voice_type.__main__.AppConfig")
         mock_cfg = mocker.MagicMock(
-            recording=mocker.MagicMock(
-                sample_rate=16000,
-                start_hotkey_modifiers=["alt"],
-                start_hotkey_key="s",
-                stop_hotkey_modifiers=["alt"],
-                stop_hotkey_key="e",
-                cancel_hotkey_modifiers=["alt"],
-                cancel_hotkey_key="c",
-            ),
+            recording=mocker.MagicMock(sample_rate=16000),
             output=mocker.MagicMock(auto_paste=True, paste_delay_ms=300),
             window=mocker.MagicMock(show_on_start=False, always_on_top=True),
+            hotkey=mocker.MagicMock(toggle_enabled=True),
         )
         mock_cfg.is_configured.return_value = is_configured
         mock_config.load.return_value = mock_cfg
@@ -142,42 +135,6 @@ class TestApplication:
         from voice_type.__main__ import Application
         app = Application()
         return app
-
-    def test_start_recording_delegates_to_window(self, qtbot, mocker):
-        app = self._make_application(qtbot, mocker)
-        app.window.start_recording.reset_mock()
-        app.window.is_recording.return_value = False
-        app._start_recording()
-        app.window.start_recording.assert_called_once()
-
-    def test_start_recording_when_already_recording_noop(self, qtbot, mocker):
-        app = self._make_application(qtbot, mocker)
-        app.window.start_recording.reset_mock()
-        app.window.is_recording.return_value = True
-        app._start_recording()
-        app.window.start_recording.assert_not_called()
-
-    def test_stop_recording_delegates_to_window(self, qtbot, mocker):
-        app = self._make_application(qtbot, mocker)
-        app.window.stop_recording.reset_mock()
-        app.window.is_recording.return_value = True
-        app._stop_recording()
-        app.window.stop_recording.assert_called_once()
-
-    def test_stop_recording_when_not_recording_noop(self, qtbot, mocker):
-        app = self._make_application(qtbot, mocker)
-        app.window.stop_recording.reset_mock()
-        app.window.is_recording.return_value = False
-        app._stop_recording()
-        app.window.stop_recording.assert_not_called()
-
-    def test_cancel_recording_while_recording(self, qtbot, mocker):
-        app = self._make_application(qtbot, mocker)
-        app.window.stop_recording.reset_mock()
-        app.window.is_recording.return_value = True
-        app._cancel_recording()
-        assert app._cancelled is True
-        app.window.stop_recording.assert_called_once()
 
     def test_on_recording_stopped_cancelled_skips_processing(self, qtbot, mocker):
         app = self._make_application(qtbot, mocker)
@@ -260,19 +217,29 @@ class TestApplication:
 
         app._settings_dialog.exec.assert_called_once()
 
-    def test_on_settings_saved_reregisters_hotkeys(self, qtbot, mocker):
+    def test_on_settings_saved_respects_toggle(self, qtbot, mocker):
         mocker.patch("voice_type.__main__.Toast")
         app = self._make_application(qtbot, mocker)
         app.hotkey_manager.stop = mocker.MagicMock()
-        app.hotkey_manager.register = mocker.MagicMock()
         app.hotkey_manager.start = mocker.MagicMock()
+        app.config.hotkey.toggle_enabled = True
 
         app._on_settings_saved()
 
         app.hotkey_manager.stop.assert_called_once()
-        # register should be called 3 times (start, stop, cancel)
-        assert app.hotkey_manager.register.call_count == 3
         app.hotkey_manager.start.assert_called_once()
+
+    def test_on_settings_saved_disables_when_toggle_off(self, qtbot, mocker):
+        mocker.patch("voice_type.__main__.Toast")
+        app = self._make_application(qtbot, mocker)
+        app.hotkey_manager.stop = mocker.MagicMock()
+        app.hotkey_manager.start = mocker.MagicMock()
+        app.config.hotkey.toggle_enabled = False
+
+        app._on_settings_saved()
+
+        app.hotkey_manager.stop.assert_called_once()
+        app.hotkey_manager.start.assert_not_called()
 
     def test_quit_guard_prevents_double_quit(self, qtbot, mocker):
         app = self._make_application(qtbot, mocker)
@@ -296,6 +263,22 @@ class TestApplication:
         app.window.stop_recording.reset_mock()
         app._toggle_recording()
         app.window.stop_recording.assert_called_once()
+
+    def test_cancel_recording_while_recording(self, qtbot, mocker):
+        app = self._make_application(qtbot, mocker)
+        app.window.is_recording.return_value = True
+        app.window.stop_recording.reset_mock()
+        app._cancel_recording()
+        assert app._cancelled is True
+        app.window.stop_recording.assert_called_once()
+
+    def test_cancel_recording_when_not_recording(self, qtbot, mocker):
+        app = self._make_application(qtbot, mocker)
+        app.window.is_recording.return_value = False
+        app.audio_recorder.cleanup = mocker.MagicMock()
+        app._cancel_recording()
+        assert app._cancelled is True
+        app.audio_recorder.cleanup.assert_called_once()
 
     def test_shows_settings_when_not_configured(self, qtbot, mocker):
         """When no API key is set, settings dialog is shown on startup."""

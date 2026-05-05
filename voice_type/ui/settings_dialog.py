@@ -1,32 +1,26 @@
 """Settings dialog — configure API, models, hotkey, etc."""
 
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+    QDialog, QVBoxLayout, QLabel, QLineEdit,
     QComboBox, QFormLayout, QGroupBox, QSpinBox, QCheckBox,
     QDialogButtonBox, QTabWidget, QWidget,
 )
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont
+from PySide6.QtGui import QIcon
 from voice_type.config import AppConfig
 from voice_type.network import check_network_available
 from voice_type.ui.main_window import Toast
+from voice_type.ui.icon_utils import make_circle_icon
+
+_SETTINGS_ICON = None
 
 
-def _make_settings_icon():
-    """Create a small gear icon pixmap for the settings dialog."""
-    pixmap = QPixmap(32, 32)
-    pixmap.fill(Qt.transparent)
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.Antialiasing)
-    painter.setBrush(QColor(99, 102, 241))  # Indigo
-    painter.setPen(Qt.NoPen)
-    painter.drawEllipse(4, 4, 24, 24)
-    painter.setPen(QColor(255, 255, 255))
-    font = QFont("Segoe UI", 14, QFont.Bold)
-    painter.setFont(font)
-    painter.drawText(pixmap.rect(), Qt.AlignCenter, "⚙")
-    painter.end()
-    return QIcon(pixmap)
+def _get_settings_icon() -> QIcon:
+    """Lazily create settings icon (requires QApplication to exist first)."""
+    global _SETTINGS_ICON
+    if _SETTINGS_ICON is None:
+        _SETTINGS_ICON = make_circle_icon("⚙", (99, 102, 241), font_size=14, font_family="Segoe UI")
+    return _SETTINGS_ICON
 
 
 class SettingsDialog(QDialog):
@@ -48,7 +42,7 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.config = config
         self.setWindowTitle("Settings")
-        self.setWindowIcon(_make_settings_icon())
+        self.setWindowIcon(_get_settings_icon())
         self.setModal(True)
         self.setMinimumWidth(480)
         self.setWindowFlags(Qt.Dialog)
@@ -153,55 +147,26 @@ class SettingsDialog(QDialog):
 
         # === Hotkey Settings ===
         hotkey_group = QGroupBox("Hotkeys")
-        hotkey_layout = QFormLayout()
+        hotkey_layout = QVBoxLayout()
 
-        # Start recording hotkey
-        self.start_mod1 = QComboBox()
-        self.start_mod2 = QComboBox()
-        for mod in ["alt", "ctrl", "shift", "super", "none"]:
-            self.start_mod1.addItem(mod)
-            self.start_mod2.addItem(mod)
-        self.start_key = QLineEdit()
-        self.start_key.setMaxLength(1)
-        self.start_key.setFixedWidth(40)
-        start_row = QHBoxLayout()
-        start_row.addWidget(self.start_mod1)
-        start_row.addWidget(self.start_mod2)
-        start_row.addWidget(QLabel("+"))
-        start_row.addWidget(self.start_key)
-        hotkey_layout.addRow("Start Recording:", start_row)
+        self.hotkey_toggle_check = QCheckBox("Enable Left Alt toggle (tap to start/stop recording)")
+        self.hotkey_toggle_check.setChecked(True)
+        hotkey_layout.addWidget(self.hotkey_toggle_check)
 
-        # Stop recording hotkey
-        self.stop_mod1 = QComboBox()
-        self.stop_mod2 = QComboBox()
-        for mod in ["alt", "ctrl", "shift", "super", "none"]:
-            self.stop_mod1.addItem(mod)
-            self.stop_mod2.addItem(mod)
-        self.stop_key = QLineEdit()
-        self.stop_key.setMaxLength(1)
-        self.stop_key.setFixedWidth(40)
-        stop_row = QHBoxLayout()
-        stop_row.addWidget(self.stop_mod1)
-        stop_row.addWidget(self.stop_mod2)
-        stop_row.addWidget(QLabel("+"))
-        stop_row.addWidget(self.stop_key)
-        hotkey_layout.addRow("Stop Recording:", stop_row)
+        hint_label = QLabel(
+            "Quickly tap Left Alt to toggle recording.\n"
+            "Holding Alt + another key (e.g. Alt+Tab) will not trigger it."
+        )
+        hint_label.setWordWrap(True)
+        hint_label.setStyleSheet("color: #9ca3af; font-size: 12px;")
+        hotkey_layout.addWidget(hint_label)
 
-        # Cancel recording hotkey
-        self.cancel_mod1 = QComboBox()
-        self.cancel_mod2 = QComboBox()
-        for mod in ["alt", "ctrl", "shift", "super", "none"]:
-            self.cancel_mod1.addItem(mod)
-            self.cancel_mod2.addItem(mod)
-        self.cancel_key = QLineEdit()
-        self.cancel_key.setMaxLength(1)
-        self.cancel_key.setFixedWidth(40)
-        cancel_row = QHBoxLayout()
-        cancel_row.addWidget(self.cancel_mod1)
-        cancel_row.addWidget(self.cancel_mod2)
-        cancel_row.addWidget(QLabel("+"))
-        cancel_row.addWidget(self.cancel_key)
-        hotkey_layout.addRow("Cancel:", cancel_row)
+        cancel_label = QLabel(
+            "<b>Alt+C</b> — Cancel recording and discard audio."
+        )
+        cancel_label.setWordWrap(True)
+        cancel_label.setStyleSheet("color: #9ca3af; font-size: 12px;")
+        hotkey_layout.addWidget(cancel_label)
 
         hotkey_group.setLayout(hotkey_layout)
         layout.addWidget(hotkey_group)
@@ -242,17 +207,7 @@ class SettingsDialog(QDialog):
         self.auto_paste_check.setChecked(self.config.output.auto_paste)
 
         # Hotkeys
-        self._load_hotkey_row(self.config.recording.start_hotkey_modifiers, self.config.recording.start_hotkey_key,
-                              self.start_mod1, self.start_mod2, self.start_key)
-        self._load_hotkey_row(self.config.recording.stop_hotkey_modifiers, self.config.recording.stop_hotkey_key,
-                              self.stop_mod1, self.stop_mod2, self.stop_key)
-        self._load_hotkey_row(self.config.recording.cancel_hotkey_modifiers, self.config.recording.cancel_hotkey_key,
-                              self.cancel_mod1, self.cancel_mod2, self.cancel_key)
-
-    def _load_hotkey_row(self, mods, key, mod1_combo, mod2_combo, key_input):
-        mod1_combo.setCurrentText(mods[0] if len(mods) > 0 else "none")
-        mod2_combo.setCurrentText(mods[1] if len(mods) > 1 else "none")
-        key_input.setText(key)
+        self.hotkey_toggle_check.setChecked(self.config.hotkey.toggle_enabled)
 
     def _save_and_close(self):
         if not check_network_available():
@@ -284,23 +239,8 @@ class SettingsDialog(QDialog):
         self.config.output.auto_paste = self.auto_paste_check.isChecked()
 
         # Hotkeys
-        self.config.recording.start_hotkey_modifiers = self._save_hotkey_row(self.start_mod1, self.start_mod2, self.start_key)
-        self.config.recording.start_hotkey_key = self.start_key.text().lower()
-        self.config.recording.stop_hotkey_modifiers = self._save_hotkey_row(self.stop_mod1, self.stop_mod2, self.stop_key)
-        self.config.recording.stop_hotkey_key = self.stop_key.text().lower()
-        self.config.recording.cancel_hotkey_modifiers = self._save_hotkey_row(self.cancel_mod1, self.cancel_mod2, self.cancel_key)
-        self.config.recording.cancel_hotkey_key = self.cancel_key.text().lower()
+        self.config.hotkey.toggle_enabled = self.hotkey_toggle_check.isChecked()
 
         self.config.save()
         self.settings_saved.emit()
         self.accept()
-
-    def _save_hotkey_row(self, mod1_combo, mod2_combo, key_input):
-        mods = []
-        m1 = mod1_combo.currentText()
-        m2 = mod2_combo.currentText()
-        if m1 != "none":
-            mods.append(m1)
-        if m2 != "none":
-            mods.append(m2)
-        return mods

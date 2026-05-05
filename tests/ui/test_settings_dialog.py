@@ -1,7 +1,7 @@
 """Tests for voice_type.ui.settings_dialog — SettingsDialog."""
 
 from PySide6.QtWidgets import QDialogButtonBox, QDialog
-from voice_type.config import AppConfig, AsrConfig, PolishApiConfig, RecordingConfig
+from voice_type.config import AppConfig, AsrConfig, PolishApiConfig, RecordingConfig, HotkeyConfig
 from voice_type.ui.settings_dialog import SettingsDialog
 
 
@@ -50,43 +50,30 @@ class TestSettingsDialogLoadConfig:
         qtbot.addWidget(dlg)
         assert dlg.stt_model_combo.currentText() == "custom-unknown-model"
 
-    def test_load_hotkey_row_empty_mods(self, qtbot):
-        cfg = AppConfig(recording=RecordingConfig(
-            start_hotkey_modifiers=[],
-            start_hotkey_key="x",
-        ))
+
+class TestSettingsDialogHotkeyToggle:
+    def test_hotkey_toggle_checked_by_default(self, qtbot):
+        dlg = SettingsDialog(AppConfig())
+        qtbot.addWidget(dlg)
+        assert dlg.hotkey_toggle_check.isChecked() is True
+
+    def test_hotkey_toggle_loads_from_config(self, qtbot):
+        cfg = AppConfig(hotkey=HotkeyConfig(toggle_enabled=False))
         dlg = SettingsDialog(cfg)
         qtbot.addWidget(dlg)
-        assert dlg.start_mod1.currentText() == "none"
-        assert dlg.start_mod2.currentText() == "none"
-        assert dlg.start_key.text() == "x"
+        assert dlg.hotkey_toggle_check.isChecked() is False
+
+    def test_hotkey_toggle_saves_to_config(self, qtbot, mocker):
+        mocker.patch("voice_type.ui.settings_dialog.check_network_available", return_value=True)
+        cfg = AppConfig(asr=AsrConfig(api_key="sk-test"))
+        dlg = SettingsDialog(cfg)
+        qtbot.addWidget(dlg)
+        dlg.hotkey_toggle_check.setChecked(False)
+        dlg._save_and_close()
+        assert cfg.hotkey.toggle_enabled is False
 
 
 class TestSettingsDialogSave:
-    def test_save_hotkey_row_both_none(self, qtbot):
-        dlg = SettingsDialog(AppConfig())
-        qtbot.addWidget(dlg)
-        dlg.start_mod1.setCurrentText("none")
-        dlg.start_mod2.setCurrentText("none")
-        result = dlg._save_hotkey_row(dlg.start_mod1, dlg.start_mod2, dlg.start_key)
-        assert result == []
-
-    def test_save_hotkey_row_one_modifier(self, qtbot):
-        dlg = SettingsDialog(AppConfig())
-        qtbot.addWidget(dlg)
-        dlg.start_mod1.setCurrentText("alt")
-        dlg.start_mod2.setCurrentText("none")
-        result = dlg._save_hotkey_row(dlg.start_mod1, dlg.start_mod2, dlg.start_key)
-        assert result == ["alt"]
-
-    def test_save_hotkey_row_two_modifiers(self, qtbot):
-        dlg = SettingsDialog(AppConfig())
-        qtbot.addWidget(dlg)
-        dlg.stop_mod1.setCurrentText("ctrl")
-        dlg.stop_mod2.setCurrentText("shift")
-        result = dlg._save_hotkey_row(dlg.stop_mod1, dlg.stop_mod2, dlg.stop_key)
-        assert result == ["ctrl", "shift"]
-
     def test_save_and_close_with_network_available(self, qtbot, mocker):
         """When network is available, config is saved and dialog accepted."""
         mocker.patch("voice_type.ui.settings_dialog.check_network_available", return_value=True)

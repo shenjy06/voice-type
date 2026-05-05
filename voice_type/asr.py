@@ -1,7 +1,7 @@
 """Speech-to-text via OpenAI-compatible API."""
 
 import logging
-from openai import OpenAI
+from voice_type.api_client import ApiClient
 from voice_type.config import AppConfig
 
 logger = logging.getLogger(__name__)
@@ -10,10 +10,11 @@ logger = logging.getLogger(__name__)
 class Transcriber:
     def __init__(self, config: AppConfig):
         self.config = config
-        self._client = OpenAI(
+        self._client = ApiClient(
             api_key=config.asr.api_key,
             base_url=config.asr.base_url,
-        )
+            timeout=30,
+        ).client
 
     def transcribe(self, audio_path: str) -> str:
         """Transcribe audio file to text."""

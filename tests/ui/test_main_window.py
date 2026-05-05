@@ -2,8 +2,8 @@
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QCloseEvent
-from voice_type.ui.main_window import FloatingRecordingWindow, PulsingDot, Toast, WM_HOTKEY
-from voice_type.ui.system_tray import HotkeyManager
+from voice_type.ui.main_window import FloatingRecordingWindow, PulsingDot, Toast
+from voice_type.state import RecorderState
 
 
 class TestPulsingDot:
@@ -51,7 +51,7 @@ class TestFloatingRecordingWindow:
     def test_initial_state_is_idle(self, qtbot):
         win = FloatingRecordingWindow()
         qtbot.addWidget(win)
-        assert win._state == win.STATE_IDLE
+        assert win._state == RecorderState.IDLE
 
     def test_start_recording_emits_signal(self, qtbot):
         win = FloatingRecordingWindow()
@@ -59,7 +59,7 @@ class TestFloatingRecordingWindow:
         with qtbot.waitSignal(win.recording_started):
             win.start_recording()
         assert win.is_recording() is True
-        assert win._state == win.STATE_RECORDING
+        assert win._state == RecorderState.RECORDING
 
     def test_start_recording_when_already_recording_noop(self, qtbot):
         win = FloatingRecordingWindow()
@@ -78,7 +78,7 @@ class TestFloatingRecordingWindow:
         with qtbot.waitSignal(win.recording_stopped):
             win.stop_recording()
         assert win.is_recording() is False
-        assert win._state == win.STATE_IDLE
+        assert win._state == RecorderState.IDLE
 
     def test_stop_recording_when_not_recording_noop(self, qtbot):
         win = FloatingRecordingWindow()
@@ -107,38 +107,20 @@ class TestFloatingRecordingWindow:
         win = FloatingRecordingWindow()
         qtbot.addWidget(win)
         win.set_processing()
-        assert win._state == win.STATE_PROCESSING
+        assert win._state == RecorderState.PROCESSING
         assert win.is_recording() is False
 
     def test_set_done(self, qtbot):
         win = FloatingRecordingWindow()
         qtbot.addWidget(win)
         win.set_done()
-        assert win._state == win.STATE_DONE
+        assert win._state == RecorderState.DONE
 
     def test_set_error(self, qtbot):
         win = FloatingRecordingWindow()
         qtbot.addWidget(win)
         win.set_error("No speech")
-        assert win._state == win.STATE_ERROR
-
-    def test_set_status_processing(self, qtbot):
-        win = FloatingRecordingWindow()
-        qtbot.addWidget(win)
-        win.set_status("Processing...")
-        assert win._state == win.STATE_PROCESSING
-
-    def test_set_status_error(self, qtbot):
-        win = FloatingRecordingWindow()
-        qtbot.addWidget(win)
-        win.set_status("Error occurred")
-        assert win._state == win.STATE_ERROR
-
-    def test_set_status_done(self, qtbot):
-        win = FloatingRecordingWindow()
-        qtbot.addWidget(win)
-        win.set_status("Done")
-        assert win._state == win.STATE_DONE
+        assert win._state == RecorderState.ERROR
 
     def test_close_event_emits_quit(self, qtbot):
         win = FloatingRecordingWindow()
@@ -147,39 +129,6 @@ class TestFloatingRecordingWindow:
             event = QCloseEvent()
             win.closeEvent(event)
             assert event.isAccepted()
-
-    def test_native_event_wm_hotkey_dispatches(self, qtbot, mocker):
-        win = FloatingRecordingWindow()
-        qtbot.addWidget(win)
-        mock_mgr = mocker.MagicMock(spec=HotkeyManager)
-        win.set_hotkey_manager(mock_mgr)
-
-        # Simulate a WM_HOTKEY message
-        msg = mocker.MagicMock()
-        msg.message = WM_HOTKEY
-        msg.wParam = 1
-        mocker.patch("ctypes.wintypes.MSG.from_address", return_value=msg)
-
-        result = win.nativeEvent(b"windows_generic_MSG", mocker.MagicMock())
-        assert result == (True, 0)
-        mock_mgr.handle_hotkey.assert_called_once_with(1)
-
-    def test_native_event_other_event_returns_false(self, qtbot):
-        win = FloatingRecordingWindow()
-        qtbot.addWidget(win)
-        result = win.nativeEvent(b"other_event", None)
-        assert result == (False, 0)
-
-    def test_native_event_no_hotkey_manager_returns_false(self, qtbot):
-        win = FloatingRecordingWindow()
-        qtbot.addWidget(win)
-        import ctypes.wintypes
-        msg_mock = ctypes.wintypes.MSG()
-        msg_mock.message = WM_HOTKEY
-        msg_mock.wParam = 1
-        win._hotkey_manager = None
-        result = win.nativeEvent(b"windows_generic_MSG", None)
-        assert result == (False, 0)
 
     def test_set_hotkey_manager(self, qtbot):
         win = FloatingRecordingWindow()
@@ -198,22 +147,22 @@ class TestFloatingRecordingWindow:
         assert win.is_recording() is False  # IDLE
 
     def test_state_transitions_full_cycle(self, qtbot):
-        """IDLE -> RECORDING -> PROCESSING -> DONE -> IDLE."""
+        """IDLE -> RECORDING -> PROCESSING -> DONE -> RECORDING."""
         win = FloatingRecordingWindow()
         qtbot.addWidget(win)
-        assert win._state == win.STATE_IDLE
+        assert win._state == RecorderState.IDLE
 
         win.start_recording()
-        assert win._state == win.STATE_RECORDING
+        assert win._state == RecorderState.RECORDING
 
         win.set_processing()
-        assert win._state == win.STATE_PROCESSING
+        assert win._state == RecorderState.PROCESSING
 
         win.set_done()
-        assert win._state == win.STATE_DONE
+        assert win._state == RecorderState.DONE
 
         win.start_recording()
-        assert win._state == win.STATE_RECORDING
+        assert win._state == RecorderState.RECORDING
 
 
 class TestToast:
