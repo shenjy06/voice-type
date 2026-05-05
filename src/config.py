@@ -7,35 +7,7 @@ from pathlib import Path
 CONFIG_DIR = Path.home() / ".voice-type"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
-DEFAULTS = {
-    "api": {
-        "base_url": "https://api.openai.com/v1",
-        "api_key": "",
-        "model": "gpt-4o",
-    },
-    "asr": {
-        "base_url": "https://api.openai.com/v1",
-        "api_key": "",
-        "model": "whisper-1",
-        "language": "auto",
-    },
-    "polish": {
-        "base_url": "https://api.openai.com/v1",
-        "api_key": "",
-        "model": "gpt-4o",
-    },
-    "recording": {
-        "sample_rate": 16000,
-    },
-    "output": {
-        "paste_delay_ms": 300,
-        "auto_paste": True,
-    },
-    "window": {
-        "show_on_start": True,
-        "always_on_top": True,
-    },
-}
+DEFAULT_BASE_URL = "https://api.openai.com/v1"
 
 
 @dataclass
@@ -127,7 +99,3 @@ class AppConfig:
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(self.to_dict(), f, indent=2, ensure_ascii=False)
-
-
-def get_default_config() -> dict:
-    return DEFAULTS

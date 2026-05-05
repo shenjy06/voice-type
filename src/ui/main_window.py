@@ -11,6 +11,13 @@ from src.state import RecorderState
 
 logger = logging.getLogger(__name__)
 
+# Shared color constants
+_COLOR_BG = QColor(31, 41, 55)
+_COLOR_BORDER_WINDOW = QColor(55, 65, 81)
+_COLOR_BORDER_BUBBLE = QColor(75, 85, 99)
+_COLOR_TEXT = QColor(229, 231, 235)
+_COLOR_DOT = QColor(239, 68, 68)
+
 # Button style descriptors keyed by RecorderState
 _BUTTON_STYLES = {
     RecorderState.RECORDING: (
@@ -80,7 +87,7 @@ class PulsingDot(QWidget):
             return
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        color = QColor(239, 68, 68)
+        color = QColor(_COLOR_DOT)
         color.setAlphaF(self._opacity)
         painter.setBrush(color)
         painter.setPen(Qt.NoPen)
@@ -199,8 +206,8 @@ class FloatingRecordingWindow(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.setBrush(QColor(31, 41, 55))
-        painter.setPen(QColor(55, 65, 81))
+        painter.setBrush(_COLOR_BG)
+        painter.setPen(_COLOR_BORDER_WINDOW)
         painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 12, 12)
 
     def mousePressEvent(self, event):
@@ -249,7 +256,6 @@ class StatusBubble(QWidget):
 
     _FONT_FAMILY = "Microsoft YaHei"
     _FONT_SIZE = 13
-    _FADE_OUT_MS = 200
     _TARGET_OPACITY = 0.9
     _BOTTOM_MARGIN = 60
     _H_PADDING = 48
@@ -287,7 +293,7 @@ class StatusBubble(QWidget):
         self.update()
 
     def dismiss(self):
-        """Fade out and close."""
+        """Hide the status bubble immediately."""
         if not self.isVisible():
             return
         self.hide()
@@ -295,11 +301,10 @@ class StatusBubble(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        color = QColor(31, 41, 55)
-        painter.setBrush(color)
-        painter.setPen(QColor(75, 85, 99))
+        painter.setBrush(_COLOR_BG)
+        painter.setPen(_COLOR_BORDER_BUBBLE)
         painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 8, 8)
-        painter.setPen(QColor(229, 231, 235))
+        painter.setPen(_COLOR_TEXT)
         painter.setFont(QFont(self._FONT_FAMILY, self._FONT_SIZE))
         painter.drawText(self.rect(), Qt.AlignCenter, self._text)
 
@@ -364,10 +369,9 @@ class Toast(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        color = QColor(31, 41, 55)
-        painter.setBrush(color)
-        painter.setPen(QColor(75, 85, 99))
+        painter.setBrush(_COLOR_BG)
+        painter.setPen(_COLOR_BORDER_BUBBLE)
         painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 8, 8)
-        painter.setPen(QColor(229, 231, 235))
+        painter.setPen(_COLOR_TEXT)
         painter.setFont(QFont(self._FONT_FAMILY, self._FONT_SIZE))
         painter.drawText(self.rect(), Qt.AlignCenter, self._text)

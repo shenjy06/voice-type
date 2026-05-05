@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QIcon
-from src.config import AppConfig
+from src.config import AppConfig, DEFAULT_BASE_URL
 from src.network import check_network_available
 from src.ui.main_window import Toast
 from src.ui.icon_utils import make_circle_icon
@@ -69,7 +69,7 @@ class SettingsDialog(QDialog):
         stt_api_layout.addRow("API Key:", self.stt_api_key_input)
 
         self.stt_base_url_input = QLineEdit()
-        self.stt_base_url_input.setPlaceholderText("https://api.openai.com/v1")
+        self.stt_base_url_input.setPlaceholderText(DEFAULT_BASE_URL)
         stt_api_layout.addRow("Base URL:", self.stt_base_url_input)
 
         self.stt_model_combo = QComboBox()
@@ -113,7 +113,7 @@ class SettingsDialog(QDialog):
         polish_api_layout.addRow("API Key:", self.polish_api_key_input)
 
         self.polish_base_url_input = QLineEdit()
-        self.polish_base_url_input.setPlaceholderText("https://api.openai.com/v1")
+        self.polish_base_url_input.setPlaceholderText(DEFAULT_BASE_URL)
         polish_api_layout.addRow("Base URL:", self.polish_base_url_input)
 
         self.polish_model_combo = QComboBox()
@@ -224,14 +224,14 @@ class SettingsDialog(QDialog):
 
         # STT
         self.config.asr.api_key = api_key
-        self.config.asr.base_url = self.stt_base_url_input.text().strip() or "https://api.openai.com/v1"
+        self.config.asr.base_url = self.stt_base_url_input.text().strip() or DEFAULT_BASE_URL
         self.config.asr.model = self.stt_model_combo.currentText()
         self.config.asr.language = self.stt_lang_combo.currentText()
         self.config.recording.sample_rate = self.sample_rate_spin.value()
 
         # Polish
         self.config.polish.api_key = self.polish_api_key_input.text().strip()
-        self.config.polish.base_url = self.polish_base_url_input.text().strip() or "https://api.openai.com/v1"
+        self.config.polish.base_url = self.polish_base_url_input.text().strip() or DEFAULT_BASE_URL
         self.config.polish.model = self.polish_model_combo.currentText()
 
         # Output

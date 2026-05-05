@@ -3,7 +3,6 @@
 import logging
 import time
 import ctypes
-from ctypes import wintypes
 
 logger = logging.getLogger(__name__)
 

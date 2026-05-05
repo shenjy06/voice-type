@@ -3,7 +3,7 @@
 import logging
 import os
 import sys
-from ctypes import windll
+import ctypes
 import pyperclip
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QThread, Signal, QObject
@@ -22,6 +22,9 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+user32 = ctypes.windll.user32
+SW_SHOWNA = 4  # Show window without activating
 
 
 class ProcessingWorker(QObject):
@@ -165,9 +168,7 @@ class Application:
         # SW_SHOWNA = show without activating. This keeps the original
         # foreground window intact so SetForegroundWindow succeeds later.
         if self.window.isVisible():
-            SW_SHOWNA = 4
-            hwnd = int(self.window.winId())
-            windll.user32.ShowWindow(hwnd, SW_SHOWNA)
+            user32.ShowWindow(int(self.window.winId()), SW_SHOWNA)
 
         # Save audio and process in background thread
         try:

@@ -9,8 +9,7 @@ from src.config import (
     RecordingConfig,
     WindowConfig,
     HotkeyConfig,
-    get_default_config,
-    DEFAULTS,
+    DEFAULT_BASE_URL,
 )
 
 
@@ -236,10 +235,6 @@ class TestAppConfigLoadSave:
         assert loaded.polish.api_key == "round-trip"
 
 
-class TestGetDefaultConfig:
-    def test_get_default_config_returns_defaults(self):
-        defaults = get_default_config()
-        assert defaults == DEFAULTS
-        assert "api" in defaults
-        assert "asr" in defaults
-        assert "recording" in defaults
+class TestDefaultBaseUrl:
+    def test_default_base_url_value(self):
+        assert DEFAULT_BASE_URL == "https://api.openai.com/v1"
