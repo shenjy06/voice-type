@@ -88,7 +88,7 @@ class Application:
         self.window.recording_started.connect(self._on_recording_started)
         self.window.recording_stopped.connect(self._on_recording_stopped)
         self.window.settings_requested.connect(self._show_settings)
-        self.window.quit_requested.connect(self._quit)
+        self.window.hide_requested.connect(self.window.hide)
 
         # System tray
         self.tray = TrayIcon()
@@ -161,11 +161,13 @@ class Application:
         self._status_bubble.show_status("润色中...")
 
         # Show the window WITHOUT stealing focus from the target window.
+        # Only do this if the window was already visible (user didn't hide it).
         # SW_SHOWNA = show without activating. This keeps the original
         # foreground window intact so SetForegroundWindow succeeds later.
-        SW_SHOWNA = 4
-        hwnd = int(self.window.winId())
-        windll.user32.ShowWindow(hwnd, SW_SHOWNA)
+        if self.window.isVisible():
+            SW_SHOWNA = 4
+            hwnd = int(self.window.winId())
+            windll.user32.ShowWindow(hwnd, SW_SHOWNA)
 
         # Save audio and process in background thread
         try:

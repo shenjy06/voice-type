@@ -93,7 +93,7 @@ class FloatingRecordingWindow(QWidget):
     recording_started = Signal()
     recording_stopped = Signal()
     settings_requested = Signal()
-    quit_requested = Signal()
+    hide_requested = Signal()
 
     def __init__(self, always_on_top: bool = True):
         super().__init__()
@@ -146,7 +146,7 @@ class FloatingRecordingWindow(QWidget):
             "border: none; font-size: 13px; border-radius: 4px; }"
             "QPushButton:hover { background: rgba(239,68,68,0.3); color: #f87171; }"
         )
-        quit_btn.clicked.connect(self.quit_requested.emit)
+        quit_btn.clicked.connect(self.hide_requested.emit)
         top_row.addWidget(quit_btn)
 
         layout.addLayout(top_row)
@@ -237,8 +237,8 @@ class FloatingRecordingWindow(QWidget):
         self._update_record_button()
 
     def closeEvent(self, event: QCloseEvent):
-        self.quit_requested.emit()
-        event.accept()
+        self.hide_requested.emit()
+        event.ignore()
 
     def set_hotkey_manager(self, manager):
         self._hotkey_manager = manager

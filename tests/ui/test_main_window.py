@@ -122,13 +122,13 @@ class TestFloatingRecordingWindow:
         win.set_error("No speech")
         assert win._state == RecorderState.ERROR
 
-    def test_close_event_emits_quit(self, qtbot):
+    def test_close_event_emits_hide(self, qtbot):
         win = FloatingRecordingWindow()
         qtbot.addWidget(win)
-        with qtbot.waitSignal(win.quit_requested):
+        with qtbot.waitSignal(win.hide_requested):
             event = QCloseEvent()
             win.closeEvent(event)
-            assert event.isAccepted()
+            assert not event.isAccepted()
 
     def test_set_hotkey_manager(self, qtbot):
         win = FloatingRecordingWindow()
