@@ -244,6 +244,66 @@ class FloatingRecordingWindow(QWidget):
         self._hotkey_manager = manager
 
 
+class StatusBubble(QWidget):
+    """A persistent status bubble shown at screen bottom during recording/processing."""
+
+    _FONT_FAMILY = "Microsoft YaHei"
+    _FONT_SIZE = 13
+    _FADE_OUT_MS = 200
+    _TARGET_OPACITY = 0.9
+    _BOTTOM_MARGIN = 60
+    _H_PADDING = 48
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._text = ""
+        self._fade_out = None
+        self.setWindowFlags(
+            Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint | Qt.BypassWindowManagerHint
+        )
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_ShowWithoutActivating)
+
+    def show_status(self, text: str):
+        """Show or update the bubble with the given text."""
+        self._text = text
+        self._resize_and_repaint()
+        self.setWindowOpacity(self._TARGET_OPACITY)
+        self.show()
+        self.raise_()
+
+    def _resize_and_repaint(self):
+        fm = QFontMetrics(QFont(self._FONT_FAMILY, self._FONT_SIZE))
+        text_w = fm.horizontalAdvance(self._text)
+        w = text_w + self._H_PADDING
+        h = 40
+        self.setFixedSize(w, h)
+        screen = QApplication.primaryScreen()
+        if screen:
+            geo = screen.availableGeometry()
+            x = geo.center().x() - w // 2
+            y = geo.bottom() - h - self._BOTTOM_MARGIN
+            self.move(x, y)
+        self.update()
+
+    def dismiss(self):
+        """Fade out and close."""
+        if not self.isVisible():
+            return
+        self.hide()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        color = QColor(31, 41, 55)
+        painter.setBrush(color)
+        painter.setPen(QColor(75, 85, 99))
+        painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 8, 8)
+        painter.setPen(QColor(229, 231, 235))
+        painter.setFont(QFont(self._FONT_FAMILY, self._FONT_SIZE))
+        painter.drawText(self.rect(), Qt.AlignCenter, self._text)
+
+
 class Toast(QWidget):
     """A brief toast-style notification that appears at screen bottom center and auto-dismisses."""
 

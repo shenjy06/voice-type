@@ -13,7 +13,7 @@ from src.asr import Transcriber
 from src.polisher import TextPolisher
 from src.typer import TextTyper
 from src.window_manager import get_foreground_window
-from src.ui.main_window import FloatingRecordingWindow, Toast
+from src.ui.main_window import FloatingRecordingWindow, Toast, StatusBubble
 from src.ui.settings_dialog import SettingsDialog
 from src.ui.system_tray import TrayIcon, HotkeyManager
 
@@ -101,6 +101,9 @@ class Application:
         # Settings dialog (lazy)
         self._settings_dialog = None
 
+        # Status bubble (persistent bubble during recording/processing)
+        self._status_bubble = StatusBubble()
+
         if self.config.window.show_on_start:
             self._show_window()
 
@@ -136,6 +139,9 @@ class Application:
         self.tray.set_recording(True)
         logger.info("Recording started, saved hwnd=%s", self._saved_hwnd)
 
+        # Show persistent status bubble
+        self._status_bubble.show_status("录制中...")
+
     def _on_recording_stopped(self):
         """User stopped recording — process audio and output text."""
         self.audio_recorder.stop()
@@ -144,11 +150,15 @@ class Application:
         if self._cancelled:
             self._cancelled = False
             self.audio_recorder.cleanup()
+            self._status_bubble.dismiss()
             self.window.set_done()
             logger.info("Recording cancelled, skipping processing")
             return
 
         self.window.set_processing()
+
+        # Update bubble text to show processing status
+        self._status_bubble.show_status("润色中...")
 
         # Show the window WITHOUT stealing focus from the target window.
         # SW_SHOWNA = show without activating. This keeps the original
@@ -164,6 +174,7 @@ class Application:
             self.window.set_error("No audio recorded")
             self.tray.show_message("Error", "No audio was recorded")
             self.window.show()
+            self._status_bubble.dismiss()
             return
 
         self._start_processing(audio_path)
@@ -188,6 +199,9 @@ class Application:
         """Processing complete — output text to cursor."""
         logger.info("Processing done, refined text: %s", refined_text[:50])
 
+        # Dismiss the status bubble
+        self._status_bubble.dismiss()
+
         if self.config.output.auto_paste:
             self.typer.output_text(refined_text, self._saved_hwnd)
         else:
@@ -199,6 +213,7 @@ class Application:
 
     def _on_processing_error(self, error_msg: str):
         """Processing failed."""
+        self._status_bubble.dismiss()
         self.window.set_error(error_msg)
         self.tray.show_message("Voice Type", f"Error: {error_msg}")
         self.audio_recorder.cleanup()
