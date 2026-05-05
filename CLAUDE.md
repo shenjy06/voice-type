@@ -12,7 +12,7 @@ Voice Type is a Windows voice-to-text dictation tool with AI refinement. Workflo
 
 ```bash
 pip install -r requirements.txt
-python -m voice_type
+python -m src
 ```
 
 Or install as a package:
@@ -26,7 +26,7 @@ Config file lives at `%USERPROFILE%\.voice-type\config.json`, created automatica
 
 ## Architecture
 
-The app follows a pipeline architecture with a central `Application` orchestrator in `voice_type/__main__.py`:
+The app follows a pipeline architecture with a central `Application` orchestrator in `src/__main__.py`:
 
 ```
 [Hotkey/UI] → [AudioRecorder] → [WAV file] → [Transcriber] → [TextPolisher] → [TextTyper] → Cursor
@@ -36,25 +36,25 @@ The app follows a pipeline architecture with a central `Application` orchestrato
 
 | Module | Responsibility |
 |--------|---------------|
-| `voice_type/__main__.py` | `Application` class — wires all components together, manages Qt event loop, background processing thread, hotkey lifecycle |
-| `voice_type/api_client.py` | `ApiClient` — wraps OpenAI client creation with common defaults |
-| `voice_type/config.py` | Dataclass-based config with JSON persistence (`AppConfig`, `AsrConfig`, `PolishApiConfig`, `RecordingConfig`, `OutputConfig`, `WindowConfig`) |
-| `voice_type/audio.py` | `AudioRecorder` — sounddevice-based async recording, saves to temp OGG via soundfile |
-| `voice_type/asr.py` | `Transcriber` — OpenAI SDK `audio.transcriptions.create()` for STT |
-| `voice_type/polisher.py` | `TextPolisher` — OpenAI SDK `chat.completions.create()` with system prompt for text refinement |
-| `voice_type/typer.py` | `TextTyper` — clipboard copy + ctypes `keybd_event` Ctrl+V to inject text at cursor |
-| `voice_type/window_manager.py` | Windows foreground control — `SetForegroundWindow` strategies, thread attachment, Alt tap |
-| `voice_type/state.py` | `RecorderState` enum for recording workflow states |
-| `voice_type/network.py` | Network connectivity check with multiple probe endpoints |
+| `src/__main__.py` | `Application` class — wires all components together, manages Qt event loop, background processing thread, hotkey lifecycle |
+| `src/api_client.py` | `ApiClient` — wraps OpenAI client creation with common defaults |
+| `src/config.py` | Dataclass-based config with JSON persistence (`AppConfig`, `AsrConfig`, `PolishApiConfig`, `RecordingConfig`, `OutputConfig`, `WindowConfig`) |
+| `src/audio.py` | `AudioRecorder` — sounddevice-based async recording, saves to temp OGG via soundfile |
+| `src/asr.py` | `Transcriber` — OpenAI SDK `audio.transcriptions.create()` for STT |
+| `src/polisher.py` | `TextPolisher` — OpenAI SDK `chat.completions.create()` with system prompt for text refinement |
+| `src/typer.py` | `TextTyper` — clipboard copy + ctypes `keybd_event` Ctrl+V to inject text at cursor |
+| `src/window_manager.py` | Windows foreground control — `SetForegroundWindow` strategies, thread attachment, Alt tap |
+| `src/state.py` | `RecorderState` enum for recording workflow states |
+| `src/network.py` | Network connectivity check with multiple probe endpoints |
 
 ### UI Modules
 
 | Module | Responsibility |
 |--------|---------------|
-| `voice_type/ui/main_window.py` | `FloatingRecordingWindow` — frameless, draggable, always-on-top window with pulsing dot animation and state machine. `Toast` — auto-dismissing notification |
-| `voice_type/ui/system_tray.py` | `TrayIcon` — system tray with context menu. `HotkeyManager` — pynput keyboard listener for global hotkeys |
-| `voice_type/ui/settings_dialog.py` | `SettingsDialog` — tabbed dialog (STT/Polish/Output/Hotkeys) with config load/save |
-| `voice_type/ui/icon_utils.py` | `make_circle_icon()` — shared circular icon creation with centered text |
+| `src/ui/main_window.py` | `FloatingRecordingWindow` — frameless, draggable, always-on-top window with pulsing dot animation and state machine. `Toast` — auto-dismissing notification |
+| `src/ui/system_tray.py` | `TrayIcon` — system tray with context menu. `HotkeyManager` — pynput keyboard listener for global hotkeys |
+| `src/ui/settings_dialog.py` | `SettingsDialog` — tabbed dialog (STT/Polish/Output/Hotkeys) with config load/save |
+| `src/ui/icon_utils.py` | `make_circle_icon()` — shared circular icon creation with centered text |
 
 ### Threading Model
 

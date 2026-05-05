@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 from pathlib import Path
-from voice_type.audio import AudioRecorder
+from src.audio import AudioRecorder
 
 
 class TestAudioRecorderDefaults:
@@ -28,7 +28,7 @@ class TestAudioRecorderStartStop:
     def test_start_creates_stream(self, mocker):
         """start() creates and starts an InputStream."""
         mock_stream = mocker.MagicMock()
-        mock_sd = mocker.patch("voice_type.audio.sd")
+        mock_sd = mocker.patch("src.audio.sd")
         mock_sd.InputStream.return_value = mock_stream
 
         recorder = AudioRecorder()
@@ -44,7 +44,7 @@ class TestAudioRecorderStartStop:
     def test_start_when_already_recording_is_noop(self, mocker):
         """start() while recording does nothing."""
         mock_stream = mocker.MagicMock()
-        mocker.patch("voice_type.audio.sd", InputStream=mocker.MagicMock(return_value=mock_stream))
+        mocker.patch("src.audio.sd", InputStream=mocker.MagicMock(return_value=mock_stream))
 
         recorder = AudioRecorder()
         recorder.start()
@@ -55,7 +55,7 @@ class TestAudioRecorderStartStop:
     def test_stop_stops_and_closes_stream(self, mocker):
         """stop() stops and closes the stream."""
         mock_stream = mocker.MagicMock()
-        mocker.patch("voice_type.audio.sd", InputStream=mocker.MagicMock(return_value=mock_stream))
+        mocker.patch("src.audio.sd", InputStream=mocker.MagicMock(return_value=mock_stream))
 
         recorder = AudioRecorder()
         recorder.start()
@@ -69,7 +69,7 @@ class TestAudioRecorderStartStop:
     def test_stop_when_not_recording_is_noop(self, mocker):
         """stop() while not recording does nothing."""
         mock_stream = mocker.MagicMock()
-        mocker.patch("voice_type.audio.sd", InputStream=mocker.MagicMock(return_value=mock_stream))
+        mocker.patch("src.audio.sd", InputStream=mocker.MagicMock(return_value=mock_stream))
 
         recorder = AudioRecorder()
         recorder.stop()
@@ -80,8 +80,8 @@ class TestAudioRecorderStartStop:
 class TestAudioRecorderSave:
     def test_save_with_frames_writes_ogg(self, mocker):
         """save() with audio frames writes an OGG file via soundfile."""
-        mock_sf = mocker.patch("voice_type.audio.sf")
-        mocker.patch("voice_type.audio.tempfile", mkdtemp=mocker.MagicMock(return_value="/tmp/voice_test_dir"))
+        mock_sf = mocker.patch("src.audio.sf")
+        mocker.patch("src.audio.tempfile", mkdtemp=mocker.MagicMock(return_value="/tmp/voice_test_dir"))
 
         recorder = AudioRecorder()
         recorder._frames = [np.array([0.1, 0.2, 0.3], dtype=np.float32)]
@@ -102,8 +102,8 @@ class TestAudioRecorderSave:
 
     def test_save_passes_float32_data(self, mocker):
         """save() passes float32 audio data directly to soundfile."""
-        mock_sf = mocker.patch("voice_type.audio.sf")
-        mocker.patch("voice_type.audio.tempfile", mkdtemp=mocker.MagicMock(return_value="/tmp/t_dir"))
+        mock_sf = mocker.patch("src.audio.sf")
+        mocker.patch("src.audio.tempfile", mkdtemp=mocker.MagicMock(return_value="/tmp/t_dir"))
 
         recorder = AudioRecorder()
         recorder._frames = [np.array([-1.0, 0.0, 1.0], dtype=np.float32)]
@@ -117,8 +117,8 @@ class TestAudioRecorderSave:
 
     def test_save_returns_path(self, mocker):
         """save() returns the Path to the saved OGG file."""
-        mocker.patch("voice_type.audio.sf")
-        mocker.patch("voice_type.audio.tempfile", mkdtemp=mocker.MagicMock(return_value="/tmp/test_dir"))
+        mocker.patch("src.audio.sf")
+        mocker.patch("src.audio.tempfile", mkdtemp=mocker.MagicMock(return_value="/tmp/test_dir"))
 
         recorder = AudioRecorder()
         recorder._frames = [np.array([0.1], dtype=np.float32)]
@@ -194,7 +194,7 @@ class TestAudioRecorderCancel:
     def test_cancel_stops_and_deletes(self, mocker):
         """cancel() stops recording and deletes the audio file."""
         mock_stream = mocker.MagicMock()
-        mocker.patch("voice_type.audio.sd", InputStream=mocker.MagicMock(return_value=mock_stream))
+        mocker.patch("src.audio.sd", InputStream=mocker.MagicMock(return_value=mock_stream))
         mock_path = mocker.MagicMock()
         mock_path.exists.return_value = True
 

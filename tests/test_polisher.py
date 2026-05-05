@@ -1,7 +1,7 @@
 """Tests for voice_type.polisher — TextPolisher."""
 
 from unittest.mock import MagicMock, patch
-from voice_type.polisher import TextPolisher, SYSTEM_PROMPT
+from src.polisher import TextPolisher, SYSTEM_PROMPT
 from tests.conftest import make_config
 
 
@@ -9,7 +9,7 @@ def _mock_api_client(mocker, mock_client):
     """Patch ApiClient to return a mock client wrapper."""
     mock_api = MagicMock()
     mock_api.client = mock_client
-    return mocker.patch("voice_type.polisher.ApiClient", return_value=mock_api)
+    return mocker.patch("src.polisher.ApiClient", return_value=mock_api)
 
 
 class TestTextPolisher:
@@ -110,7 +110,7 @@ class TestTextPolisher:
         mock_client.chat.completions.create.return_value = MagicMock()
         mock_api = MagicMock()
         mock_api.client = mock_client
-        mock_api_cls = mocker.patch("voice_type.polisher.ApiClient", return_value=mock_api)
+        mock_api_cls = mocker.patch("src.polisher.ApiClient", return_value=mock_api)
 
         cfg = make_config(polish={"api_key": "sk", "base_url": "https://api"})
         TextPolisher(cfg)

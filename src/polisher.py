@@ -1,8 +1,8 @@
 """Text polishing via LLM API."""
 
 import logging
-from voice_type.api_client import ApiClient
-from voice_type.config import AppConfig
+from src.api_client import ApiClient
+from src.config import AppConfig
 
 logger = logging.getLogger(__name__)
 

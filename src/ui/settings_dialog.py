@@ -7,10 +7,10 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QIcon
-from voice_type.config import AppConfig
-from voice_type.network import check_network_available
-from voice_type.ui.main_window import Toast
-from voice_type.ui.icon_utils import make_circle_icon
+from src.config import AppConfig
+from src.network import check_network_available
+from src.ui.main_window import Toast
+from src.ui.icon_utils import make_circle_icon
 
 _SETTINGS_ICON = None
 

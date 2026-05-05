@@ -7,15 +7,15 @@ from ctypes import windll
 import pyperclip
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QThread, Signal, QObject
-from voice_type.config import AppConfig
-from voice_type.audio import AudioRecorder
-from voice_type.asr import Transcriber
-from voice_type.polisher import TextPolisher
-from voice_type.typer import TextTyper
-from voice_type.window_manager import get_foreground_window
-from voice_type.ui.main_window import FloatingRecordingWindow, Toast
-from voice_type.ui.settings_dialog import SettingsDialog
-from voice_type.ui.system_tray import TrayIcon, HotkeyManager
+from src.config import AppConfig
+from src.audio import AudioRecorder
+from src.asr import Transcriber
+from src.polisher import TextPolisher
+from src.typer import TextTyper
+from src.window_manager import get_foreground_window
+from src.ui.main_window import FloatingRecordingWindow, Toast
+from src.ui.settings_dialog import SettingsDialog
+from src.ui.system_tray import TrayIcon, HotkeyManager
 
 logging.basicConfig(
     level=logging.INFO,

@@ -53,7 +53,7 @@ pip install -r requirements.txt
 ## Running
 
 ```bash
-python -m voice_type
+python -m src
 ```
 
 ## Packaging as EXE
@@ -69,7 +69,7 @@ Or use the command line:
 ```bash
 pyinstaller --clean --name="VoiceType" --windowed --noconfirm --onefile \
     --collect-all PySide6 \
-    voice_type/__main__.py
+    src/__main__.py
 ```
 
 The generated `dist/VoiceType.exe` is a standalone executable — no Python environment required.
@@ -174,7 +174,7 @@ Any API that supports the OpenAI-compatible protocol can be used (DashScope, Vol
 
 ```
 voice-type/
-├── voice_type/
+├── src/
 │   ├── __main__.py              # Entry point: Application orchestrator
 │   ├── api_client.py            # Base OpenAI-compatible API client wrapper
 │   ├── config.py                # Config management: dataclass + JSON persistence

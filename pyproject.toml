@@ -19,10 +19,10 @@ dependencies = [
 ]
 
 [project.scripts]
-voice-type = "voice_type.__main__:main"
+voice-type = "src.__main__:main"
 
 [tool.setuptools.packages.find]
-include = ["voice_type*"]
+include = ["src*"]
 
 [project.optional-dependencies]
 dev = [

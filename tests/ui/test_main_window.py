@@ -2,8 +2,8 @@
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QCloseEvent
-from voice_type.ui.main_window import FloatingRecordingWindow, PulsingDot, Toast
-from voice_type.state import RecorderState
+from src.ui.main_window import FloatingRecordingWindow, PulsingDot, Toast
+from src.state import RecorderState
 
 
 class TestPulsingDot:

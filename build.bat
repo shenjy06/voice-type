@@ -48,7 +48,7 @@ pyinstaller --clean --name="VoiceType" ^
     --noconfirm ^
     --onefile ^
     --collect-all PySide6 ^
-    voice_type/__main__.py
+    src/__main__.py
 
 if errorlevel 1 (
     echo.

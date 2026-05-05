@@ -5,8 +5,8 @@ import time
 import ctypes
 
 import pyperclip
-from voice_type.config import AppConfig
-from voice_type.window_manager import set_foreground_window
+from src.config import AppConfig
+from src.window_manager import set_foreground_window
 
 logger = logging.getLogger(__name__)
 

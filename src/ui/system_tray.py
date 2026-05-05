@@ -5,7 +5,7 @@ from PySide6.QtWidgets import QSystemTrayIcon, QMenu
 from PySide6.QtCore import Qt, Signal, QObject
 from PySide6.QtGui import QIcon, QFont, QAction
 from pynput import keyboard
-from voice_type.ui.icon_utils import make_circle_icon
+from src.ui.icon_utils import make_circle_icon
 
 logger = logging.getLogger(__name__)
 

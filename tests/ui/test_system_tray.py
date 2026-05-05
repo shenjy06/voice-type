@@ -2,7 +2,7 @@
 
 from PySide6.QtWidgets import QSystemTrayIcon
 from pynput import keyboard
-from voice_type.ui.system_tray import TrayIcon, HotkeyManager
+from src.ui.system_tray import TrayIcon, HotkeyManager
 
 
 class TestTrayIcon:
@@ -85,14 +85,14 @@ class TestTrayIcon:
 
 class TestHotkeyManager:
     def test_start_creates_listener(self, qtbot, mocker):
-        mock_listener_cls = mocker.patch("voice_type.ui.system_tray.keyboard.Listener")
+        mock_listener_cls = mocker.patch("src.ui.system_tray.keyboard.Listener")
         mgr = HotkeyManager()
         mgr.start()
         mock_listener_cls.assert_called_once()
         mock_listener_cls.return_value.start.assert_called_once()
 
     def test_stop_stops_listener(self, qtbot, mocker):
-        mock_listener_cls = mocker.patch("voice_type.ui.system_tray.keyboard.Listener")
+        mock_listener_cls = mocker.patch("src.ui.system_tray.keyboard.Listener")
         mock_listener = mock_listener_cls.return_value
         mgr = HotkeyManager()
         mgr.start()
@@ -106,7 +106,7 @@ class TestHotkeyManager:
         mgr.stop()  # should be safe
 
     def test_start_idempotent(self, qtbot, mocker):
-        mock_listener_cls = mocker.patch("voice_type.ui.system_tray.keyboard.Listener")
+        mock_listener_cls = mocker.patch("src.ui.system_tray.keyboard.Listener")
         mgr = HotkeyManager()
         mgr.start()
         mgr.start()

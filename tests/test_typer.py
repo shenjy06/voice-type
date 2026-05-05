@@ -1,8 +1,8 @@
 """Tests for voice_type.typer — TextTyper."""
 
 import pyperclip
-from voice_type.typer import TextTyper, user32
-from voice_type.window_manager import (
+from src.typer import TextTyper, user32
+from src.window_manager import (
     _tap_alt,
     _attach_thread_input,
     _detach_thread_input,
@@ -16,7 +16,7 @@ class TestTapAlt:
     def test_tap_alt_sends_two_inputs(self, mocker):
         """_tap_alt() calls SendInput."""
         # Don't mock KeyboardInput — it needs to be a real ctypes Structure for sizeof()
-        mock_send = mocker.patch("voice_type.window_manager.user32.SendInput")
+        mock_send = mocker.patch("src.window_manager.user32.SendInput")
 
         _tap_alt()
 
@@ -26,7 +26,7 @@ class TestTapAlt:
 class TestAttachThreadInput:
     def test_attach_when_same_thread_noop(self, mocker):
         """No AttachThreadInput call when threads are the same."""
-        mock_user32 = mocker.patch("voice_type.window_manager.user32")
+        mock_user32 = mocker.patch("src.window_manager.user32")
         mock_user32.GetCurrentThreadId.return_value = 100
         mock_user32.GetWindowThreadProcessId.return_value = 100
 
@@ -36,7 +36,7 @@ class TestAttachThreadInput:
 
     def test_attach_when_different_thread(self, mocker):
         """AttachThreadInput(True) called when threads differ."""
-        mock_user32 = mocker.patch("voice_type.window_manager.user32")
+        mock_user32 = mocker.patch("src.window_manager.user32")
         mock_user32.GetCurrentThreadId.return_value = 100
         mock_user32.GetWindowThreadProcessId.return_value = 200
 
@@ -48,7 +48,7 @@ class TestAttachThreadInput:
 class TestDetachThreadInput:
     def test_detach_when_different_thread(self, mocker):
         """AttachThreadInput(False) called to detach."""
-        mock_user32 = mocker.patch("voice_type.window_manager.user32")
+        mock_user32 = mocker.patch("src.window_manager.user32")
         mock_user32.GetCurrentThreadId.return_value = 100
         mock_user32.GetWindowThreadProcessId.return_value = 200
 
@@ -58,7 +58,7 @@ class TestDetachThreadInput:
 
     def test_detach_when_same_thread_noop(self, mocker):
         """No call when threads are the same."""
-        mock_user32 = mocker.patch("voice_type.window_manager.user32")
+        mock_user32 = mocker.patch("src.window_manager.user32")
         mock_user32.GetCurrentThreadId.return_value = 100
         mock_user32.GetWindowThreadProcessId.return_value = 100
 
@@ -70,7 +70,7 @@ class TestDetachThreadInput:
 class TestGetForegroundWindow:
     def test_returns_hwnd(self, mocker):
         """get_foreground_window() returns user32.GetForegroundWindow()."""
-        mock_user32 = mocker.patch("voice_type.window_manager.user32")
+        mock_user32 = mocker.patch("src.window_manager.user32")
         mock_user32.GetForegroundWindow.return_value = 12345
 
         result = get_foreground_window()
@@ -90,38 +90,38 @@ class TestSetForegroundWindow:
 
     def test_returns_false_when_window_not_exists(self, mocker):
         """IsWindow False -> returns False."""
-        mock_user32 = mocker.patch("voice_type.window_manager.user32")
+        mock_user32 = mocker.patch("src.window_manager.user32")
         mock_user32.IsWindow.return_value = False
 
         assert set_foreground_window(123) is False
 
     def test_strategy1_success(self, mocker):
         """Strategy 1 succeeds -> returns True."""
-        mock_user32 = mocker.patch("voice_type.window_manager.user32")
+        mock_user32 = mocker.patch("src.window_manager.user32")
         mock_user32.IsWindow.return_value = True
         mock_user32.GetCurrentThreadId.return_value = 100
         mock_user32.GetWindowThreadProcessId.return_value = 200
         mock_user32.SetForegroundWindow.return_value = True
-        mocker.patch("voice_type.window_manager.time.sleep")
+        mocker.patch("src.window_manager.time.sleep")
 
         assert set_foreground_window(123) is True
 
     def test_strategy2_fallback_success(self, mocker):
         """Strategy 1 fails, Strategy 2 succeeds -> returns True."""
-        mock_user32 = mocker.patch("voice_type.window_manager.user32")
+        mock_user32 = mocker.patch("src.window_manager.user32")
         mock_user32.IsWindow.return_value = True
         mock_user32.SetForegroundWindow.side_effect = [False, True]  # S1 fails, S2 succeeds
-        mocker.patch("voice_type.window_manager.time.sleep")
+        mocker.patch("src.window_manager.time.sleep")
 
         assert set_foreground_window(123) is True
 
     def test_strategy3_fallback(self, mocker):
         """All strategies fail -> returns False."""
-        mock_user32 = mocker.patch("voice_type.window_manager.user32")
+        mock_user32 = mocker.patch("src.window_manager.user32")
         mock_user32.IsWindow.return_value = True
         mock_user32.SetForegroundWindow.return_value = False
         mock_user32.ShowWindow.return_value = 1
-        mocker.patch("voice_type.window_manager.time.sleep")
+        mocker.patch("src.window_manager.time.sleep")
 
         result = set_foreground_window(123)
         assert result is False
@@ -132,7 +132,7 @@ class TestTextTyperOutputText:
         """Empty string returns False."""
         cfg = make_config()
         typer = TextTyper(cfg)
-        mocker.patch("voice_type.typer.time.sleep")
+        mocker.patch("src.typer.time.sleep")
 
         assert typer.output_text("") is False
 
@@ -140,8 +140,8 @@ class TestTextTyperOutputText:
         """Non-zero saved_hwnd triggers set_foreground_window."""
         cfg = make_config()
         typer = TextTyper(cfg)
-        mocker.patch("voice_type.typer.time.sleep")
-        mock_sfw = mocker.patch("voice_type.typer.set_foreground_window", return_value=True)
+        mocker.patch("src.typer.time.sleep")
+        mock_sfw = mocker.patch("src.typer.set_foreground_window", return_value=True)
         mocker.patch.object(typer, "_send_paste", return_value=True)
         mocker.patch("pyperclip.paste", return_value="")
         mocker.patch("pyperclip.copy")
@@ -154,8 +154,8 @@ class TestTextTyperOutputText:
         """Successful paste returns True."""
         cfg = make_config()
         typer = TextTyper(cfg)
-        mocker.patch("voice_type.typer.time.sleep")
-        mocker.patch("voice_type.typer.set_foreground_window", return_value=True)
+        mocker.patch("src.typer.time.sleep")
+        mocker.patch("src.typer.set_foreground_window", return_value=True)
         mocker.patch.object(typer, "_send_paste", return_value=True)
         mocker.patch("pyperclip.paste", return_value="original")
         mock_copy = mocker.patch("pyperclip.copy")
@@ -169,8 +169,8 @@ class TestTextTyperOutputText:
         """Failed paste restores original clipboard content."""
         cfg = make_config()
         typer = TextTyper(cfg)
-        mocker.patch("voice_type.typer.time.sleep")
-        mocker.patch("voice_type.typer.set_foreground_window", return_value=True)
+        mocker.patch("src.typer.time.sleep")
+        mocker.patch("src.typer.set_foreground_window", return_value=True)
         mocker.patch.object(typer, "_send_paste", return_value=False)
         mocker.patch("pyperclip.paste", return_value="original clipboard")
         mock_copy = mocker.patch("pyperclip.copy")
@@ -184,8 +184,8 @@ class TestTextTyperOutputText:
         """If pyperclip.paste() raises, uses empty string as original."""
         cfg = make_config()
         typer = TextTyper(cfg)
-        mocker.patch("voice_type.typer.time.sleep")
-        mocker.patch("voice_type.typer.set_foreground_window", return_value=True)
+        mocker.patch("src.typer.time.sleep")
+        mocker.patch("src.typer.set_foreground_window", return_value=True)
         mocker.patch.object(typer, "_send_paste", return_value=False)
         mocker.patch("pyperclip.paste", side_effect=Exception("clipboard error"))
         mock_copy = mocker.patch("pyperclip.copy")
@@ -196,8 +196,8 @@ class TestTextTyperOutputText:
 
     def test_paste_delay_respected(self, mocker):
         """sleep is called with paste_delay_ms / 1000."""
-        mock_sleep = mocker.patch("voice_type.typer.time.sleep")
-        mocker.patch("voice_type.typer.set_foreground_window", return_value=True)
+        mock_sleep = mocker.patch("src.typer.time.sleep")
+        mocker.patch("src.typer.set_foreground_window", return_value=True)
         mocker.patch.object(TextTyper, "_send_paste", return_value=True)
         mocker.patch("pyperclip.paste", return_value="")
         mocker.patch("pyperclip.copy")
@@ -212,8 +212,8 @@ class TestTextTyperOutputText:
 class TestTextTyperSendPaste:
     def test_send_paste_success(self, mocker):
         """_send_paste() returns True on success."""
-        mock_user32 = mocker.patch("voice_type.typer.user32")
-        mocker.patch("voice_type.typer.time.sleep")
+        mock_user32 = mocker.patch("src.typer.user32")
+        mocker.patch("src.typer.time.sleep")
 
         cfg = make_config()
         typer = TextTyper(cfg)
@@ -224,7 +224,7 @@ class TestTextTyperSendPaste:
 
     def test_send_paste_exception_returns_false(self, mocker):
         """_send_paste() returns False on exception."""
-        mock_user32 = mocker.patch("voice_type.typer.user32")
+        mock_user32 = mocker.patch("src.typer.user32")
         mock_user32.keybd_event.side_effect = Exception("access denied")
 
         cfg = make_config()

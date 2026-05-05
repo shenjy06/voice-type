@@ -1,8 +1,8 @@
 """Tests for voice_type.ui.settings_dialog — SettingsDialog."""
 
 from PySide6.QtWidgets import QDialogButtonBox, QDialog
-from voice_type.config import AppConfig, AsrConfig, PolishApiConfig, RecordingConfig, HotkeyConfig
-from voice_type.ui.settings_dialog import SettingsDialog
+from src.config import AppConfig, AsrConfig, PolishApiConfig, RecordingConfig, HotkeyConfig
+from src.ui.settings_dialog import SettingsDialog
 
 
 class TestSettingsDialogCreation:
@@ -64,7 +64,7 @@ class TestSettingsDialogHotkeyToggle:
         assert dlg.hotkey_toggle_check.isChecked() is False
 
     def test_hotkey_toggle_saves_to_config(self, qtbot, mocker):
-        mocker.patch("voice_type.ui.settings_dialog.check_network_available", return_value=True)
+        mocker.patch("src.ui.settings_dialog.check_network_available", return_value=True)
         cfg = AppConfig(asr=AsrConfig(api_key="sk-test"))
         dlg = SettingsDialog(cfg)
         qtbot.addWidget(dlg)
@@ -76,8 +76,8 @@ class TestSettingsDialogHotkeyToggle:
 class TestSettingsDialogSave:
     def test_save_and_close_with_network_available(self, qtbot, mocker):
         """When network is available, config is saved and dialog accepted."""
-        mocker.patch("voice_type.ui.settings_dialog.check_network_available", return_value=True)
-        mock_toast = mocker.patch("voice_type.ui.settings_dialog.Toast")
+        mocker.patch("src.ui.settings_dialog.check_network_available", return_value=True)
+        mock_toast = mocker.patch("src.ui.settings_dialog.Toast")
 
         cfg = AppConfig(asr=AsrConfig(api_key="sk-test"))
         dlg = SettingsDialog(cfg)
@@ -90,8 +90,8 @@ class TestSettingsDialogSave:
 
     def test_save_and_close_with_network_unavailable(self, qtbot, mocker):
         """When network is unavailable, toast is shown and config is NOT saved."""
-        mocker.patch("voice_type.ui.settings_dialog.check_network_available", return_value=False)
-        mock_toast = mocker.patch("voice_type.ui.settings_dialog.Toast")
+        mocker.patch("src.ui.settings_dialog.check_network_available", return_value=False)
+        mock_toast = mocker.patch("src.ui.settings_dialog.Toast")
 
         cfg = AppConfig()
         dlg = SettingsDialog(cfg)
@@ -110,7 +110,7 @@ class TestSettingsDialogSave:
 
     def test_save_and_close_empty_base_url_defaults(self, qtbot, mocker):
         """Empty base_url defaults to https://api.openai.com/v1."""
-        mocker.patch("voice_type.ui.settings_dialog.check_network_available", return_value=True)
+        mocker.patch("src.ui.settings_dialog.check_network_available", return_value=True)
 
         cfg = AppConfig(asr=AsrConfig(api_key="sk-test"))
         cfg.asr.base_url = "https://old.url"
@@ -129,7 +129,7 @@ class TestSettingsDialogSave:
 
     def test_save_strips_whitespace_from_api_key(self, qtbot, mocker):
         """API key inputs are stripped."""
-        mocker.patch("voice_type.ui.settings_dialog.check_network_available", return_value=True)
+        mocker.patch("src.ui.settings_dialog.check_network_available", return_value=True)
 
         cfg = AppConfig()
         dlg = SettingsDialog(cfg)
@@ -145,7 +145,7 @@ class TestSettingsDialogSave:
 
     def test_save_and_close_accepts_dialog(self, qtbot, mocker):
         """_save_and_close calls accept() to close the dialog."""
-        mocker.patch("voice_type.ui.settings_dialog.check_network_available", return_value=True)
+        mocker.patch("src.ui.settings_dialog.check_network_available", return_value=True)
 
         cfg = AppConfig(asr=AsrConfig(api_key="sk-test"))
         dlg = SettingsDialog(cfg)
