@@ -1,8 +1,8 @@
 # Voice Type 打包指南
 
-将程序打包为 Windows 安装程序，分两个阶段：**PyInstaller 打包** + **Inno Setup 制作安装包**。
+将程序打包为 Windows 独立 .exe。
 
-## 第一阶段：PyInstaller 打包成独立 .exe
+## 打包
 
 ### 安装
 
@@ -13,44 +13,35 @@ pip install pyinstaller
 ### 打包命令
 
 ```bash
-pyinstaller voice_type/__main__.py \
-  --name "VoiceType" \
-  --onedir \
-  --windowed \
-  --hidden-import sounddevice \
-  --hidden-import scipy
+pyinstaller VoiceType.spec
 ```
 
-### 参数说明
+产物：`dist/VoiceType.exe`（约 65 MB 单文件）
 
-| 参数 | 作用 |
-|------|------|
-| `--name` | 输出目录/文件名 |
-| `--onedir` | 输出一个文件夹（包含 .exe 和依赖 dll），适合制作安装包 |
-| `--windowed` | 隐藏命令行控制台窗口（GUI 应用不需要） |
-| `--hidden-import` | PyInstaller 可能漏掉动态导入的包，需手动指定 |
+## 体积优化
 
-### 注意事项
+`VoiceType.spec` 已包含以下优化：
 
-- PySide6 的 Qt 插件（`platforms/qwindows.dll` 等）通常会自动收集。如果打包后启动闪退，检查 `dist/VoiceType/PySide6/plugins/platforms/` 是否存在 `qwindows.dll`
-- 打包完成后产物在 `dist/VoiceType/` 目录
+| 优化项 | 说明 |
+|--------|------|
+| **精选 Qt 模块** | 仅收集 QtCore/QtGui/QtWidgets，不使用 collect_all |
+| **排除 40+ 个 Qt 模块** | WebEngine/3D/Multimedia/Qml/Quick/Sql/Network 等显式 exclude |
+| **optimize=1** | 移除 docstrings（-O 编译） |
+| **UPX 压缩** | 对二进制文件加壳压缩 |
 
-### 快速出包（单文件）
+实际体积约 **65 MB**（从 collect_all 方案的 259 MB 降至 65 MB）。
 
-如果只需要一个独立 .exe，不需要安装包：
+## 快速出包（单文件）
+
+如果不需要优化体积，可直接用命令行：
 
 ```bash
-pyinstaller voice_type/__main__.py \
-  --name "VoiceType" \
-  --onefile \
-  --windowed \
-  --hidden-import sounddevice \
-  --hidden-import scipy
+pyinstaller voice_type/__main__.py --name "VoiceType" --onefile --windowed
 ```
 
-产物：`dist/VoiceType.exe`（体积较大，启动稍慢）
+产物：`dist/VoiceType.exe`
 
-### 替代方案：auto-py-to-exe
+## 替代方案：auto-py-to-exe
 
 ```bash
 pip install auto-py-to-exe
@@ -59,15 +50,12 @@ auto-py-to-exe
 
 提供 GUI 界面，填好入口脚本和参数，一键生成 .exe。适合快速出包。
 
-## 第二阶段：Inno Setup 制作安装程序
+## 制作安装程序（可选）
 
-### 安装
+如需制作安装包，可使用 Inno Setup：
 
-下载 [Inno Setup](https://jrsoftware.org/isdl.php) 并安装。
-
-### 创建打包脚本
-
-在项目根目录创建 `installer.iss`：
+1. 下载 [Inno Setup](https://jrsoftware.org/isdl.php) 并安装
+2. 在项目根目录创建 `installer.iss`：
 
 ```iss
 [Setup]
@@ -79,23 +67,11 @@ OutputBaseFilename=VoiceType-Setup
 OutputDir=installer-output
 
 [Files]
-Source: "dist\VoiceType\*"; DestDir: "{app}"; Flags: recursesubdirs
+Source: "dist\VoiceType.exe"; DestDir: "{app}"
 
 [Icons]
-Name: "{group}\Voice Type"; Filename: "{app}\__main__.exe"
-Name: "{commondesktop}\Voice Type"; Filename: "{app}\__main__.exe"
+Name: "{commondesktop}\Voice Type"; Filename: "{app}\VoiceType.exe"
 ```
 
-### 编译安装包
-
-1. 用 Inno Setup 打开 `installer.iss`
-2. 点击 **Build → Compile**
-3. 生成的安装程序位于 `installer-output/VoiceType-Setup.exe`
-
-## 方案对比
-
-| 场景 | 方案 |
-|------|------|
-| 快速出包自己用 | PyInstaller `--onefile --windowed`，直接给 .exe |
-| 正式分发 / 安装包 | PyInstaller `--onedir` + Inno Setup |
-| 持续集成打包 | PyInstaller + GitHub Actions (windows-latest runner) |
+3. 用 Inno Setup 打开 `installer.iss` → Build → Compile
+4. 生成的安装程序位于 `installer-output/VoiceType-Setup.exe`
