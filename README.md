@@ -11,7 +11,8 @@ Licensed under [GPL-3.0](LICENSE).
 - **Smart Refinement**: LLM automatically removes filler words, fixes grammar, and improves clarity
 - **Text Injection**: Restores the original foreground window and pastes the refined text at the cursor position
 - **Floating Control Window**: Always-on-top mini window with drag support and pulsing red dot animation
-- **System Tray**: Tray icon provides recording toggle, settings, and quit functions
+- **Status Bubble**: Shows "录制中..." during recording, "润色中..." during processing, dismisses after paste
+- **System Tray**: Click X to minimize to tray; tray menu provides recording toggle, settings, and quit
 - **Global Hotkeys**: Uses `pynput` keyboard listener for global hotkey detection — responsive in any application
 - **Network Detection**: Automatically checks network availability on settings save to prevent invalid configurations
 - **Startup Check**: Automatically detects API configuration on first launch and shows setup wizard if unconfigured
@@ -165,10 +166,11 @@ Any API that supports the OpenAI-compatible protocol can be used (DashScope, Vol
 1. Launch the app — the setup wizard appears automatically on first run if no API key is configured
 2. Configure your API Key and models in Settings
 3. Place your cursor at the desired input position
-4. Press `Left Alt` (tap once) to start recording (the pulsing red dot lights up)
+4. Press `Left Alt` (tap once) to start recording (status bubble shows "录制中...")
 5. When finished speaking, press `Left Alt` (tap again) to stop recording
-6. Wait for processing — the refined text will automatically appear at the cursor position
+6. Wait for processing — status bubble shows "润色中...", then refined text automatically appears at the cursor position
 7. To discard the current recording, press `Alt + C` to cancel (audio will be discarded)
+8. Click window X button to minimize to tray; use tray menu "Quit" to fully exit
 
 ## Project Structure
 
@@ -186,7 +188,7 @@ voice-type/
 │   ├── network.py               # Network detection: HTTP connectivity check
 │   ├── state.py                 # Application state enum (RecorderState)
 │   └── ui/
-│       ├── main_window.py       # Floating recording window + pulsing dot + Toast
+│       ├── main_window.py       # Floating recording window + pulsing dot + StatusBubble + Toast
 │       ├── settings_dialog.py   # Settings dialog (STT/Polish/Output/Hotkeys)
 │       ├── system_tray.py       # System tray icon + pynput hotkey manager
 │       └── icon_utils.py        # Shared icon creation (circle + centered text)

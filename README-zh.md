@@ -11,8 +11,9 @@ Windows 语音转文字速记工具。录制语音 → 语音识别 → 文本�
 - **智能润色**: LLM 自动去除语气词、修正语法、提升表达清晰度
 - **文本注入**: 恢复原始焦点窗口，将润色后的文本粘贴到光标位置
 - **浮动控制窗口**: 始终置顶的迷你窗口，支持拖拽移动，带脉冲红点动画
-- **系统托盘**: 托盘图标提供录制切换、设置、退出等功能
-- **全局热键**: 使用 Windows 原生热键 API，在任何应用中均可响应
+- **状态气泡**: 录制时显示"录制中..."，润色时显示"润色中..."，完成后自动消失
+- **系统托盘**: 点击 X 最小化到托盘，托盘菜单提供录制切换、设置、退出功能
+- **全局热键**: 使用 pynput 监听键盘，在任何应用中均可响应
 - **网络检测**: 保存设置时自动检测网络可用性，避免无效配置
 - **启动检查**: 首次启动时自动检测 API 配置，未配置时弹出设置引导
 
@@ -25,7 +26,7 @@ Windows 语音转文字速记工具。录制语音 → 语音识别 → 文本�
 | 音频编码 | soundfile (OGG/Vorbis) |
 | 语音识别 | OpenAI 兼容协议 (ASR API) |
 | 文本润色 | OpenAI 兼容协议 (Chat Completions API) |
-| 全局热键 | Windows RegisterHotKey (ctypes) |
+| 全局热键 | pynput 键盘监听 |
 | 文本注入 | pyperclip (剪贴板) + ctypes (窗口管理) |
 
 ## 安装
@@ -52,7 +53,7 @@ pip install -r requirements.txt
 ## 运行
 
 ```bash
-python -m voice_type
+python -m src
 ```
 
 ## 打包为 EXE
@@ -68,7 +69,7 @@ build.bat
 ```bash
 pyinstaller --clean --name="VoiceType" --windowed --noconfirm --onefile \
     --collect-all PySide6 \
-    voice_type/__main__.py
+    src/__main__.py
 ```
 
 生成的 `dist/VoiceType.exe` 为独立可执行文件，无需安装 Python 环境。
@@ -97,15 +98,12 @@ pyinstaller --clean --name="VoiceType" --windowed --noconfirm --onefile \
 
 ### 热键配置
 
-在设置中可以分别配置开始录制、停止录制和取消录制的热键：
-
 | 热键 | 默认 | 说明 |
 |------|------|------|
-| 开始录制 | `Alt + S` | 开始录制语音 |
-| 停止录制 | `Alt + E` | 停止录制并进入识别/润色流程 |
+| 切换录制 | `Left Alt`（单击） | 第一次点击开始录制，第二次点击停止录制 |
 | 取消录制 | `Alt + C` | 停止录制并丢弃音频，不进行后续处理 |
 
-支持 `alt`、`ctrl`、`shift`、`super`、`none` 修饰键，最多两个修饰键组合。
+Left Alt 热键区分单击（切换录制）和组合键（如 `Alt+Tab` 不触发录制）。
 
 ### 输出配置
 
@@ -167,16 +165,17 @@ Voice Type 使用 OpenAI 兼容协议的 API，支持多种服务商。以下是
 1. 启动程序，首次运行时会自动弹出设置引导页面
 2. 在设置中配置好 API Key 和模型
 3. 将光标放在需要输入的位置
-4. 按 `Alt + S` 开始录制（窗口保持显示，脉冲红点亮起）
-5. 说话完毕后，按 `Alt + E` 停止录制
-6. 等待处理完成，润色后的文本将自动出现在光标位置
+4. 按 `Left Alt`（单击一次）开始录制（状态气泡显示"录制中..."）
+5. 说话完毕后，按 `Left Alt`（单击一次）停止录制
+6. 等待处理完成（状态气泡显示"润色中..."），润色后的文本将自动出现在光标位置
 7. 如需放弃本次录制，按 `Alt + C` 取消（音频将被丢弃）
+8. 点击窗口 X 按钮最小化到托盘，通过托盘菜单 "Quit" 完全退出
 
 ## 项目结构
 
 ```
 voice-type/
-├── voice_type/
+├── src/
 │   ├── __main__.py              # 入口：Application 类，连接所有组件
 │   ├── config.py                # 配置管理：dataclass + JSON 序列化/持久化
 │   ├── audio.py                 # 音频录制：sounddevice 异步录制 + soundfile 编码为 OGG
@@ -184,11 +183,13 @@ voice-type/
 │   ├── polisher.py              # 文本润色：LLM API + 系统提示词
 │   ├── typer.py                 # 文本注入：窗口管理 + 剪贴板
 │   ├── network.py               # 网络检测：HTTP 连通性检查
+│   ├── state.py                 # 应用状态枚举 (RecorderState)
 │   └── ui/
-│       ├── main_window.py       # 浮动录制窗口 + 脉冲红点动画 + Toast 通知
+│       ├── main_window.py       # 浮动录制窗口 + 脉冲红点动画 + 状态气泡 + Toast
 │       ├── settings_dialog.py   # 设置对话框（STT/Polish/Output/Hotkeys 四标签页）
-│       └── system_tray.py       # 系统托盘 + 全局热键管理
-├── tests/                       # 单元测试（178 项，覆盖全部模块）
+│       ├── system_tray.py       # 系统托盘 + 全局热键管理
+│       └── icon_utils.py        # 共享图标创建（圆形 + 居中文字）
+├── tests/                       # 单元测试（171 项，覆盖全部模块）
 │   ├── conftest.py
 │   ├── test_audio.py
 │   ├── test_asr.py
@@ -197,6 +198,7 @@ voice-type/
 │   ├── test_network.py
 │   ├── test_polisher.py
 │   ├── test_typer.py
+│   ├── test_window_manager.py
 │   └── ui/
 │       ├── test_main_window.py
 │       ├── test_settings_dialog.py
