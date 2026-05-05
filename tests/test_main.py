@@ -31,8 +31,8 @@ class TestProcessingWorker:
         assert signals["started"] is True
         assert signals["finished_text"] == "Hello, world!"
 
-    def test_empty_transcript_emits_error(self, qtbot, mocker):
-        """Empty transcript emits error signal."""
+    def test_empty_transcript_emits_finished_empty(self, qtbot, mocker):
+        """Empty transcript emits finished with empty string (no error)."""
         from src.__main__ import ProcessingWorker
 
         mock_transcriber = mocker.patch("src.__main__.Transcriber")
@@ -42,16 +42,16 @@ class TestProcessingWorker:
         cfg = mocker.MagicMock()
         worker = ProcessingWorker(cfg, "/tmp/audio.wav")
 
-        error_msg = None
+        finished_text = None
 
-        def on_error(msg):
-            nonlocal error_msg
-            error_msg = msg
+        def on_finished(text):
+            nonlocal finished_text
+            finished_text = text
 
-        worker.error.connect(on_error)
+        worker.finished.connect(on_finished)
         worker.run()
 
-        assert "No speech detected" in error_msg
+        assert finished_text == ""
 
     def test_exception_emits_error(self, qtbot, mocker):
         """Exception in processing emits error signal."""

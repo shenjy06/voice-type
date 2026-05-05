@@ -48,7 +48,7 @@ class ProcessingWorker(QObject):
             except OSError as e:
                 logger.warning("Failed to delete audio: %s", e)
             if not transcript:
-                self.error.emit("No speech detected in recording")
+                self.finished.emit("")
                 return
             polisher = TextPolisher(self.config)
             refined = polisher.polish(transcript)
@@ -197,15 +197,16 @@ class Application:
 
     def _on_processing_done(self, refined_text: str):
         """Processing complete — output text to cursor."""
-        logger.info("Processing done, refined text: %s", refined_text[:50])
+        logger.info("Processing done, refined text: %s", refined_text[:50] if refined_text else "(empty)")
 
         # Dismiss the status bubble
         self._status_bubble.dismiss()
 
-        if self.config.output.auto_paste:
-            self.typer.output_text(refined_text, self._saved_hwnd)
-        else:
-            pyperclip.copy(refined_text)
+        if refined_text:
+            if self.config.output.auto_paste:
+                self.typer.output_text(refined_text, self._saved_hwnd)
+            else:
+                pyperclip.copy(refined_text)
 
         # Cleanup temp audio and reset to idle
         self.audio_recorder.cleanup()
