@@ -47,7 +47,9 @@ pyinstaller --clean --name="VoiceType" ^
     --windowed ^
     --noconfirm ^
     --onefile ^
-    --collect-all PySide6 ^
+    --collect-all PySide6.QtCore ^
+    --collect-all PySide6.QtGui ^
+    --collect-all PySide6.QtWidgets ^
     src/__main__.py
 
 if errorlevel 1 (
