@@ -274,7 +274,6 @@ class Application:
                 self._processing_thread.quit()
                 self._processing_thread.wait(1000)
         except RuntimeError:
-            # Thread already deleted by deleteLater
             pass
         finally:
             self._processing_thread = None
@@ -282,6 +281,8 @@ class Application:
         self.tray.hide()
         self.window.close()
         self.app.quit()
+        # Force exit — Qt tray icon can keep process alive after quit()
+        os._exit(0)
 
     def run(self):
         sys.exit(self.app.exec())

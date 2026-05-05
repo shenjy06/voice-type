@@ -6,9 +6,27 @@ from PySide6.QtWidgets import (
     QDialogButtonBox, QTabWidget, QWidget,
 )
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont
 from voice_type.config import AppConfig
 from voice_type.network import check_network_available
 from voice_type.ui.main_window import Toast
+
+
+def _make_settings_icon():
+    """Create a small gear icon pixmap for the settings dialog."""
+    pixmap = QPixmap(32, 32)
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+    painter.setBrush(QColor(99, 102, 241))  # Indigo
+    painter.setPen(Qt.NoPen)
+    painter.drawEllipse(4, 4, 24, 24)
+    painter.setPen(QColor(255, 255, 255))
+    font = QFont("Segoe UI", 14, QFont.Bold)
+    painter.setFont(font)
+    painter.drawText(pixmap.rect(), Qt.AlignCenter, "⚙")
+    painter.end()
+    return QIcon(pixmap)
 
 
 class SettingsDialog(QDialog):
@@ -30,6 +48,7 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.config = config
         self.setWindowTitle("Settings")
+        self.setWindowIcon(_make_settings_icon())
         self.setModal(True)
         self.setMinimumWidth(480)
         self.setWindowFlags(Qt.Dialog)
