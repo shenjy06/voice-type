@@ -92,7 +92,7 @@ class TestSettingsDialogSave:
         mocker.patch("voice_type.ui.settings_dialog.check_network_available", return_value=True)
         mock_toast = mocker.patch("voice_type.ui.settings_dialog.Toast")
 
-        cfg = AppConfig()
+        cfg = AppConfig(asr=AsrConfig(api_key="sk-test"))
         dlg = SettingsDialog(cfg)
         qtbot.addWidget(dlg)
 
@@ -125,7 +125,7 @@ class TestSettingsDialogSave:
         """Empty base_url defaults to https://api.openai.com/v1."""
         mocker.patch("voice_type.ui.settings_dialog.check_network_available", return_value=True)
 
-        cfg = AppConfig()
+        cfg = AppConfig(asr=AsrConfig(api_key="sk-test"))
         cfg.asr.base_url = "https://old.url"
         cfg.polish.base_url = "https://old.url"
         dlg = SettingsDialog(cfg)
@@ -160,7 +160,7 @@ class TestSettingsDialogSave:
         """_save_and_close calls accept() to close the dialog."""
         mocker.patch("voice_type.ui.settings_dialog.check_network_available", return_value=True)
 
-        cfg = AppConfig()
+        cfg = AppConfig(asr=AsrConfig(api_key="sk-test"))
         dlg = SettingsDialog(cfg)
         qtbot.addWidget(dlg)
 
