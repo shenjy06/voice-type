@@ -1,30 +1,40 @@
 # -*- mode: python ; coding: utf-8 -*-
+
 from PyInstaller.utils.hooks import collect_all
 
-datas = []
-binaries = []
-hiddenimports = []
-tmp_ret = collect_all('PySide6.QtCore')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('PySide6.QtGui')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('PySide6.QtWidgets')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+# 白名单：只收集项目明确需要的 PySide6 模块
+# 不再列"不需要的模块"，而是列"需要的模块"
+needed_binaries = []
+needed_datas = []
+needed_imports = []
 
+for qt_module in ['PySide6.QtCore', 'PySide6.QtGui', 'PySide6.QtWidgets']:
+    datas, binaries, hiddenimports = collect_all(qt_module)
+    needed_binaries.extend(binaries)
+    needed_datas.extend(datas)
+    needed_imports.extend(hiddenimports)
+
+# 排除全局环境中的无关大包
+excludes = [
+    'torch', 'torchvision', 'torchaudio',
+    'pandas', 'pyarrow', 'scipy',
+    'sklearn', 'scikit-learn', 'matplotlib',
+]
 
 a = Analysis(
     ['src\\__main__.py'],
     pathex=[],
-    binaries=binaries,
-    datas=datas,
-    hiddenimports=hiddenimports,
+    binaries=needed_binaries,
+    datas=needed_datas,
+    hiddenimports=needed_imports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=excludes,
     noarchive=False,
-    optimize=0,
+    optimize=1,
 )
+
 pyz = PYZ(a.pure)
 
 exe = EXE(

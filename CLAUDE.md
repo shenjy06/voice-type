@@ -74,3 +74,56 @@ ASR + LLM processing runs in a `QThread` via `ProcessingWorker` to avoid blockin
 - **Centralized state transitions**: `FloatingRecordingWindow._transition_to()` handles signal emission and button updates in one place.
 - **Shared icon creation**: `make_circle_icon()` in `icon_utils.py` eliminates duplicate QPixmap+QPainter code across UI modules.
 - **State enum**: `RecorderState` in `state.py` replaces scattered string constants (`STATE_IDLE`, etc.).
+
+## Building & Packaging
+
+### PyInstaller 白名单打包策略
+
+项目使用白名单方式打包，只收集明确需要的模块，避免全局 Python 环境中的无关包（torch、pandas 等）被拉入。
+
+**核心原则**：在 `.spec` 中用 `collect_all` 声明"我需要什么"，而不是用 `excludes` 列"我不用什么"。
+
+```python
+# VoiceType.spec 核心逻辑
+from PyInstaller.utils.hooks import collect_all
+
+# 1. 白名单：只收集需要的 PySide6 模块
+needed_binaries = []
+needed_datas = []
+needed_imports = []
+for qt_module in ['PySide6.QtCore', 'PySide6.QtGui', 'PySide6.QtWidgets']:
+    datas, binaries, hiddenimports = collect_all(qt_module)
+    needed_binaries.extend(binaries)
+    needed_datas.extend(datas)
+    needed_imports.extend(hiddenimports)
+
+# 2. 排除全局环境中的无关大包（黑名单作为补充保险）
+excludes = [
+    'torch', 'torchvision', 'torchaudio',
+    'pandas', 'pyarrow', 'scipy',
+    'sklearn', 'scikit-learn', 'matplotlib',
+]
+
+a = Analysis(
+    ['src\\__main__.py'],
+    pathex=[],
+    binaries=needed_binaries,   # 白名单收集的二进制文件
+    datas=needed_datas,          # 白名单收集的数据文件
+    hiddenimports=needed_imports,# 白名单收集的隐藏导入
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=excludes,           # 补充排除全局大环境包
+    noarchive=False,
+    optimize=1,
+)
+```
+
+**效果**：体积从 178MB 降到 80MB（减少 55%）。
+
+**注意事项**：
+- 新增 PySide6 模块时，只需在 `collect_all` 循环中加对应模块名
+- `excludes` 列表只保留已知的全局环境大包，不影响功能
+- 打包命令：`pyinstaller VoiceType.spec`
+- 输出位置：`dist/VoiceType.exe`
+
