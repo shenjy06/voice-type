@@ -143,7 +143,7 @@ class Application:
         logger.info("Recording started, saved hwnd=%s", self._saved_hwnd)
 
         # Show persistent status bubble
-        self._status_bubble.show_status("录制中...")
+        self._status_bubble.show_status("Recording...")
 
     def _on_recording_stopped(self):
         """User stopped recording — process audio and output text."""
@@ -161,7 +161,7 @@ class Application:
         self.window.set_processing()
 
         # Update bubble text to show processing status
-        self._status_bubble.show_status("润色中...")
+        self._status_bubble.show_status("Polishing...")
 
         # Show the window WITHOUT stealing focus from the target window.
         # Only do this if the window was already visible (user didn't hide it).

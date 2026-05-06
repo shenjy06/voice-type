@@ -36,7 +36,7 @@ _BUTTON_STYLES = {
 
 _BUTTON_TEXTS = {
     RecorderState.RECORDING: "Recording...",
-    RecorderState.PROCESSING: "Processing...",
+    RecorderState.PROCESSING: "Polishing...",
     RecorderState.IDLE: "Record",
     RecorderState.DONE: "Record",
     RecorderState.ERROR: "Record",
