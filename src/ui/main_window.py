@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QTimer, Signal, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QCursor, QCloseEvent
 from src.state import RecorderState
+from src.i18n import t
 
 logger = logging.getLogger(__name__)
 
@@ -34,12 +35,12 @@ _BUTTON_STYLES = {
     ),
 }
 
-_BUTTON_TEXTS = {
-    RecorderState.RECORDING: "Recording...",
-    RecorderState.PROCESSING: "Polishing...",
-    RecorderState.IDLE: "Record",
-    RecorderState.DONE: "Record",
-    RecorderState.ERROR: "Record",
+_BUTTON_TEXT_KEYS = {
+    RecorderState.RECORDING: "btn.recording",
+    RecorderState.PROCESSING: "btn.polishing",
+    RecorderState.IDLE: "btn.record",
+    RecorderState.DONE: "btn.record",
+    RecorderState.ERROR: "btn.record",
 }
 
 
@@ -168,7 +169,7 @@ class FloatingRecordingWindow(QWidget):
 
     def _update_record_button(self):
         style = _BUTTON_STYLES.get(self._state)
-        text = _BUTTON_TEXTS.get(self._state, "Record")
+        text = t(_BUTTON_TEXT_KEYS.get(self._state, "btn.record"))
         enabled = self._state != RecorderState.PROCESSING
 
         if style:
@@ -249,6 +250,10 @@ class FloatingRecordingWindow(QWidget):
 
     def set_hotkey_manager(self, manager):
         self._hotkey_manager = manager
+
+    def retranslate(self):
+        """Retranslate all user-facing text after a language change."""
+        self._update_record_button()
 
 
 class StatusBubble(QWidget):

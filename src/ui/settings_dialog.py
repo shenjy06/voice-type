@@ -3,7 +3,7 @@
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QLabel, QLineEdit,
     QComboBox, QFormLayout, QGroupBox, QSpinBox, QCheckBox,
-    QDialogButtonBox, QTabWidget, QWidget,
+    QDialogButtonBox, QTabWidget, QWidget, QPushButton,
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QIcon
@@ -11,6 +11,7 @@ from src.config import AppConfig, DEFAULT_BASE_URL
 from src.network import check_network_available
 from src.ui.main_window import Toast
 from src.ui.icon_utils import make_circle_icon
+from src.i18n import t
 
 _SETTINGS_ICON = None
 
@@ -41,7 +42,7 @@ class SettingsDialog(QDialog):
     def __init__(self, config: AppConfig, parent=None):
         super().__init__(parent)
         self.config = config
-        self.setWindowTitle("Settings")
+        self.setWindowTitle(t("settings.title"))
         self.setWindowIcon(_get_settings_icon())
         self.setModal(True)
         self.setMinimumWidth(480)
@@ -53,133 +54,155 @@ class SettingsDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
 
-        tabs = QTabWidget()
+        self._tabs = QTabWidget()
+
+        # === Tab 0: General ===
+        general_tab = QWidget()
+        general_layout = QVBoxLayout(general_tab)
+        general_layout.setSpacing(12)
+
+        lang_group = QGroupBox(t("settings.general"))
+        lang_layout = QFormLayout()
+
+        self.language_combo = QComboBox()
+        self.language_combo.addItem(t("settings.ui_language_auto"), "auto")
+        self.language_combo.addItem("English", "en")
+        self.language_combo.addItem("中文", "zh")
+        lang_layout.addRow(t("settings.ui_language"), self.language_combo)
+
+        lang_group.setLayout(lang_layout)
+        general_layout.addWidget(lang_group)
+        general_layout.addStretch()
+        self._tabs.addTab(general_tab, t("settings.general"))
 
         # === Tab 1: STT (Speech-to-Text) ===
         stt_tab = QWidget()
         stt_layout = QVBoxLayout(stt_tab)
         stt_layout.setSpacing(12)
 
-        stt_api_group = QGroupBox("STT API")
+        stt_api_group = QGroupBox(t("settings.stt_api"))
         stt_api_layout = QFormLayout()
 
         self.stt_api_key_input = QLineEdit()
         self.stt_api_key_input.setEchoMode(QLineEdit.Password)
         self.stt_api_key_input.setPlaceholderText("sk-...")
-        stt_api_layout.addRow("API Key:", self.stt_api_key_input)
+        stt_api_layout.addRow(t("settings.api_key"), self.stt_api_key_input)
 
         self.stt_base_url_input = QLineEdit()
         self.stt_base_url_input.setPlaceholderText(DEFAULT_BASE_URL)
-        stt_api_layout.addRow("Base URL:", self.stt_base_url_input)
+        stt_api_layout.addRow(t("settings.base_url"), self.stt_base_url_input)
 
         self.stt_model_combo = QComboBox()
         self.stt_model_combo.setEditable(True)
         for m in self.ASR_MODELS:
             self.stt_model_combo.addItem(m)
-        stt_api_layout.addRow("Model:", self.stt_model_combo)
+        stt_api_layout.addRow(t("settings.model"), self.stt_model_combo)
 
         self.stt_lang_combo = QComboBox()
         for lang in ["auto", "zh", "en", "ja", "ko", "fr", "de", "es"]:
             self.stt_lang_combo.addItem(lang)
-        stt_api_layout.addRow("Language:", self.stt_lang_combo)
+        stt_api_layout.addRow(t("settings.language"), self.stt_lang_combo)
 
         stt_api_group.setLayout(stt_api_layout)
         stt_layout.addWidget(stt_api_group)
 
-        stt_misc_group = QGroupBox("Recording")
+        stt_misc_group = QGroupBox(t("settings.recording_group"))
         stt_misc_layout = QFormLayout()
 
         self.sample_rate_spin = QSpinBox()
         self.sample_rate_spin.setRange(8000, 48000)
         self.sample_rate_spin.setSingleStep(8000)
-        stt_misc_layout.addRow("Sample Rate:", self.sample_rate_spin)
+        stt_misc_layout.addRow(t("settings.sample_rate"), self.sample_rate_spin)
 
         stt_misc_group.setLayout(stt_misc_layout)
         stt_layout.addWidget(stt_misc_group)
         stt_layout.addStretch()
-        tabs.addTab(stt_tab, "STT")
+        self._tabs.addTab(stt_tab, t("settings.stt_tab"))
 
         # === Tab 2: Polish ===
         polish_tab = QWidget()
         polish_layout = QVBoxLayout(polish_tab)
         polish_layout.setSpacing(12)
 
-        polish_api_group = QGroupBox("Polish API")
+        polish_api_group = QGroupBox(t("settings.polish_api"))
         polish_api_layout = QFormLayout()
 
         self.polish_api_key_input = QLineEdit()
         self.polish_api_key_input.setEchoMode(QLineEdit.Password)
         self.polish_api_key_input.setPlaceholderText("sk-...")
-        polish_api_layout.addRow("API Key:", self.polish_api_key_input)
+        polish_api_layout.addRow(t("settings.api_key"), self.polish_api_key_input)
 
         self.polish_base_url_input = QLineEdit()
         self.polish_base_url_input.setPlaceholderText(DEFAULT_BASE_URL)
-        polish_api_layout.addRow("Base URL:", self.polish_base_url_input)
+        polish_api_layout.addRow(t("settings.base_url"), self.polish_base_url_input)
 
         self.polish_model_combo = QComboBox()
         self.polish_model_combo.setEditable(True)
         for m in self.POLISH_MODELS:
             self.polish_model_combo.addItem(m)
-        polish_api_layout.addRow("Model:", self.polish_model_combo)
+        polish_api_layout.addRow(t("settings.model"), self.polish_model_combo)
 
         polish_api_group.setLayout(polish_api_layout)
         polish_layout.addWidget(polish_api_group)
 
         polish_layout.addStretch()
-        tabs.addTab(polish_tab, "Polish")
+        self._tabs.addTab(polish_tab, t("settings.polish_tab"))
 
-        layout.addWidget(tabs)
+        layout.addWidget(self._tabs)
 
         # === Output Settings (always visible below tabs) ===
-        output_group = QGroupBox("Output")
+        output_group = QGroupBox(t("settings.output"))
         output_layout = QFormLayout()
 
         self.paste_delay_spin = QSpinBox()
         self.paste_delay_spin.setRange(0, 2000)
         self.paste_delay_spin.setSuffix(" ms")
-        output_layout.addRow("Paste Delay:", self.paste_delay_spin)
+        output_layout.addRow(t("settings.paste_delay"), self.paste_delay_spin)
 
-        self.auto_paste_check = QCheckBox("Auto-paste to cursor position")
+        self.auto_paste_check = QCheckBox(t("settings.auto_paste"))
         output_layout.addRow("", self.auto_paste_check)
 
         output_group.setLayout(output_layout)
         layout.addWidget(output_group)
 
         # === Hotkey Settings ===
-        hotkey_group = QGroupBox("Hotkeys")
+        hotkey_group = QGroupBox(t("settings.hotkeys"))
         hotkey_layout = QVBoxLayout()
 
-        self.hotkey_toggle_check = QCheckBox("Enable Left Alt toggle (tap to start/stop recording)")
+        self.hotkey_toggle_check = QCheckBox(t("settings.hotkey_toggle"))
         self.hotkey_toggle_check.setChecked(True)
         hotkey_layout.addWidget(self.hotkey_toggle_check)
 
-        hint_label = QLabel(
-            "Quickly tap Left Alt to toggle recording.\n"
-            "Holding Alt + another key (e.g. Alt+Tab) will not trigger it."
-        )
-        hint_label.setWordWrap(True)
-        hint_label.setStyleSheet("color: #9ca3af; font-size: 12px;")
-        hotkey_layout.addWidget(hint_label)
+        self._hint_label = QLabel(t("settings.hotkey_hint"))
+        self._hint_label.setWordWrap(True)
+        self._hint_label.setStyleSheet("color: #9ca3af; font-size: 12px;")
+        hotkey_layout.addWidget(self._hint_label)
 
-        cancel_label = QLabel(
-            "<b>Alt+C</b> — Cancel recording and discard audio."
-        )
-        cancel_label.setWordWrap(True)
-        cancel_label.setStyleSheet("color: #9ca3af; font-size: 12px;")
-        hotkey_layout.addWidget(cancel_label)
+        self._cancel_label = QLabel(t("settings.hotkey_cancel"))
+        self._cancel_label.setWordWrap(True)
+        self._cancel_label.setStyleSheet("color: #9ca3af; font-size: 12px;")
+        hotkey_layout.addWidget(self._cancel_label)
 
         hotkey_group.setLayout(hotkey_layout)
         layout.addWidget(hotkey_group)
 
         # === Buttons ===
-        button_box = QDialogButtonBox(
-            QDialogButtonBox.Save | QDialogButtonBox.Cancel
-        )
-        button_box.accepted.connect(self._save_and_close)
-        button_box.rejected.connect(self.reject)
+        button_box = QDialogButtonBox()
+        self._save_btn = QPushButton(t("settings.save"))
+        self._save_btn.setDefault(True)
+        self._cancel_btn = QPushButton(t("settings.cancel"))
+        button_box.addButton(self._save_btn, QDialogButtonBox.AcceptRole)
+        button_box.addButton(self._cancel_btn, QDialogButtonBox.RejectRole)
+        self._save_btn.clicked.connect(self._save_and_close)
+        self._cancel_btn.clicked.connect(self.reject)
         layout.addWidget(button_box)
 
     def _load_config(self):
+        # General tab — language
+        idx = self.language_combo.findData(self.config.language)
+        if idx >= 0:
+            self.language_combo.setCurrentIndex(idx)
+
         # STT tab
         self.stt_api_key_input.setText(self.config.asr.api_key)
         self.stt_base_url_input.setText(self.config.asr.base_url)
@@ -211,16 +234,19 @@ class SettingsDialog(QDialog):
 
     def _save_and_close(self):
         if not check_network_available():
-            self._toast = Toast("Network unavailable, settings not saved", parent=self)
+            self._toast = Toast(t("settings.network_error"), parent=self)
             self._toast.show()
             return
 
         api_key = self.stt_api_key_input.text().strip()
         polish_key = self.polish_api_key_input.text().strip()
         if not api_key and not polish_key:
-            self._toast = Toast("At least one API Key is required", parent=self)
+            self._toast = Toast(t("settings.api_key_required"), parent=self)
             self._toast.show()
             return
+
+        # General — language
+        self.config.language = self.language_combo.currentData()
 
         # STT
         self.config.asr.api_key = api_key

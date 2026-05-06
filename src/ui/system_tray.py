@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt, Signal, QObject
 from PySide6.QtGui import QIcon, QFont, QAction
 from pynput import keyboard
 from src.ui.icon_utils import make_circle_icon
+from src.i18n import t
 
 logger = logging.getLogger(__name__)
 
@@ -28,31 +29,31 @@ class TrayIcon(QObject):
         """Create a simple microphone-style tray icon."""
         self._icon = make_circle_icon("T", (37, 99, 235))
         self._tray = QSystemTrayIcon(self._icon)
-        self._tray.setToolTip("Voice Type")
+        self._tray.setToolTip(t("tray.tooltip"))
         self._tray.activated.connect(self._on_activated)
 
     def _init_menu(self):
         menu = QMenu()
 
-        self.show_action = QAction("Show Window", menu)
+        self.show_action = QAction(t("tray.show_window"), menu)
         self.show_action.triggered.connect(self.show_window_requested.emit)
         menu.addAction(self.show_action)
 
         menu.addSeparator()
 
-        self.record_action = QAction("Start Recording", menu)
+        self.record_action = QAction(t("tray.start_recording"), menu)
         self.record_action.triggered.connect(self.recording_toggled.emit)
         menu.addAction(self.record_action)
 
-        self.settings_action = QAction("Settings...", menu)
+        self.settings_action = QAction(t("tray.settings"), menu)
         self.settings_action.triggered.connect(self.settings_requested.emit)
         menu.addAction(self.settings_action)
 
         menu.addSeparator()
 
-        quit_action = QAction("Quit", menu)
-        quit_action.triggered.connect(self.quit_requested.emit)
-        menu.addAction(quit_action)
+        self._quit_action = QAction(t("tray.quit"), menu)
+        self._quit_action.triggered.connect(self.quit_requested.emit)
+        menu.addAction(self._quit_action)
 
         self._tray.setContextMenu(menu)
 
@@ -67,13 +68,21 @@ class TrayIcon(QObject):
         """Update tray menu based on recording state."""
         self._is_recording = recording
         if recording:
-            self.record_action.setText("Stop Recording")
+            self.record_action.setText(t("tray.stop_recording"))
             self._tray.setIcon(make_circle_icon("■", (220, 38, 38)))
-            self._tray.setToolTip("Voice Type — Recording...")
+            self._tray.setToolTip(t("tray.tooltip_recording"))
         else:
-            self.record_action.setText("Start Recording")
+            self.record_action.setText(t("tray.start_recording"))
             self._tray.setIcon(self._icon)
-            self._tray.setToolTip("Voice Type")
+            self._tray.setToolTip(t("tray.tooltip"))
+
+    def retranslate(self):
+        """Retranslate all menu texts after a language change."""
+        self.show_action.setText(t("tray.show_window"))
+        self.record_action.setText(t("tray.stop_recording") if self._is_recording else t("tray.start_recording"))
+        self.settings_action.setText(t("tray.settings"))
+        self._quit_action.setText(t("tray.quit"))
+        self._tray.setToolTip(t("tray.tooltip_recording") if self._is_recording else t("tray.tooltip"))
 
     def show_message(self, title: str, message: str, icon=QSystemTrayIcon.Information):
         """Show a system tray notification."""

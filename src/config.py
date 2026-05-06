@@ -50,6 +50,7 @@ class WindowConfig:
 
 @dataclass
 class AppConfig:
+    language: str = "auto"
     polish: PolishApiConfig = field(default_factory=PolishApiConfig)
     asr: AsrConfig = field(default_factory=AsrConfig)
     recording: RecordingConfig = field(default_factory=RecordingConfig)
@@ -75,6 +76,7 @@ class AppConfig:
         else:
             hotkey_data = data.get("hotkey", {})
         return cls(
+            language=data.get("language", "auto"),
             polish=PolishApiConfig(**data.get("polish", data.get("api", {}))),
             asr=AsrConfig(**data.get("asr", {})),
             recording=RecordingConfig(sample_rate=rec_data.get("sample_rate", 16000)),

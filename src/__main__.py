@@ -16,6 +16,7 @@ from src.window_manager import get_foreground_window
 from src.ui.main_window import FloatingRecordingWindow, Toast, StatusBubble
 from src.ui.settings_dialog import SettingsDialog
 from src.ui.system_tray import TrayIcon, HotkeyManager
+from src.i18n import init_language, t
 
 logging.basicConfig(
     level=logging.INFO,
@@ -68,6 +69,7 @@ class Application:
         self.app.setQuitOnLastWindowClosed(False)
 
         self.config = AppConfig.load()
+        init_language(self.config.language)
         self.audio_recorder = AudioRecorder(self.config.recording.sample_rate)
         self.typer = TextTyper(self.config)
         self._processing_thread = None
@@ -143,7 +145,7 @@ class Application:
         logger.info("Recording started, saved hwnd=%s", self._saved_hwnd)
 
         # Show persistent status bubble
-        self._status_bubble.show_status("Recording...")
+        self._status_bubble.show_status(t("status.recording"))
 
     def _on_recording_stopped(self):
         """User stopped recording — process audio and output text."""
@@ -161,7 +163,7 @@ class Application:
         self.window.set_processing()
 
         # Update bubble text to show processing status
-        self._status_bubble.show_status("Polishing...")
+        self._status_bubble.show_status(t("status.polishing"))
 
         # Show the window WITHOUT stealing focus from the target window.
         # Only do this if the window was already visible (user didn't hide it).
@@ -174,8 +176,8 @@ class Application:
         try:
             audio_path = self.audio_recorder.save()
         except ValueError:
-            self.window.set_error("No audio recorded")
-            self.tray.show_message("Error", "No audio was recorded")
+            self.window.set_error(t("error.no_audio"))
+            self.tray.show_message(t("error.title"), t("error.no_audio_detail"))
             self.window.show()
             self._status_bubble.dismiss()
             return
@@ -219,7 +221,7 @@ class Application:
         """Processing failed."""
         self._status_bubble.dismiss()
         self.window.set_error(error_msg)
-        self.tray.show_message("Voice Type", f"Error: {error_msg}")
+        self.tray.show_message(t("app.name"), t("msg.error_format").format(msg=error_msg))
         self.audio_recorder.cleanup()
 
     def _show_settings(self):
@@ -230,12 +232,17 @@ class Application:
 
     def _on_settings_saved(self):
         """Reload config and update hotkeys."""
+        init_language(self.config.language)
         self.hotkey_manager.stop()
         if self.config.hotkey.toggle_enabled:
             self.hotkey_manager.start()
         self.audio_recorder.sample_rate = self.config.recording.sample_rate
+        self.window.retranslate()
+        self.tray.retranslate()
+        # Invalidate cached dialog so it's recreated with new language next time
+        self._settings_dialog = None
         # Show toast from main window (which is guaranteed to be alive)
-        self._toast = Toast("Settings saved", parent=self.window)
+        self._toast = Toast(t("msg.settings_saved"), parent=self.window)
         self._toast.show()
 
     def _show_window(self):
