@@ -55,7 +55,15 @@ PyInstaller 是将 Python 项目打包为独立 EXE 的工具。
 
 ## 第五步：构建 EXE
 
-### 方式一：一键构建（推荐）
+### 方式一：使用 spec 文件构建（推荐）
+
+```cmd
+pyinstaller VoiceType.spec
+```
+
+项目采用白名单打包策略，只收集必需的 Qt 模块（QtCore/QtGui/QtWidgets），排除全局环境中的大包（torch、pandas 等），体积约 73 MB。
+
+### 方式二：一键构建
 
 双击运行：
 
@@ -65,28 +73,6 @@ build.bat
 
 该脚本会自动检查 Python 和 PyInstaller 是否安装，安装缺失的依赖，然后完成构建。
 
-### 方式二：手动构建
-
-```cmd
-pyinstaller --clean --name="VoiceType" ^
-    --windowed ^
-    --noconfirm ^
-    --onefile ^
-    --collect-all PySide6 ^
-    voice_type/__main__.py
-```
-
-### 构建参数说明
-
-| 参数 | 作用 |
-|------|------|
-| `--clean` | 清除之前的构建缓存，确保全新构建 |
-| `--name="VoiceType"` | 指定输出的 EXE 文件名 |
-| `--windowed` | 无控制台窗口（GUI 模式） |
-| `--noconfirm` | 覆盖已存在的构建文件，不弹窗确认 |
-| `--onefile` | 打包为单个 EXE 文件 |
-| `--collect-all PySide6` | 确保 PySide6 所有组件都被打包 |
-
 ## 构建输出
 
 构建成功后，EXE 文件位于：
@@ -95,7 +81,7 @@ pyinstaller --clean --name="VoiceType" ^
 dist\VoiceType.exe
 ```
 
-文件大小约 270 MB。
+文件大小约 73 MB（白名单优化后，原方案约 270 MB）。
 
 ## 测试构建结果
 

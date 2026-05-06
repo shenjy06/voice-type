@@ -16,20 +16,20 @@ pip install pyinstaller
 pyinstaller VoiceType.spec
 ```
 
-产物：`dist/VoiceType.exe`（约 65 MB 单文件）
+产物：`dist/VoiceType.exe`（约 73 MB 单文件）
 
 ## 体积优化
 
-`VoiceType.spec` 已包含以下优化：
+`VoiceType.spec` 采用白名单打包策略，只收集明确需要的模块：
 
 | 优化项 | 说明 |
 |--------|------|
-| **精选 Qt 模块** | 仅收集 QtCore/QtGui/QtWidgets，不使用 collect_all |
-| **排除 40+ 个 Qt 模块** | WebEngine/3D/Multimedia/Qml/Quick/Sql/Network 等显式 exclude |
+| **白名单 Qt 模块** | 只收集 QtCore/QtGui/QtWidgets，不使用 collect_all |
+| **黑名单排除大包** | 排除 torch、pandas、scipy、matplotlib 等全局环境大包 |
 | **optimize=1** | 移除 docstrings（-O 编译） |
 | **UPX 压缩** | 对二进制文件加壳压缩 |
 
-实际体积约 **65 MB**（从 collect_all 方案的 259 MB 降至 65 MB）。
+实际体积约 **73 MB**（从 collect_all 方案的 ~270 MB 降至 ~73 MB）。
 
 ## 快速出包（单文件）
 

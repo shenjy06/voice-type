@@ -16,6 +16,7 @@ Licensed under [GPL-3.0](LICENSE).
 - **Global Hotkeys**: Uses `pynput` keyboard listener for global hotkey detection — responsive in any application
 - **Network Detection**: Automatically checks network availability on settings save to prevent invalid configurations
 - **Startup Check**: Automatically detects API configuration on first launch and shows setup wizard if unconfigured
+- **Bilingual UI**: Supports Chinese and English interface, switchable in settings (requires restart)
 
 ## Tech Stack
 
