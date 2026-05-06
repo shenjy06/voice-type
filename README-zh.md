@@ -178,13 +178,16 @@ Voice Type 使用 OpenAI 兼容协议的 API，支持多种服务商。以下是
 voice-type/
 ├── src/
 │   ├── __main__.py              # 入口：Application 类，连接所有组件
+│   ├── api_client.py            # OpenAI 兼容 API 客户端封装
 │   ├── config.py                # 配置管理：dataclass + JSON 序列化/持久化
 │   ├── audio.py                 # 音频录制：sounddevice 异步录制 + soundfile 编码为 OGG
 │   ├── asr.py                   # 语音识别：OpenAI 兼容 API
 │   ├── polisher.py              # 文本润色：LLM API + 系统提示词
 │   ├── typer.py                 # 文本注入：窗口管理 + 剪贴板
+│   ├── window_manager.py        # Windows 窗口控制：ctypes API
 │   ├── network.py               # 网络检测：HTTP 连通性检查
 │   ├── state.py                 # 应用状态枚举 (RecorderState)
+│   ├── i18n.py                  # 国际化：中英文翻译
 │   └── ui/
 │       ├── main_window.py       # 浮动录制窗口 + 脉冲红点动画 + 状态气泡 + Toast
 │       ├── settings_dialog.py   # 设置对话框（STT/Polish/Output/Hotkeys 四标签页）

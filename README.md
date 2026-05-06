@@ -188,6 +188,7 @@ voice-type/
 │   ├── window_manager.py        # Windows foreground control: ctypes window/keyboard APIs
 │   ├── network.py               # Network detection: HTTP connectivity check
 │   ├── state.py                 # Application state enum (RecorderState)
+│   ├── i18n.py                  # Internationalization: Chinese/English translations
 │   └── ui/
 │       ├── main_window.py       # Floating recording window + pulsing dot + StatusBubble + Toast
 │       ├── settings_dialog.py   # Settings dialog (STT/Polish/Output/Hotkeys)
