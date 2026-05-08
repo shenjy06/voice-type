@@ -2,12 +2,15 @@
 
 import logging
 import tempfile
+import uuid
 from pathlib import Path
 import numpy as np
 import sounddevice as sd
 import soundfile as sf
 
 logger = logging.getLogger(__name__)
+
+TEMP_AUDIO_DIR_NAME = "voice_type"
 
 
 class AudioRecorder:
@@ -54,8 +57,9 @@ class AudioRecorder:
         if not self._frames:
             raise ValueError("No audio data recorded")
         data = np.concatenate(self._frames)
-        tmpdir = tempfile.mkdtemp(prefix="voice_")
-        self._temp_file = Path(tmpdir) / "recording.ogg"
+        tmpdir = Path(tempfile.gettempdir()) / TEMP_AUDIO_DIR_NAME
+        tmpdir.mkdir(parents=True, exist_ok=True)
+        self._temp_file = tmpdir / f"recording_{uuid.uuid4().hex}.ogg"
         sf.write(str(self._temp_file), data, self.sample_rate, format="OGG", subtype="VORBIS")
         logger.info("Audio saved to %s (%.1f seconds)", self._temp_file, len(data) / self.sample_rate)
         return self._temp_file

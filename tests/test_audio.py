@@ -81,7 +81,9 @@ class TestAudioRecorderSave:
     def test_save_with_frames_writes_ogg(self, mocker):
         """save() with audio frames writes an OGG file via soundfile."""
         mock_sf = mocker.patch("src.audio.sf")
-        mocker.patch("src.audio.tempfile", mkdtemp=mocker.MagicMock(return_value="/tmp/voice_test_dir"))
+        mocker.patch("src.audio.tempfile.gettempdir", return_value="/tmp")
+        mocker.patch("src.audio.uuid.uuid4", return_value=mocker.MagicMock(hex="abc123"))
+        mock_mkdir = mocker.patch("src.audio.Path.mkdir")
 
         recorder = AudioRecorder()
         recorder._frames = [np.array([0.1, 0.2, 0.3], dtype=np.float32)]
@@ -89,7 +91,8 @@ class TestAudioRecorderSave:
 
         mock_sf.write.assert_called_once()
         args, kwargs = mock_sf.write.call_args
-        assert Path(str(args[0])).as_posix() == "/tmp/voice_test_dir/recording.ogg"
+        assert Path(str(args[0])).as_posix() == "/tmp/voice_type/recording_abc123.ogg"
+        mock_mkdir.assert_called_once_with(parents=True, exist_ok=True)
         assert args[2] == recorder.sample_rate
         assert kwargs["format"] == "OGG"
         assert kwargs["subtype"] == "VORBIS"
@@ -103,7 +106,9 @@ class TestAudioRecorderSave:
     def test_save_passes_float32_data(self, mocker):
         """save() passes float32 audio data directly to soundfile."""
         mock_sf = mocker.patch("src.audio.sf")
-        mocker.patch("src.audio.tempfile", mkdtemp=mocker.MagicMock(return_value="/tmp/t_dir"))
+        mocker.patch("src.audio.tempfile.gettempdir", return_value="/tmp")
+        mocker.patch("src.audio.uuid.uuid4", return_value=mocker.MagicMock(hex="abc123"))
+        mocker.patch("src.audio.Path.mkdir")
 
         recorder = AudioRecorder()
         recorder._frames = [np.array([-1.0, 0.0, 1.0], dtype=np.float32)]
@@ -118,14 +123,16 @@ class TestAudioRecorderSave:
     def test_save_returns_path(self, mocker):
         """save() returns the Path to the saved OGG file."""
         mocker.patch("src.audio.sf")
-        mocker.patch("src.audio.tempfile", mkdtemp=mocker.MagicMock(return_value="/tmp/test_dir"))
+        mocker.patch("src.audio.tempfile.gettempdir", return_value="/tmp")
+        mocker.patch("src.audio.uuid.uuid4", return_value=mocker.MagicMock(hex="def456"))
+        mocker.patch("src.audio.Path.mkdir")
 
         recorder = AudioRecorder()
         recorder._frames = [np.array([0.1], dtype=np.float32)]
         result = recorder.save()
 
         assert isinstance(result, Path)
-        assert Path(str(result)).as_posix() == "/tmp/test_dir/recording.ogg"
+        assert Path(str(result)).as_posix() == "/tmp/voice_type/recording_def456.ogg"
         assert recorder.audio_path is not None
 
 
