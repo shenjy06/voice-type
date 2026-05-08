@@ -1,40 +1,56 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-from PyInstaller.utils.hooks import collect_all
+datas = []
+binaries = []
 
-# 白名单：只收集项目明确需要的 PySide6 模块
-# 不再列"不需要的模块"，而是列"需要的模块"
-needed_binaries = []
-needed_datas = []
-needed_imports = []
-
-for qt_module in ['PySide6.QtCore', 'PySide6.QtGui', 'PySide6.QtWidgets']:
-    datas, binaries, hiddenimports = collect_all(qt_module)
-    needed_binaries.extend(binaries)
-    needed_datas.extend(datas)
-    needed_imports.extend(hiddenimports)
-
-# 排除全局环境中的无关大包
-excludes = [
-    'torch', 'torchvision', 'torchaudio',
-    'pandas', 'pyarrow', 'scipy',
-    'sklearn', 'scikit-learn', 'matplotlib',
+# Keep the bundled dependency surface explicit. PyInstaller can otherwise follow
+# optional hooks from the global Python environment and pull in large packages
+# such as pandas, scipy, torch, and pyarrow.
+hiddenimports = [
+    "PySide6.QtCore",
+    "PySide6.QtGui",
+    "PySide6.QtWidgets",
+    "sounddevice",
+    "soundfile",
+    "numpy",
+    "openai",
+    "pyperclip",
+    "pynput",
+    "pynput.keyboard",
 ]
+
+excluded_optional_modules = [
+    "IPython",
+    "PIL",
+    "cv2",
+    "matplotlib",
+    "notebook",
+    "pandas",
+    "pyarrow",
+    "pytest",
+    "scipy",
+    "scikit-learn",
+    "sklearn",
+    "tensorflow",
+    "torch",
+    "torchaudio",
+    "torchvision",
+]
+
 
 a = Analysis(
     ['src\\__main__.py'],
     pathex=[],
-    binaries=needed_binaries,
-    datas=needed_datas,
-    hiddenimports=needed_imports,
+    binaries=binaries,
+    datas=datas,
+    hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=excludes,
+    excludes=excluded_optional_modules,
     noarchive=False,
     optimize=1,
 )
-
 pyz = PYZ(a.pure)
 
 exe = EXE(

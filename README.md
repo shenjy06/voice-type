@@ -69,10 +69,11 @@ build.bat
 Or use the command line:
 
 ```bash
-pyinstaller --clean --name="VoiceType" --windowed --noconfirm --onefile \
-    --collect-all PySide6 \
-    src/__main__.py
+pyinstaller --clean --noconfirm VoiceType.spec
 ```
+
+The spec file uses a whitelist build strategy and excludes large optional
+packages from the global Python environment.
 
 The generated `dist/VoiceType.exe` is a standalone executable — no Python environment required.
 

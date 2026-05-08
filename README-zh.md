@@ -68,10 +68,10 @@ build.bat
 或使用命令行：
 
 ```bash
-pyinstaller --clean --name="VoiceType" --windowed --noconfirm --onefile \
-    --collect-all PySide6 \
-    src/__main__.py
+pyinstaller --clean --noconfirm VoiceType.spec
 ```
+
+`VoiceType.spec` 采用白名单打包策略，并排除全局 Python 环境中的大体积可选依赖。
 
 生成的 `dist/VoiceType.exe` 为独立可执行文件，无需安装 Python 环境。
 

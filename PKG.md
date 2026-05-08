@@ -36,7 +36,7 @@ pyinstaller VoiceType.spec
 如果不需要优化体积，可直接用命令行：
 
 ```bash
-pyinstaller voice_type/__main__.py --name "VoiceType" --onefile --windowed
+pyinstaller --clean --noconfirm VoiceType.spec
 ```
 
 产物：`dist/VoiceType.exe`

@@ -43,14 +43,9 @@ echo.
 echo [INFO] Building VoiceType EXE...
 echo.
 
-pyinstaller --clean --name="VoiceType" ^
-    --windowed ^
+pyinstaller --clean ^
     --noconfirm ^
-    --onefile ^
-    --collect-all PySide6.QtCore ^
-    --collect-all PySide6.QtGui ^
-    --collect-all PySide6.QtWidgets ^
-    src/__main__.py
+    VoiceType.spec
 
 if errorlevel 1 (
     echo.
