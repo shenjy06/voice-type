@@ -26,6 +26,11 @@ TERMINAL_TITLE_MARKERS = (
     "windows powershell",
 )
 
+PASTE_MODE_AUTO = "auto"
+PASTE_MODE_CTRL_V = "ctrl_v"
+PASTE_MODE_CTRL_SHIFT_V = "ctrl_shift_v"
+PASTE_MODE_CLIPBOARD = "clipboard"
+
 
 class TextTyper:
     def __init__(self, config: AppConfig):
@@ -35,7 +40,7 @@ class TextTyper:
         """
         Output text to the cursor position.
 
-        Strategy: clipboard copy + Ctrl+V paste.
+        Strategy: clipboard copy + configured paste shortcut.
         Attempts to restore the saved foreground window first.
 
         Returns True if text was successfully pasted, False otherwise.
@@ -55,27 +60,21 @@ class TextTyper:
         # Small delay to ensure window focus is settled
         time.sleep(self.config.output.paste_delay_ms / 1000.0)
 
-        # Copy to clipboard and paste
-        try:
-            original_clipboard = pyperclip.paste()
-        except Exception:
-            original_clipboard = ""
-
         pyperclip.copy(text)
         logger.info("Text copied to clipboard (%d chars)", len(text))
 
-        use_terminal_paste = self._is_terminal_window(saved_hwnd)
+        paste_mode = self.config.output.paste_mode
+        if paste_mode == PASTE_MODE_CLIPBOARD:
+            logger.info("Paste mode is clipboard-only; skipping paste keystrokes")
+            return True
+
+        use_terminal_paste = self._use_terminal_paste(paste_mode, saved_hwnd)
 
         # Send paste shortcut via ctypes
         success = self._send_paste(use_terminal_paste=use_terminal_paste)
 
         if not success:
-            # Restore original clipboard
-            try:
-                pyperclip.copy(original_clipboard)
-            except Exception:
-                pass
-            logger.error("Failed to paste text")
+            logger.error("Failed to paste text; text remains on clipboard")
             return False
 
         logger.info("Text pasted successfully, window_restored=%s", window_restored)
@@ -105,6 +104,15 @@ class TextTyper:
         except Exception as e:
             logger.error("Failed to send paste keystrokes: %s", e)
             return False
+
+    def _use_terminal_paste(self, paste_mode: str, hwnd: int) -> bool:
+        if paste_mode == PASTE_MODE_CTRL_SHIFT_V:
+            return True
+        if paste_mode == PASTE_MODE_CTRL_V:
+            return False
+        if paste_mode != PASTE_MODE_AUTO:
+            logger.warning("Unknown paste mode '%s', falling back to auto", paste_mode)
+        return self._is_terminal_window(hwnd)
 
     def _is_terminal_window(self, hwnd: int) -> bool:
         """Detect terminal-like targets that prefer Ctrl+Shift+V."""

@@ -1,7 +1,7 @@
 """Tests for voice_type.ui.settings_dialog — SettingsDialog."""
 
 from PySide6.QtWidgets import QDialogButtonBox, QDialog
-from src.config import AppConfig, AsrConfig, PolishApiConfig, RecordingConfig, HotkeyConfig
+from src.config import AppConfig, AsrConfig, PolishApiConfig, RecordingConfig, HotkeyConfig, OutputConfig
 from src.ui.settings_dialog import SettingsDialog
 
 
@@ -29,6 +29,12 @@ class TestSettingsDialogCreation:
         assert "zh" in langs
         assert "en" in langs
 
+    def test_paste_mode_combo_populated(self, qtbot):
+        dlg = SettingsDialog(AppConfig())
+        qtbot.addWidget(dlg)
+        modes = [dlg.paste_mode_combo.itemData(i) for i in range(dlg.paste_mode_combo.count())]
+        assert modes == ["auto", "ctrl_v", "ctrl_shift_v", "clipboard"]
+
 
 class TestSettingsDialogLoadConfig:
     def test_load_config_populates_fields(self, qtbot):
@@ -49,6 +55,12 @@ class TestSettingsDialogLoadConfig:
         dlg = SettingsDialog(cfg)
         qtbot.addWidget(dlg)
         assert dlg.stt_model_combo.currentText() == "custom-unknown-model"
+
+    def test_load_config_populates_paste_mode(self, qtbot):
+        cfg = AppConfig(output=OutputConfig(paste_mode="ctrl_shift_v"))
+        dlg = SettingsDialog(cfg)
+        qtbot.addWidget(dlg)
+        assert dlg.paste_mode_combo.currentData() == "ctrl_shift_v"
 
 
 class TestSettingsDialogHotkeyToggle:
@@ -142,6 +154,18 @@ class TestSettingsDialogSave:
 
         assert cfg.asr.api_key == "sk-test"
         assert cfg.polish.api_key == "sk-polish"
+
+    def test_save_paste_mode(self, qtbot, mocker):
+        mocker.patch("src.ui.settings_dialog.check_network_available", return_value=True)
+
+        cfg = AppConfig(asr=AsrConfig(api_key="sk-test"))
+        dlg = SettingsDialog(cfg)
+        qtbot.addWidget(dlg)
+        dlg.paste_mode_combo.setCurrentIndex(dlg.paste_mode_combo.findData("clipboard"))
+
+        dlg._save_and_close()
+
+        assert cfg.output.paste_mode == "clipboard"
 
     def test_save_and_close_accepts_dialog(self, qtbot, mocker):
         """_save_and_close calls accept() to close the dialog."""

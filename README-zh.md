@@ -10,6 +10,7 @@ Windows 语音转文字速记工具。录制语音 → 语音识别 → 文本�
 - **语音识别 (STT)**: 将录制的音频转录为文本（支持 OpenAI 兼容协议）
 - **智能润色**: LLM 自动去除语气词、修正语法、提升表达清晰度
 - **文本注入**: 恢复原始焦点窗口，将润色后的文本粘贴到光标位置
+- **本地历史记录**: 使用本地 SQLite 保留最近识别文本，可从托盘菜单复制或重新粘贴
 - **浮动控制窗口**: 始终置顶的迷你窗口，支持拖拽移动，带脉冲红点动画
 - **状态气泡**: 录制时显示"录制中..."，润色时显示"润色中..."，完成后自动消失
 - **系统托盘**: 点击 X 最小化到托盘，托盘菜单提供录制切换、设置、退出功能
@@ -111,7 +112,10 @@ Left Alt 热键区分单击（切换录制）和组合键（如 `Alt+Tab` 不触
 | 字段 | 说明 | 默认值 |
 |------|------|--------|
 | Paste Delay | 粘贴前延迟（毫秒） | `300 ms` |
+| Paste Mode | 自动检测目标窗口、强制 `Ctrl+V`、强制 `Ctrl+Shift+V` 或仅复制 | 自动 |
 | Auto-paste | 是否自动粘贴到光标位置 | 开启 |
+
+如果自动粘贴失败，识别文本会保留在剪贴板中，可手动粘贴。
 
 ## API 密钥配置
 
@@ -180,6 +184,7 @@ voice-type/
 │   ├── __main__.py              # 入口：Application 类，连接所有组件
 │   ├── api_client.py            # OpenAI 兼容 API 客户端封装
 │   ├── config.py                # 配置管理：dataclass + JSON 序列化/持久化
+│   ├── history.py               # SQLite 本地识别文本历史记录
 │   ├── audio.py                 # 音频录制：sounddevice 异步录制 + soundfile 编码为 OGG
 │   ├── asr.py                   # 语音识别：OpenAI 兼容 API
 │   ├── polisher.py              # 文本润色：LLM API + 系统提示词
@@ -189,6 +194,7 @@ voice-type/
 │   ├── state.py                 # 应用状态枚举 (RecorderState)
 │   ├── i18n.py                  # 国际化：中英文翻译
 │   └── ui/
+│       ├── history_dialog.py    # 最近文本历史查看/复制/重新粘贴
 │       ├── main_window.py       # 浮动录制窗口 + 脉冲红点动画 + 状态气泡 + Toast
 │       ├── settings_dialog.py   # 设置对话框（STT/Polish/Output/Hotkeys 四标签页）
 │       ├── system_tray.py       # 系统托盘 + 全局热键管理
@@ -222,7 +228,7 @@ pytest tests/ -v
 
 ## 配置文件
 
-用户配置存储在 `%USERPROFILE%\.voice-type\config.json`。首次启动时如果未检测到配置，会自动弹出设置页面引导配置。
+用户配置存储在 `%USERPROFILE%\.voice-type\config.json`。本地历史记录存储在 `%USERPROFILE%\.voice-type\history.sqlite3`。首次启动时如果未检测到配置，会自动弹出设置页面引导配置。
 
 ## 注意事项
 

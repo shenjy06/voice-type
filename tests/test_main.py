@@ -128,6 +128,7 @@ class TestApplication:
 
         mocker.patch("src.__main__.AudioRecorder")
         mocker.patch("src.__main__.TextTyper")
+        mocker.patch("src.__main__.HistoryStore")
         mocker.patch("src.__main__.FloatingRecordingWindow")
         mocker.patch("src.__main__.TrayIcon")
         mocker.patch("src.__main__.HotkeyManager")
@@ -163,14 +164,35 @@ class TestApplication:
 
     def test_on_processing_done_with_auto_paste(self, qtbot, mocker):
         app = self._make_application(qtbot, mocker)
+        mock_toast = mocker.patch("src.__main__.Toast")
         app.config.output.auto_paste = True
         app._saved_hwnd = 12345
-        app.typer.output_text = mocker.MagicMock()
+        app.typer.output_text = mocker.MagicMock(return_value=True)
         app.audio_recorder.cleanup = mocker.MagicMock()
 
         app._on_processing_done("Hello, world!")
 
+        app.history_store.add.assert_called_once_with("Hello, world!")
         app.typer.output_text.assert_called_once_with("Hello, world!", 12345)
+        app.tray.show_message.assert_not_called()
+        mock_toast.assert_not_called()
+        app.audio_recorder.cleanup.assert_called_once()
+
+    def test_on_processing_done_auto_paste_failure_shows_copied_toast(self, qtbot, mocker):
+        app = self._make_application(qtbot, mocker)
+        mock_toast = mocker.patch("src.__main__.Toast")
+        app.config.output.auto_paste = True
+        app._saved_hwnd = 12345
+        app.typer.output_text = mocker.MagicMock(return_value=False)
+        app.audio_recorder.cleanup = mocker.MagicMock()
+
+        app._on_processing_done("Hello, world!")
+
+        app.history_store.add.assert_called_once_with("Hello, world!")
+        app.typer.output_text.assert_called_once_with("Hello, world!", 12345)
+        app.tray.show_message.assert_not_called()
+        mock_toast.assert_called_once()
+        mock_toast.return_value.show.assert_called_once()
         app.audio_recorder.cleanup.assert_called_once()
 
     def test_on_processing_done_without_auto_paste(self, qtbot, mocker):
@@ -182,7 +204,17 @@ class TestApplication:
 
         app._on_processing_done("Hello, world!")
 
+        app.history_store.add.assert_called_once_with("Hello, world!")
         mock_copy.assert_called_once_with("Hello, world!")
+        app.audio_recorder.cleanup.assert_called_once()
+
+    def test_on_processing_done_empty_text_not_added_to_history(self, qtbot, mocker):
+        app = self._make_application(qtbot, mocker)
+        app.audio_recorder.cleanup = mocker.MagicMock()
+
+        app._on_processing_done("")
+
+        app.history_store.add.assert_not_called()
         app.audio_recorder.cleanup.assert_called_once()
 
     def test_on_processing_error(self, qtbot, mocker):
@@ -216,6 +248,64 @@ class TestApplication:
         app._show_settings()
 
         app._settings_dialog.exec.assert_called_once()
+
+    def test_show_history_lazy_loads_dialog(self, qtbot, mocker):
+        app = self._make_application(qtbot, mocker)
+        mock_dialog_cls = mocker.patch("src.__main__.HistoryDialog")
+        mock_dialog = mocker.MagicMock()
+        mock_dialog_cls.return_value = mock_dialog
+
+        app._history_dialog = None
+        app._show_history()
+
+        mock_dialog_cls.assert_called_once_with(app.history_store, app.window)
+        mock_dialog.paste_requested.connect.assert_called_once()
+        mock_dialog.exec.assert_called_once()
+
+    def test_show_history_reloads_existing_dialog(self, qtbot, mocker):
+        app = self._make_application(qtbot, mocker)
+        app._history_dialog = mocker.MagicMock()
+
+        app._show_history()
+
+        app._history_dialog.reload.assert_called_once()
+        app._history_dialog.exec.assert_called_once()
+
+    def test_paste_history_text_with_auto_paste(self, qtbot, mocker):
+        app = self._make_application(qtbot, mocker)
+        mock_toast = mocker.patch("src.__main__.Toast")
+        app.config.output.auto_paste = True
+        app.typer.output_text = mocker.MagicMock(return_value=True)
+        mocker.patch("src.__main__.get_foreground_window", return_value=456)
+
+        app._paste_history_text("from history")
+
+        app.typer.output_text.assert_called_once_with("from history", 456)
+        app.tray.show_message.assert_not_called()
+        mock_toast.assert_not_called()
+
+    def test_paste_history_text_auto_paste_failure_shows_copied_toast(self, qtbot, mocker):
+        app = self._make_application(qtbot, mocker)
+        mock_toast = mocker.patch("src.__main__.Toast")
+        app.config.output.auto_paste = True
+        app.typer.output_text = mocker.MagicMock(return_value=False)
+        mocker.patch("src.__main__.get_foreground_window", return_value=456)
+
+        app._paste_history_text("from history")
+
+        app.typer.output_text.assert_called_once_with("from history", 456)
+        app.tray.show_message.assert_not_called()
+        mock_toast.assert_called_once()
+        mock_toast.return_value.show.assert_called_once()
+
+    def test_paste_history_text_without_auto_paste(self, qtbot, mocker):
+        app = self._make_application(qtbot, mocker)
+        app.config.output.auto_paste = False
+        mock_copy = mocker.patch("pyperclip.copy")
+
+        app._paste_history_text("from history")
+
+        mock_copy.assert_called_once_with("from history")
 
     def test_on_settings_saved_respects_toggle(self, qtbot, mocker):
         mocker.patch("src.__main__.Toast")

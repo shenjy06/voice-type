@@ -15,6 +15,7 @@ class TrayIcon(QObject):
     """System tray icon with context menu."""
 
     show_window_requested = Signal()
+    history_requested = Signal()
     settings_requested = Signal()
     recording_toggled = Signal()
     quit_requested = Signal()
@@ -49,6 +50,10 @@ class TrayIcon(QObject):
         self.settings_action.triggered.connect(self.settings_requested.emit)
         menu.addAction(self.settings_action)
 
+        self.history_action = QAction(t("tray.history"), menu)
+        self.history_action.triggered.connect(self.history_requested.emit)
+        menu.addAction(self.history_action)
+
         menu.addSeparator()
 
         self._quit_action = QAction(t("tray.quit"), menu)
@@ -80,6 +85,7 @@ class TrayIcon(QObject):
         """Retranslate all menu texts after a language change."""
         self.show_action.setText(t("tray.show_window"))
         self.record_action.setText(t("tray.stop_recording") if self._is_recording else t("tray.start_recording"))
+        self.history_action.setText(t("tray.history"))
         self.settings_action.setText(t("tray.settings"))
         self._quit_action.setText(t("tray.quit"))
         self._tray.setToolTip(t("tray.tooltip_recording") if self._is_recording else t("tray.tooltip"))

@@ -10,10 +10,12 @@ from PySide6.QtCore import QThread, Signal, QObject
 from src.config import AppConfig
 from src.audio import AudioRecorder
 from src.asr import Transcriber
+from src.history import HistoryStore
 from src.polisher import TextPolisher
 from src.typer import TextTyper
 from src.window_manager import get_foreground_window
 from src.ui.main_window import FloatingRecordingWindow, Toast, StatusBubble
+from src.ui.history_dialog import HistoryDialog
 from src.ui.settings_dialog import SettingsDialog
 from src.ui.system_tray import TrayIcon, HotkeyManager
 from src.i18n import init_language, t
@@ -72,6 +74,7 @@ class Application:
         init_language(self.config.language)
         self.audio_recorder = AudioRecorder(self.config.recording.sample_rate)
         self.typer = TextTyper(self.config)
+        self.history_store = HistoryStore()
         self._processing_thread = None
         self._processing_worker = None
         self._saved_hwnd = 0
@@ -98,6 +101,7 @@ class Application:
         # System tray
         self.tray = TrayIcon()
         self.tray.show_window_requested.connect(self._show_window)
+        self.tray.history_requested.connect(self._show_history)
         self.tray.settings_requested.connect(self._show_settings)
         self.tray.recording_toggled.connect(self._toggle_recording)
         self.tray.quit_requested.connect(self._quit)
@@ -105,6 +109,7 @@ class Application:
 
         # Settings dialog (lazy)
         self._settings_dialog = None
+        self._history_dialog = None
 
         # Status bubble (persistent bubble during recording/processing)
         self._status_bubble = StatusBubble()
@@ -208,8 +213,11 @@ class Application:
         self._status_bubble.dismiss()
 
         if refined_text:
+            self.history_store.add(refined_text)
             if self.config.output.auto_paste:
-                self.typer.output_text(refined_text, self._saved_hwnd)
+                pasted = self.typer.output_text(refined_text, self._saved_hwnd)
+                if not pasted:
+                    self._show_toast(t("msg.paste_failed_copied"))
             else:
                 pyperclip.copy(refined_text)
 
@@ -230,6 +238,26 @@ class Application:
             self._settings_dialog.settings_saved.connect(self._on_settings_saved)
         self._settings_dialog.exec()
 
+    def _show_history(self):
+        if self._history_dialog is None:
+            self._history_dialog = HistoryDialog(self.history_store, self.window)
+            self._history_dialog.paste_requested.connect(self._paste_history_text)
+        else:
+            self._history_dialog.reload()
+        self._history_dialog.exec()
+
+    def _paste_history_text(self, text: str):
+        if self.config.output.auto_paste:
+            pasted = self.typer.output_text(text, get_foreground_window())
+            if not pasted:
+                self._show_toast(t("msg.paste_failed_copied"))
+        else:
+            pyperclip.copy(text)
+
+    def _show_toast(self, message: str):
+        self._toast = Toast(message, parent=self.window)
+        self._toast.show()
+
     def _on_settings_saved(self):
         """Reload config and update hotkeys."""
         init_language(self.config.language)
@@ -239,11 +267,12 @@ class Application:
         self.audio_recorder.sample_rate = self.config.recording.sample_rate
         self.window.retranslate()
         self.tray.retranslate()
+        if self._history_dialog is not None:
+            self._history_dialog.retranslate()
         # Invalidate cached dialog so it's recreated with new language next time
         self._settings_dialog = None
         # Show toast from main window (which is guaranteed to be alive)
-        self._toast = Toast(t("msg.settings_saved"), parent=self.window)
-        self._toast.show()
+        self._show_toast(t("msg.settings_saved"))
 
     def _show_window(self):
         self.window.show()

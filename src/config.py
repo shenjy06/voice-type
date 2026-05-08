@@ -40,6 +40,7 @@ class RecordingConfig:
 class OutputConfig:
     paste_delay_ms: int = 300
     auto_paste: bool = True
+    paste_mode: str = "auto"
 
 
 @dataclass

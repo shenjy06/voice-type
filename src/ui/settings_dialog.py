@@ -39,6 +39,13 @@ class SettingsDialog(QDialog):
         "whisper-1",
     ]
 
+    PASTE_MODES = [
+        ("settings.paste_mode_auto", "auto"),
+        ("settings.paste_mode_ctrl_v", "ctrl_v"),
+        ("settings.paste_mode_ctrl_shift_v", "ctrl_shift_v"),
+        ("settings.paste_mode_clipboard", "clipboard"),
+    ]
+
     def __init__(self, config: AppConfig, parent=None):
         super().__init__(parent)
         self.config = config
@@ -159,6 +166,11 @@ class SettingsDialog(QDialog):
         self.paste_delay_spin.setSuffix(" ms")
         output_layout.addRow(t("settings.paste_delay"), self.paste_delay_spin)
 
+        self.paste_mode_combo = QComboBox()
+        for label_key, value in self.PASTE_MODES:
+            self.paste_mode_combo.addItem(t(label_key), value)
+        output_layout.addRow(t("settings.paste_mode"), self.paste_mode_combo)
+
         self.auto_paste_check = QCheckBox(t("settings.auto_paste"))
         output_layout.addRow("", self.auto_paste_check)
 
@@ -227,6 +239,10 @@ class SettingsDialog(QDialog):
 
         # Output
         self.paste_delay_spin.setValue(self.config.output.paste_delay_ms)
+        idx = self.paste_mode_combo.findData(self.config.output.paste_mode)
+        if idx < 0:
+            idx = self.paste_mode_combo.findData("auto")
+        self.paste_mode_combo.setCurrentIndex(idx)
         self.auto_paste_check.setChecked(self.config.output.auto_paste)
 
         # Hotkeys
@@ -262,6 +278,7 @@ class SettingsDialog(QDialog):
 
         # Output
         self.config.output.paste_delay_ms = self.paste_delay_spin.value()
+        self.config.output.paste_mode = self.paste_mode_combo.currentData()
         self.config.output.auto_paste = self.auto_paste_check.isChecked()
 
         # Hotkeys

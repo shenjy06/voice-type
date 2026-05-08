@@ -165,34 +165,35 @@ class TestTextTyperOutputText:
         assert result is True
         mock_copy.assert_called_with("hello")
 
-    def test_paste_failure_restores_clipboard(self, mocker):
-        """Failed paste restores original clipboard content."""
+    def test_paste_failure_leaves_text_on_clipboard(self, mocker):
+        """Failed paste leaves recognized text on the clipboard."""
         cfg = make_config()
         typer = TextTyper(cfg)
         mocker.patch("src.typer.time.sleep")
         mocker.patch("src.typer.set_foreground_window", return_value=True)
         mocker.patch.object(typer, "_send_paste", return_value=False)
-        mocker.patch("pyperclip.paste", return_value="original clipboard")
         mock_copy = mocker.patch("pyperclip.copy")
 
         result = typer.output_text("hello", saved_hwnd=0)
 
         assert result is False
-        mock_copy.assert_any_call("original clipboard")
+        mock_copy.assert_called_once_with("hello")
 
-    def test_clipboard_get_failure_uses_empty(self, mocker):
-        """If pyperclip.paste() raises, uses empty string as original."""
+    def test_clipboard_only_mode_copies_without_pasting(self, mocker):
+        """Clipboard-only mode skips paste keystrokes."""
         cfg = make_config()
+        cfg.output.paste_mode = "clipboard"
         typer = TextTyper(cfg)
         mocker.patch("src.typer.time.sleep")
         mocker.patch("src.typer.set_foreground_window", return_value=True)
-        mocker.patch.object(typer, "_send_paste", return_value=False)
-        mocker.patch("pyperclip.paste", side_effect=Exception("clipboard error"))
+        mock_send = mocker.patch.object(typer, "_send_paste", return_value=True)
         mock_copy = mocker.patch("pyperclip.copy")
 
-        typer.output_text("hello", saved_hwnd=0)
+        result = typer.output_text("hello", saved_hwnd=0)
 
-        mock_copy.assert_any_call("")
+        assert result is True
+        mock_copy.assert_called_once_with("hello")
+        mock_send.assert_not_called()
 
     def test_paste_delay_respected(self, mocker):
         """sleep is called with paste_delay_ms / 1000."""
@@ -222,6 +223,32 @@ class TestTextTyperOutputText:
         typer.output_text("hello", saved_hwnd=123)
 
         mock_send.assert_called_once_with(use_terminal_paste=True)
+
+    def test_ctrl_shift_v_mode_forces_terminal_paste_shortcut(self, mocker):
+        """Ctrl+Shift+V mode always uses terminal paste shortcut."""
+        cfg = make_config(output={"paste_mode": "ctrl_shift_v"})
+        typer = TextTyper(cfg)
+        mocker.patch("src.typer.time.sleep")
+        mocker.patch.object(typer, "_is_terminal_window", return_value=False)
+        mock_send = mocker.patch.object(typer, "_send_paste", return_value=True)
+        mocker.patch("pyperclip.copy")
+
+        typer.output_text("hello", saved_hwnd=0)
+
+        mock_send.assert_called_once_with(use_terminal_paste=True)
+
+    def test_ctrl_v_mode_forces_regular_paste_shortcut(self, mocker):
+        """Ctrl+V mode always uses regular paste shortcut."""
+        cfg = make_config(output={"paste_mode": "ctrl_v"})
+        typer = TextTyper(cfg)
+        mocker.patch("src.typer.time.sleep")
+        mocker.patch.object(typer, "_is_terminal_window", return_value=True)
+        mock_send = mocker.patch.object(typer, "_send_paste", return_value=True)
+        mocker.patch("pyperclip.copy")
+
+        typer.output_text("hello", saved_hwnd=0)
+
+        mock_send.assert_called_once_with(use_terminal_paste=False)
 
     def test_non_terminal_window_uses_regular_paste_shortcut(self, mocker):
         """Non-terminal targets use Ctrl+V."""

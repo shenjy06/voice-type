@@ -40,6 +40,7 @@ class TestDefaultConfigs:
         cfg = OutputConfig()
         assert cfg.paste_delay_ms == 300
         assert cfg.auto_paste is True
+        assert cfg.paste_mode == "auto"
 
     def test_window_config_defaults(self):
         cfg = WindowConfig()
@@ -105,6 +106,7 @@ class TestAppConfigToDict:
         assert restored.recording.sample_rate == 48000
         assert restored.output.paste_delay_ms == 500
         assert restored.output.auto_paste is False
+        assert restored.output.paste_mode == "auto"
         assert restored.window.show_on_start is False
 
 
@@ -114,7 +116,7 @@ class TestAppConfigFromDict:
             "polish": {"base_url": "https://example.com", "api_key": "sk-1", "model": "gpt-4"},
             "asr": {"base_url": "https://asr.com", "api_key": "sk-2", "model": "whisper", "language": "en"},
             "recording": {"sample_rate": 44100},
-            "output": {"paste_delay_ms": 100, "auto_paste": False},
+            "output": {"paste_delay_ms": 100, "auto_paste": False, "paste_mode": "ctrl_shift_v"},
             "window": {"show_on_start": False, "always_on_top": False},
             "hotkey": {"toggle_enabled": False},
         }
@@ -123,6 +125,7 @@ class TestAppConfigFromDict:
         assert cfg.asr.language == "en"
         assert cfg.recording.sample_rate == 44100
         assert cfg.output.auto_paste is False
+        assert cfg.output.paste_mode == "ctrl_shift_v"
         assert cfg.window.show_on_start is False
         assert cfg.hotkey.toggle_enabled is False
 

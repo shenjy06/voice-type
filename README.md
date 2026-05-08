@@ -10,6 +10,7 @@ Licensed under [GPL-3.0](LICENSE).
 - **Speech Recognition (STT)**: Transcribe recorded audio to text (OpenAI-compatible protocol)
 - **Smart Refinement**: LLM automatically removes filler words, fixes grammar, and improves clarity
 - **Text Injection**: Restores the original foreground window and pastes the refined text at the cursor position
+- **Local History**: Keeps recent recognized text in local SQLite for copy or re-paste from the tray menu
 - **Floating Control Window**: Always-on-top mini window with drag support and pulsing red dot animation
 - **Status Bubble**: Shows "录制中..." during recording, "润色中..." during processing, dismisses after paste
 - **System Tray**: Click X to minimize to tray; tray menu provides recording toggle, settings, and quit
@@ -113,7 +114,10 @@ The Left Alt hotkey distinguishes between a tap (start/stop toggle) and modifier
 | Field | Description | Default |
 |-------|-------------|---------|
 | Paste Delay | Delay before pasting (milliseconds) | `300 ms` |
+| Paste Mode | Auto-detect target window, force `Ctrl+V`, force `Ctrl+Shift+V`, or copy only | Auto |
 | Auto-paste | Whether to auto-paste to cursor position | Enabled |
+
+If auto-paste fails, the recognized text remains on the clipboard so it can be pasted manually.
 
 ## API Key Configuration
 
@@ -182,6 +186,7 @@ voice-type/
 │   ├── __main__.py              # Entry point: Application orchestrator
 │   ├── api_client.py            # Base OpenAI-compatible API client wrapper
 │   ├── config.py                # Config management: dataclass + JSON persistence
+│   ├── history.py               # SQLite local recognized text history storage
 │   ├── audio.py                 # Audio recording: sounddevice + soundfile OGG encoding
 │   ├── asr.py                   # Speech recognition: OpenAI-compatible transcriptions API
 │   ├── polisher.py              # Text refinement: LLM chat completions API
@@ -191,6 +196,7 @@ voice-type/
 │   ├── state.py                 # Application state enum (RecorderState)
 │   ├── i18n.py                  # Internationalization: Chinese/English translations
 │   └── ui/
+│       ├── history_dialog.py    # Recent text history viewer/copy/re-paste dialog
 │       ├── main_window.py       # Floating recording window + pulsing dot + StatusBubble + Toast
 │       ├── settings_dialog.py   # Settings dialog (STT/Polish/Output/Hotkeys)
 │       ├── system_tray.py       # System tray icon + pynput hotkey manager
@@ -225,7 +231,7 @@ pytest tests/ -v
 
 ## Configuration File
 
-User configuration is stored at `%USERPROFILE%\.voice-type\config.json`. On first launch, if no configuration is detected, the settings dialog will automatically appear to guide the user through setup.
+User configuration is stored at `%USERPROFILE%\.voice-type\config.json`. Local history is stored at `%USERPROFILE%\.voice-type\history.sqlite3`. On first launch, if no configuration is detected, the settings dialog will automatically appear to guide the user through setup.
 
 ## Notes
 

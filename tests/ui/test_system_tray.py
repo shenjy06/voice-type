@@ -14,7 +14,7 @@ class TestTrayIcon:
         tray = TrayIcon()
         ctx = tray._tray.contextMenu()
         actions = ctx.actions()
-        # Show Window, separator, Start Recording, Settings..., separator, Quit
+        # Show Window, separator, Start Recording, Settings..., History..., separator, Quit
         assert len(actions) >= 4
 
     def test_on_activated_double_click_emits(self, qtbot):
@@ -71,6 +71,11 @@ class TestTrayIcon:
         tray = TrayIcon()
         with qtbot.waitSignal(tray.settings_requested):
             tray._tray.contextMenu().actions()[3].trigger()  # Settings...
+
+    def test_menu_history_emits_signal(self, qtbot):
+        tray = TrayIcon()
+        with qtbot.waitSignal(tray.history_requested):
+            tray._tray.contextMenu().actions()[4].trigger()  # History...
 
     def test_menu_quit_emits_signal(self, qtbot):
         tray = TrayIcon()
