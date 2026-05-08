@@ -208,6 +208,35 @@ class TestTextTyperOutputText:
 
         mock_sleep.assert_called_with(0.5)
 
+    def test_terminal_window_uses_terminal_paste_shortcut(self, mocker):
+        """Terminal targets use Ctrl+Shift+V."""
+        cfg = make_config()
+        typer = TextTyper(cfg)
+        mocker.patch("src.typer.time.sleep")
+        mocker.patch("src.typer.set_foreground_window", return_value=True)
+        mocker.patch.object(typer, "_is_terminal_window", return_value=True)
+        mock_send = mocker.patch.object(typer, "_send_paste", return_value=True)
+        mocker.patch("pyperclip.paste", return_value="")
+        mocker.patch("pyperclip.copy")
+
+        typer.output_text("hello", saved_hwnd=123)
+
+        mock_send.assert_called_once_with(use_terminal_paste=True)
+
+    def test_non_terminal_window_uses_regular_paste_shortcut(self, mocker):
+        """Non-terminal targets use Ctrl+V."""
+        cfg = make_config()
+        typer = TextTyper(cfg)
+        mocker.patch("src.typer.time.sleep")
+        mocker.patch.object(typer, "_is_terminal_window", return_value=False)
+        mock_send = mocker.patch.object(typer, "_send_paste", return_value=True)
+        mocker.patch("pyperclip.paste", return_value="")
+        mocker.patch("pyperclip.copy")
+
+        typer.output_text("hello", saved_hwnd=0)
+
+        mock_send.assert_called_once_with(use_terminal_paste=False)
+
 
 class TestTextTyperSendPaste:
     def test_send_paste_success(self, mocker):
@@ -230,3 +259,39 @@ class TestTextTyperSendPaste:
         cfg = make_config()
         typer = TextTyper(cfg)
         assert typer._send_paste() is False
+
+    def test_send_terminal_paste_success(self, mocker):
+        """Terminal paste sends Ctrl+Shift+V."""
+        mock_user32 = mocker.patch("src.typer.user32")
+        mocker.patch("src.typer.time.sleep")
+
+        cfg = make_config()
+        typer = TextTyper(cfg)
+        assert typer._send_paste(use_terminal_paste=True) is True
+
+        assert mock_user32.keybd_event.call_count == 6
+
+
+class TestTextTyperTerminalDetection:
+    def test_detects_windows_terminal_class(self, mocker):
+        cfg = make_config()
+        typer = TextTyper(cfg)
+        mocker.patch.object(typer, "_get_window_class_name", return_value="CASCADIA_HOSTING_WINDOW_CLASS")
+
+        assert typer._is_terminal_window(123) is True
+
+    def test_detects_codex_title(self, mocker):
+        cfg = make_config()
+        typer = TextTyper(cfg)
+        mocker.patch.object(typer, "_get_window_class_name", return_value="Chrome_WidgetWin_1")
+        mocker.patch.object(typer, "_get_window_title", return_value="Codex - Visual Studio Code")
+
+        assert typer._is_terminal_window(123) is True
+
+    def test_non_terminal_window_returns_false(self, mocker):
+        cfg = make_config()
+        typer = TextTyper(cfg)
+        mocker.patch.object(typer, "_get_window_class_name", return_value="TXGuiFoundation")
+        mocker.patch.object(typer, "_get_window_title", return_value="QQ")
+
+        assert typer._is_terminal_window(123) is False
