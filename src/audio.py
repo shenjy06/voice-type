@@ -13,6 +13,83 @@ logger = logging.getLogger(__name__)
 TEMP_AUDIO_DIR_NAME = "voice_type"
 
 
+def _calculate_input_level(indata) -> float:
+    """Return a normalized level for float audio input."""
+    rms = float(np.sqrt(np.mean(np.square(indata), dtype=np.float64)))
+    return min(1.0, rms * 12.0)
+
+
+def get_default_input_device_name() -> str:
+    """Return the current default input device name, or an empty string."""
+    try:
+        device = sd.query_devices(kind="input")
+    except Exception as e:
+        logger.warning("Failed to query input device: %s", e)
+        return ""
+    if isinstance(device, dict):
+        return str(device.get("name", ""))
+    return str(device)
+
+
+class MicrophoneMonitor:
+    """Lightweight microphone level monitor for settings diagnostics."""
+
+    def __init__(self, sample_rate: int = 16000):
+        self.sample_rate = sample_rate
+        self._stream: sd.InputStream | None = None
+        self._input_level = 0.0
+        self._error = ""
+
+    @property
+    def input_level(self) -> float:
+        return self._input_level
+
+    @property
+    def error(self) -> str:
+        return self._error
+
+    @property
+    def is_running(self) -> bool:
+        return self._stream is not None
+
+    def start(self) -> bool:
+        if self._stream:
+            return True
+        self._error = ""
+        self._input_level = 0.0
+        try:
+            self._stream = sd.InputStream(
+                samplerate=self.sample_rate,
+                channels=1,
+                dtype=np.float32,
+                callback=self._callback,
+            )
+            self._stream.start()
+        except Exception as e:
+            self._stream = None
+            self._error = str(e)
+            logger.warning("Failed to start microphone monitor: %s", e)
+            return False
+        return True
+
+    def stop(self) -> None:
+        if not self._stream:
+            return
+        try:
+            self._stream.stop()
+            self._stream.close()
+        except Exception as e:
+            logger.warning("Failed to stop microphone monitor: %s", e)
+        finally:
+            self._stream = None
+            self._input_level = 0.0
+
+    def _callback(self, indata, frames, time_info, status):
+        if status:
+            logger.debug("Monitor stream status: %s", status)
+        self._input_level = _calculate_input_level(indata)
+
+
 class AudioRecorder:
     def __init__(self, sample_rate: int = 16000):
         self.sample_rate = sample_rate
@@ -75,8 +152,7 @@ class AudioRecorder:
             logger.debug("Stream status: %s", status)
         if self._recording:
             self._frames.append(indata.copy())
-            rms = float(np.sqrt(np.mean(np.square(indata), dtype=np.float64)))
-            self._input_level = min(1.0, rms * 12.0)
+            self._input_level = _calculate_input_level(indata)
         else:
             self._input_level = 0.0
 

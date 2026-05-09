@@ -20,7 +20,19 @@ class TrayIcon(QObject):
     history_requested = Signal()
     settings_requested = Signal()
     recording_toggled = Signal()
+    auto_paste_toggled = Signal(bool)
+    polish_toggled = Signal(bool)
+    paste_mode_changed = Signal(str)
+    asr_language_changed = Signal(str)
     quit_requested = Signal()
+
+    PASTE_MODES = (
+        ("settings.paste_mode_auto", "auto"),
+        ("settings.paste_mode_ctrl_v", "ctrl_v"),
+        ("settings.paste_mode_ctrl_shift_v", "ctrl_shift_v"),
+        ("settings.paste_mode_clipboard", "clipboard"),
+    )
+    ASR_LANGUAGES = ("auto", "zh", "en", "ja", "ko", "fr", "de", "es")
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -48,6 +60,40 @@ class TrayIcon(QObject):
         self.record_action.triggered.connect(self.recording_toggled.emit)
         menu.addAction(self.record_action)
 
+        menu.addSeparator()
+
+        self.auto_paste_action = QAction(t("tray.auto_paste"), menu)
+        self.auto_paste_action.setCheckable(True)
+        self.auto_paste_action.toggled.connect(self.auto_paste_toggled.emit)
+        menu.addAction(self.auto_paste_action)
+
+        self.polish_action = QAction(t("tray.polish"), menu)
+        self.polish_action.setCheckable(True)
+        self.polish_action.toggled.connect(self.polish_toggled.emit)
+        menu.addAction(self.polish_action)
+
+        self.paste_mode_menu = QMenu(t("tray.paste_mode"), menu)
+        self.paste_mode_actions = {}
+        for label_key, value in self.PASTE_MODES:
+            action = QAction(t(label_key), self.paste_mode_menu)
+            action.setCheckable(True)
+            action.triggered.connect(lambda checked=False, mode=value: self.paste_mode_changed.emit(mode))
+            self.paste_mode_menu.addAction(action)
+            self.paste_mode_actions[value] = action
+        menu.addMenu(self.paste_mode_menu)
+
+        self.asr_language_menu = QMenu(t("tray.asr_language"), menu)
+        self.asr_language_actions = {}
+        for language in self.ASR_LANGUAGES:
+            action = QAction(language, self.asr_language_menu)
+            action.setCheckable(True)
+            action.triggered.connect(
+                lambda checked=False, lang=language: self.asr_language_changed.emit(lang)
+            )
+            self.asr_language_menu.addAction(action)
+            self.asr_language_actions[language] = action
+        menu.addMenu(self.asr_language_menu)
+
         self.settings_action = QAction(t("tray.settings"), menu)
         self.settings_action.triggered.connect(self.settings_requested.emit)
         menu.addAction(self.settings_action)
@@ -63,6 +109,24 @@ class TrayIcon(QObject):
         menu.addAction(self._quit_action)
 
         self._tray.setContextMenu(menu)
+
+    def apply_config(self, config):
+        """Reflect current runtime config in quick toggle actions."""
+        self._set_action_checked(self.auto_paste_action, config.output.auto_paste)
+        self._set_action_checked(self.polish_action, config.polish.enabled)
+        self._check_action_group(self.paste_mode_actions, config.output.paste_mode, "auto")
+        self._check_action_group(self.asr_language_actions, config.asr.language, "auto")
+
+    def _set_action_checked(self, action: QAction, checked: bool):
+        old = action.blockSignals(True)
+        action.setChecked(checked)
+        action.blockSignals(old)
+
+    def _check_action_group(self, actions: dict[str, QAction], selected: str, fallback: str):
+        if selected not in actions:
+            selected = fallback
+        for value, action in actions.items():
+            self._set_action_checked(action, value == selected)
 
     def _on_activated(self, reason):
         if reason == QSystemTrayIcon.DoubleClick:
@@ -89,6 +153,12 @@ class TrayIcon(QObject):
         self.record_action.setText(
             t("tray.stop_recording") if self._is_recording else t("tray.start_recording")
         )
+        self.auto_paste_action.setText(t("tray.auto_paste"))
+        self.polish_action.setText(t("tray.polish"))
+        self.paste_mode_menu.setTitle(t("tray.paste_mode"))
+        for label_key, value in self.PASTE_MODES:
+            self.paste_mode_actions[value].setText(t(label_key))
+        self.asr_language_menu.setTitle(t("tray.asr_language"))
         self.history_action.setText(t("tray.history"))
         self.settings_action.setText(t("tray.settings"))
         self._quit_action.setText(t("tray.quit"))

@@ -53,6 +53,31 @@ class TestProcessingWorker:
 
         assert finished_text == ""
 
+    def test_polish_disabled_returns_transcript(self, qtbot, mocker):
+        """When polish is disabled, ASR text is returned directly."""
+        from src.__main__ import ProcessingWorker
+
+        mock_transcriber = mocker.patch("src.__main__.Transcriber")
+        mock_transcriber.return_value.transcribe.return_value = "raw text"
+        mock_polisher = mocker.patch("src.__main__.TextPolisher")
+        mocker.patch("os.remove")
+
+        cfg = mocker.MagicMock()
+        cfg.polish.enabled = False
+        worker = ProcessingWorker(cfg, "/tmp/audio.wav")
+
+        finished_text = None
+
+        def on_finished(text):
+            nonlocal finished_text
+            finished_text = text
+
+        worker.finished.connect(on_finished)
+        worker.run()
+
+        assert finished_text == "raw text"
+        mock_polisher.assert_not_called()
+
     def test_exception_emits_error(self, qtbot, mocker):
         """Exception in processing emits error signal."""
         from src.__main__ import ProcessingWorker
@@ -119,7 +144,9 @@ class TestApplication:
         mock_config = mocker.patch("src.__main__.AppConfig")
         mock_cfg = mocker.MagicMock(
             recording=mocker.MagicMock(sample_rate=16000),
-            output=mocker.MagicMock(auto_paste=True, paste_delay_ms=300),
+            output=mocker.MagicMock(auto_paste=True, paste_delay_ms=300, paste_mode="auto"),
+            polish=mocker.MagicMock(enabled=True),
+            asr=mocker.MagicMock(language="auto"),
             window=mocker.MagicMock(show_on_start=False, always_on_top=True),
             hotkey=mocker.MagicMock(toggle_enabled=True),
         )
@@ -386,3 +413,40 @@ class TestApplication:
         self._make_application(qtbot, mocker, is_configured=True)
 
         mock_dialog_cls.assert_not_called()
+
+    def test_quick_set_auto_paste_saves_config(self, qtbot, mocker):
+        app = self._make_application(qtbot, mocker)
+        app.config.save = mocker.MagicMock()
+
+        app._set_auto_paste(False)
+
+        assert app.config.output.auto_paste is False
+        app.config.save.assert_called_once()
+        app.tray.apply_config.assert_called()
+
+    def test_quick_set_polish_enabled_saves_config(self, qtbot, mocker):
+        app = self._make_application(qtbot, mocker)
+        app.config.save = mocker.MagicMock()
+
+        app._set_polish_enabled(False)
+
+        assert app.config.polish.enabled is False
+        app.config.save.assert_called_once()
+
+    def test_quick_set_paste_mode_saves_config(self, qtbot, mocker):
+        app = self._make_application(qtbot, mocker)
+        app.config.save = mocker.MagicMock()
+
+        app._set_paste_mode("clipboard")
+
+        assert app.config.output.paste_mode == "clipboard"
+        app.config.save.assert_called_once()
+
+    def test_quick_set_asr_language_saves_config(self, qtbot, mocker):
+        app = self._make_application(qtbot, mocker)
+        app.config.save = mocker.MagicMock()
+
+        app._set_asr_language("en")
+
+        assert app.config.asr.language == "en"
+        app.config.save.assert_called_once()

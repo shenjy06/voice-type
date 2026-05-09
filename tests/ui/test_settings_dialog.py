@@ -35,6 +35,14 @@ class TestSettingsDialogCreation:
         modes = [dlg.paste_mode_combo.itemData(i) for i in range(dlg.paste_mode_combo.count())]
         assert modes == ["auto", "ctrl_v", "ctrl_shift_v", "clipboard"]
 
+    def test_microphone_controls_exist(self, qtbot, mocker):
+        mocker.patch("src.ui.settings_dialog.get_default_input_device_name", return_value="Mic")
+        dlg = SettingsDialog(AppConfig())
+        qtbot.addWidget(dlg)
+        assert dlg.mic_device_label.text() == "Mic"
+        assert dlg.mic_level_bar.value() == 0
+        assert dlg.mic_test_btn.text() == "Test Microphone"
+
 
 class TestSettingsDialogLoadConfig:
     def test_load_config_populates_fields(self, qtbot):
@@ -48,6 +56,7 @@ class TestSettingsDialogLoadConfig:
         assert dlg.stt_base_url_input.text() == "https://stt.api"
         assert dlg.polish_api_key_input.text() == "sk-polish"
         assert dlg.polish_base_url_input.text() == "https://polish.api"
+        assert dlg.polish_enabled_check.isChecked() is True
 
     def test_load_config_with_custom_model_not_in_list(self, qtbot):
         """Custom model sets the edit text."""
@@ -83,6 +92,85 @@ class TestSettingsDialogHotkeyToggle:
         dlg.hotkey_toggle_check.setChecked(False)
         dlg._save_and_close()
         assert cfg.hotkey.toggle_enabled is False
+
+
+class TestSettingsDialogMicrophoneTest:
+    def test_start_microphone_monitor(self, qtbot, mocker):
+        monitor = mocker.MagicMock()
+        monitor.start.return_value = True
+        monitor.is_running = True
+        mock_monitor_cls = mocker.patch(
+            "src.ui.settings_dialog.MicrophoneMonitor",
+            return_value=monitor,
+        )
+        mocker.patch("src.ui.settings_dialog.get_default_input_device_name", return_value="Mic")
+
+        dlg = SettingsDialog(AppConfig())
+        qtbot.addWidget(dlg)
+        dlg.sample_rate_spin.setValue(16000)
+        dlg._start_microphone_monitor()
+
+        mock_monitor_cls.assert_called_once_with(16000)
+        monitor.start.assert_called_once()
+        assert dlg._mic_timer.isActive()
+        assert dlg.mic_test_btn.text() == "Stop Test"
+        assert dlg.mic_status_label.text() == "Listening..."
+
+    def test_start_microphone_monitor_failure(self, qtbot, mocker):
+        monitor = mocker.MagicMock()
+        monitor.start.return_value = False
+        monitor.error = "permission denied"
+        mocker.patch("src.ui.settings_dialog.MicrophoneMonitor", return_value=monitor)
+        mocker.patch("src.ui.settings_dialog.get_default_input_device_name", return_value="Mic")
+
+        dlg = SettingsDialog(AppConfig())
+        qtbot.addWidget(dlg)
+        dlg._start_microphone_monitor()
+
+        assert not dlg._mic_timer.isActive()
+        assert dlg.mic_level_bar.value() == 0
+        assert "permission denied" in dlg.mic_status_label.text()
+        assert dlg.mic_test_btn.text() == "Test Microphone"
+
+    def test_refresh_microphone_level_detects_input(self, qtbot, mocker):
+        monitor = mocker.MagicMock()
+        monitor.is_running = True
+        monitor.input_level = 0.5
+        mocker.patch("src.ui.settings_dialog.get_default_input_device_name", return_value="Mic")
+
+        dlg = SettingsDialog(AppConfig())
+        qtbot.addWidget(dlg)
+        dlg._mic_monitor = monitor
+        dlg._refresh_microphone_level()
+
+        assert dlg.mic_level_bar.value() == 50
+        assert dlg.mic_status_label.text() == "Microphone input detected."
+
+    def test_refresh_microphone_level_reports_silence(self, qtbot, mocker):
+        monitor = mocker.MagicMock()
+        monitor.is_running = True
+        monitor.input_level = 0.0
+        mocker.patch("src.ui.settings_dialog.get_default_input_device_name", return_value="Mic")
+
+        dlg = SettingsDialog(AppConfig())
+        qtbot.addWidget(dlg)
+        dlg._mic_monitor = monitor
+        dlg._refresh_microphone_level()
+
+        assert dlg.mic_level_bar.value() == 0
+        assert "No input detected" in dlg.mic_status_label.text()
+
+    def test_reject_stops_microphone_monitor(self, qtbot, mocker):
+        monitor = mocker.MagicMock()
+        monitor.is_running = True
+        mocker.patch("src.ui.settings_dialog.get_default_input_device_name", return_value="Mic")
+
+        dlg = SettingsDialog(AppConfig())
+        qtbot.addWidget(dlg)
+        dlg._mic_monitor = monitor
+        dlg.reject()
+
+        monitor.stop.assert_called_once()
 
 
 class TestSettingsDialogSave:
@@ -166,6 +254,18 @@ class TestSettingsDialogSave:
         dlg._save_and_close()
 
         assert cfg.output.paste_mode == "clipboard"
+
+    def test_save_polish_enabled(self, qtbot, mocker):
+        mocker.patch("src.ui.settings_dialog.check_network_available", return_value=True)
+
+        cfg = AppConfig(asr=AsrConfig(api_key="sk-test"))
+        dlg = SettingsDialog(cfg)
+        qtbot.addWidget(dlg)
+        dlg.polish_enabled_check.setChecked(False)
+
+        dlg._save_and_close()
+
+        assert cfg.polish.enabled is False
 
     def test_save_and_close_accepts_dialog(self, qtbot, mocker):
         """_save_and_close calls accept() to close the dialog."""

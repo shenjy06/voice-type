@@ -14,8 +14,9 @@ class TestTrayIcon:
         tray = TrayIcon()
         ctx = tray._tray.contextMenu()
         actions = ctx.actions()
-        # Show Window, separator, Start Recording, Settings..., History..., separator, Quit
-        assert len(actions) >= 4
+        assert len(actions) >= 10
+        assert tray.auto_paste_action.text() == "Auto-paste"
+        assert tray.polish_action.text() == "Polish text"
 
     def test_on_activated_double_click_emits(self, qtbot):
         tray = TrayIcon()
@@ -70,12 +71,12 @@ class TestTrayIcon:
     def test_menu_settings_emits_signal(self, qtbot):
         tray = TrayIcon()
         with qtbot.waitSignal(tray.settings_requested):
-            tray._tray.contextMenu().actions()[3].trigger()  # Settings...
+            tray.settings_action.trigger()
 
     def test_menu_history_emits_signal(self, qtbot):
         tray = TrayIcon()
         with qtbot.waitSignal(tray.history_requested):
-            tray._tray.contextMenu().actions()[4].trigger()  # History...
+            tray.history_action.trigger()
 
     def test_menu_quit_emits_signal(self, qtbot):
         tray = TrayIcon()
@@ -86,6 +87,46 @@ class TestTrayIcon:
         tray = TrayIcon()
         with qtbot.waitSignal(tray.recording_toggled):
             tray.record_action.trigger()
+
+    def test_quick_toggle_auto_paste_emits(self, qtbot):
+        tray = TrayIcon()
+        with qtbot.waitSignal(tray.auto_paste_toggled) as blocker:
+            tray.auto_paste_action.trigger()
+        assert blocker.args == [True]
+
+    def test_quick_toggle_polish_emits(self, qtbot):
+        tray = TrayIcon()
+        with qtbot.waitSignal(tray.polish_toggled) as blocker:
+            tray.polish_action.trigger()
+        assert blocker.args == [True]
+
+    def test_paste_mode_action_emits_mode(self, qtbot):
+        tray = TrayIcon()
+        with qtbot.waitSignal(tray.paste_mode_changed) as blocker:
+            tray.paste_mode_actions["ctrl_shift_v"].trigger()
+        assert blocker.args == ["ctrl_shift_v"]
+
+    def test_asr_language_action_emits_language(self, qtbot):
+        tray = TrayIcon()
+        with qtbot.waitSignal(tray.asr_language_changed) as blocker:
+            tray.asr_language_actions["en"].trigger()
+        assert blocker.args == ["en"]
+
+    def test_apply_config_checks_quick_actions(self, qtbot):
+        from src.config import AppConfig, AsrConfig, OutputConfig, PolishApiConfig
+
+        tray = TrayIcon()
+        cfg = AppConfig(
+            asr=AsrConfig(language="en"),
+            polish=PolishApiConfig(enabled=False),
+            output=OutputConfig(auto_paste=False, paste_mode="ctrl_shift_v"),
+        )
+        tray.apply_config(cfg)
+
+        assert tray.auto_paste_action.isChecked() is False
+        assert tray.polish_action.isChecked() is False
+        assert tray.paste_mode_actions["ctrl_shift_v"].isChecked() is True
+        assert tray.asr_language_actions["en"].isChecked() is True
 
 
 class TestHotkeyManager:

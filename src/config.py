@@ -15,6 +15,7 @@ class PolishApiConfig:
     base_url: str = "https://api.openai.com/v1"
     api_key: str = ""
     model: str = "gpt-4o"
+    enabled: bool = True
 
 
 @dataclass

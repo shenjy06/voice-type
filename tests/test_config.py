@@ -19,6 +19,7 @@ class TestDefaultConfigs:
         assert cfg.base_url == "https://api.openai.com/v1"
         assert cfg.api_key == ""
         assert cfg.model == "gpt-4o"
+        assert cfg.enabled is True
 
     def test_asr_config_defaults(self):
         cfg = AsrConfig()
@@ -102,6 +103,7 @@ class TestAppConfigToDict:
         restored = AppConfig.from_dict(cfg.to_dict())
         assert restored.polish.api_key == "sk-test"
         assert restored.polish.model == "gpt-4o-mini"
+        assert restored.polish.enabled is True
         assert restored.asr.language == "zh"
         assert restored.recording.sample_rate == 48000
         assert restored.output.paste_delay_ms == 500
@@ -113,7 +115,7 @@ class TestAppConfigToDict:
 class TestAppConfigFromDict:
     def test_from_dict_full_config(self):
         data = {
-            "polish": {"base_url": "https://example.com", "api_key": "sk-1", "model": "gpt-4"},
+            "polish": {"base_url": "https://example.com", "api_key": "sk-1", "model": "gpt-4", "enabled": False},
             "asr": {"base_url": "https://asr.com", "api_key": "sk-2", "model": "whisper", "language": "en"},
             "recording": {"sample_rate": 44100},
             "output": {"paste_delay_ms": 100, "auto_paste": False, "paste_mode": "ctrl_shift_v"},
@@ -122,6 +124,7 @@ class TestAppConfigFromDict:
         }
         cfg = AppConfig.from_dict(data)
         assert cfg.polish.base_url == "https://example.com"
+        assert cfg.polish.enabled is False
         assert cfg.asr.language == "en"
         assert cfg.recording.sample_rate == 44100
         assert cfg.output.auto_paste is False

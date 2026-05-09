@@ -56,6 +56,9 @@ class ProcessingWorker(QObject):
             if not transcript:
                 self.finished.emit("")
                 return
+            if not self.config.polish.enabled:
+                self.finished.emit(transcript)
+                return
             polisher = TextPolisher(self.config)
             refined = polisher.polish(transcript)
             self.finished.emit(refined)
@@ -107,7 +110,12 @@ class Application:
         self.tray.history_requested.connect(self._show_history)
         self.tray.settings_requested.connect(self._show_settings)
         self.tray.recording_toggled.connect(self._toggle_recording)
+        self.tray.auto_paste_toggled.connect(self._set_auto_paste)
+        self.tray.polish_toggled.connect(self._set_polish_enabled)
+        self.tray.paste_mode_changed.connect(self._set_paste_mode)
+        self.tray.asr_language_changed.connect(self._set_asr_language)
         self.tray.quit_requested.connect(self._quit)
+        self.tray.apply_config(self.config)
         self.tray.show()
 
         # Settings dialog (lazy)
@@ -273,6 +281,7 @@ class Application:
         self.audio_recorder.sample_rate = self.config.recording.sample_rate
         self.window.retranslate()
         self.tray.retranslate()
+        self.tray.apply_config(self.config)
         if self._history_dialog is not None:
             self._history_dialog.retranslate()
         # Invalidate cached dialog so it's recreated with new language next time
@@ -312,6 +321,27 @@ class Application:
     def _sync_audio_level(self):
         """Copy recorder level into the UI on the Qt thread."""
         self.window.set_audio_level(self.audio_recorder.input_level)
+
+    def _save_quick_settings(self):
+        self.config.save()
+        self.tray.apply_config(self.config)
+        self.typer.config = self.config
+
+    def _set_auto_paste(self, enabled: bool):
+        self.config.output.auto_paste = enabled
+        self._save_quick_settings()
+
+    def _set_polish_enabled(self, enabled: bool):
+        self.config.polish.enabled = enabled
+        self._save_quick_settings()
+
+    def _set_paste_mode(self, mode: str):
+        self.config.output.paste_mode = mode
+        self._save_quick_settings()
+
+    def _set_asr_language(self, language: str):
+        self.config.asr.language = language
+        self._save_quick_settings()
 
     def run(self):
         sys.exit(self.app.exec())

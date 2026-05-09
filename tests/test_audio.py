@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 from pathlib import Path
-from src.audio import AudioRecorder
+from src.audio import AudioRecorder, MicrophoneMonitor, get_default_input_device_name
 
 
 class TestAudioRecorderDefaults:
@@ -233,3 +233,61 @@ class TestAudioRecorderCancel:
         recorder.cancel()
 
         assert recorder._temp_file is None
+
+
+class TestMicrophoneMonitor:
+    def test_start_creates_stream(self, mocker):
+        mock_stream = mocker.MagicMock()
+        mock_sd = mocker.patch("src.audio.sd")
+        mock_sd.InputStream.return_value = mock_stream
+
+        monitor = MicrophoneMonitor(sample_rate=44100)
+        assert monitor.start() is True
+
+        mock_sd.InputStream.assert_called_once()
+        call_kwargs = mock_sd.InputStream.call_args[1]
+        assert call_kwargs["samplerate"] == 44100
+        assert call_kwargs["channels"] == 1
+        assert call_kwargs["dtype"] == np.float32
+        mock_stream.start.assert_called_once()
+        assert monitor.is_running is True
+
+    def test_start_failure_sets_error(self, mocker):
+        mocker.patch("src.audio.sd.InputStream", side_effect=RuntimeError("denied"))
+
+        monitor = MicrophoneMonitor()
+
+        assert monitor.start() is False
+        assert monitor.is_running is False
+        assert "denied" in monitor.error
+
+    def test_stop_closes_stream_and_resets_level(self, mocker):
+        mock_stream = mocker.MagicMock()
+        mocker.patch("src.audio.sd.InputStream", return_value=mock_stream)
+
+        monitor = MicrophoneMonitor()
+        monitor.start()
+        monitor._input_level = 0.5
+        monitor.stop()
+
+        mock_stream.stop.assert_called_once()
+        mock_stream.close.assert_called_once()
+        assert monitor.is_running is False
+        assert monitor.input_level == 0.0
+
+    def test_callback_updates_input_level(self):
+        monitor = MicrophoneMonitor()
+        data = np.array([[0.1], [0.1]], dtype=np.float32)
+        monitor._callback(data, 2, None, None)
+
+        assert monitor.input_level > 0.0
+
+    def test_get_default_input_device_name(self, mocker):
+        mocker.patch("src.audio.sd.query_devices", return_value={"name": "Microphone Array"})
+
+        assert get_default_input_device_name() == "Microphone Array"
+
+    def test_get_default_input_device_name_handles_error(self, mocker):
+        mocker.patch("src.audio.sd.query_devices", side_effect=RuntimeError("no device"))
+
+        assert get_default_input_device_name() == ""

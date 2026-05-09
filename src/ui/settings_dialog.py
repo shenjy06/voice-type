@@ -3,10 +3,11 @@
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QLabel, QLineEdit,
     QComboBox, QFormLayout, QGroupBox, QSpinBox, QCheckBox,
-    QDialogButtonBox, QTabWidget, QWidget, QPushButton,
+    QDialogButtonBox, QTabWidget, QWidget, QPushButton, QProgressBar,
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QIcon
+from src.audio import MicrophoneMonitor, get_default_input_device_name
 from src.config import AppConfig, DEFAULT_BASE_URL
 from src.network import check_network_available
 from src.ui.main_window import Toast
@@ -54,6 +55,10 @@ class SettingsDialog(QDialog):
         self.setModal(True)
         self.setMinimumWidth(480)
         self.setWindowFlags(Qt.Dialog)
+        self._mic_monitor = None
+        self._mic_timer = QTimer(self)
+        self._mic_timer.setInterval(100)
+        self._mic_timer.timeout.connect(self._refresh_microphone_level)
         self._init_ui()
         self._load_config()
 
@@ -121,6 +126,30 @@ class SettingsDialog(QDialog):
         self.sample_rate_spin.setSingleStep(8000)
         stt_misc_layout.addRow(t("settings.sample_rate"), self.sample_rate_spin)
 
+        self.mic_device_label = QLabel()
+        self.mic_device_label.setWordWrap(True)
+        stt_misc_layout.addRow(t("settings.mic_device"), self.mic_device_label)
+
+        self.mic_level_bar = QProgressBar()
+        self.mic_level_bar.setRange(0, 100)
+        self.mic_level_bar.setValue(0)
+        self.mic_level_bar.setTextVisible(False)
+        self.mic_level_bar.setFixedHeight(10)
+        self.mic_level_bar.setStyleSheet(
+            "QProgressBar { background: #1f2937; border: 1px solid #4b5563; border-radius: 5px; }"
+            "QProgressBar::chunk { background: #22c55e; border-radius: 4px; }"
+        )
+        stt_misc_layout.addRow(t("settings.mic_level"), self.mic_level_bar)
+
+        self.mic_status_label = QLabel(t("settings.mic_status_idle"))
+        self.mic_status_label.setWordWrap(True)
+        self.mic_status_label.setStyleSheet("color: #9ca3af; font-size: 12px;")
+        stt_misc_layout.addRow("", self.mic_status_label)
+
+        self.mic_test_btn = QPushButton(t("settings.mic_test_start"))
+        self.mic_test_btn.clicked.connect(self._toggle_microphone_monitor)
+        stt_misc_layout.addRow("", self.mic_test_btn)
+
         stt_misc_group.setLayout(stt_misc_layout)
         stt_layout.addWidget(stt_misc_group)
         stt_layout.addStretch()
@@ -148,6 +177,9 @@ class SettingsDialog(QDialog):
         for m in self.POLISH_MODELS:
             self.polish_model_combo.addItem(m)
         polish_api_layout.addRow(t("settings.model"), self.polish_model_combo)
+
+        self.polish_enabled_check = QCheckBox(t("settings.polish_enabled"))
+        polish_api_layout.addRow("", self.polish_enabled_check)
 
         polish_api_group.setLayout(polish_api_layout)
         polish_layout.addWidget(polish_api_group)
@@ -231,6 +263,7 @@ class SettingsDialog(QDialog):
         # Polish tab
         self.polish_api_key_input.setText(self.config.polish.api_key)
         self.polish_base_url_input.setText(self.config.polish.base_url)
+        self.polish_enabled_check.setChecked(self.config.polish.enabled)
         idx = self.polish_model_combo.findText(self.config.polish.model)
         if idx >= 0:
             self.polish_model_combo.setCurrentIndex(idx)
@@ -247,6 +280,7 @@ class SettingsDialog(QDialog):
 
         # Hotkeys
         self.hotkey_toggle_check.setChecked(self.config.hotkey.toggle_enabled)
+        self._update_microphone_device_label()
 
     def _save_and_close(self):
         if not check_network_available():
@@ -275,6 +309,7 @@ class SettingsDialog(QDialog):
         self.config.polish.api_key = self.polish_api_key_input.text().strip()
         self.config.polish.base_url = self.polish_base_url_input.text().strip() or DEFAULT_BASE_URL
         self.config.polish.model = self.polish_model_combo.currentText()
+        self.config.polish.enabled = self.polish_enabled_check.isChecked()
 
         # Output
         self.config.output.paste_delay_ms = self.paste_delay_spin.value()
@@ -287,3 +322,57 @@ class SettingsDialog(QDialog):
         self.config.save()
         self.settings_saved.emit()
         self.accept()
+
+    def _update_microphone_device_label(self):
+        device_name = get_default_input_device_name()
+        self.mic_device_label.setText(device_name or t("settings.mic_device_none"))
+
+    def _toggle_microphone_monitor(self):
+        if self._mic_monitor and self._mic_monitor.is_running:
+            self._stop_microphone_monitor()
+        else:
+            self._start_microphone_monitor()
+
+    def _start_microphone_monitor(self):
+        self._stop_microphone_monitor()
+        self._update_microphone_device_label()
+        self._mic_monitor = MicrophoneMonitor(self.sample_rate_spin.value())
+        if not self._mic_monitor.start():
+            self.mic_level_bar.setValue(0)
+            detail = self._mic_monitor.error or t("settings.mic_status_error")
+            self.mic_status_label.setText(f"{t('settings.mic_status_error')}: {detail}")
+            self.mic_test_btn.setText(t("settings.mic_test_start"))
+            return
+        self.mic_status_label.setText(t("settings.mic_status_listening"))
+        self.mic_test_btn.setText(t("settings.mic_test_stop"))
+        self._mic_timer.start()
+
+    def _stop_microphone_monitor(self):
+        self._mic_timer.stop()
+        if self._mic_monitor:
+            self._mic_monitor.stop()
+        self.mic_level_bar.setValue(0)
+        self.mic_status_label.setText(t("settings.mic_status_idle"))
+        self.mic_test_btn.setText(t("settings.mic_test_start"))
+
+    def _refresh_microphone_level(self):
+        if not self._mic_monitor or not self._mic_monitor.is_running:
+            return
+        level = self._mic_monitor.input_level
+        self.mic_level_bar.setValue(int(level * 100))
+        if level < 0.02:
+            self.mic_status_label.setText(t("settings.mic_status_silent"))
+        else:
+            self.mic_status_label.setText(t("settings.mic_status_ok"))
+
+    def closeEvent(self, event):
+        self._stop_microphone_monitor()
+        super().closeEvent(event)
+
+    def reject(self):
+        self._stop_microphone_monitor()
+        super().reject()
+
+    def accept(self):
+        self._stop_microphone_monitor()
+        super().accept()
