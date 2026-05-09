@@ -2,7 +2,13 @@
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QCloseEvent
-from src.ui.main_window import AudioLevelWaveform, FloatingRecordingWindow, PulsingDot, Toast
+from src.ui.main_window import (
+    AudioLevelWaveform,
+    FloatingRecordingWindow,
+    MicrophoneIcon,
+    PulsingDot,
+    Toast,
+)
 from src.state import RecorderState
 
 
@@ -52,6 +58,15 @@ class TestFloatingRecordingWindow:
         win = FloatingRecordingWindow()
         qtbot.addWidget(win)
         assert win._state == RecorderState.IDLE
+        assert isinstance(win.app_icon, MicrophoneIcon)
+        assert win.app_icon.width() == 16
+        assert win.app_name_label.text() == "Voice Type"
+
+    def test_status_row_uses_recording_indicator(self, qtbot):
+        win = FloatingRecordingWindow()
+        qtbot.addWidget(win)
+        assert isinstance(win.dot, PulsingDot)
+        assert not hasattr(win, "status_label")
 
     def test_start_recording_emits_signal(self, qtbot):
         win = FloatingRecordingWindow()

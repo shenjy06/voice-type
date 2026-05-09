@@ -97,6 +97,29 @@ class PulsingDot(QWidget):
         painter.drawEllipse(0, 0, self._SIZE, self._SIZE)
 
 
+class MicrophoneIcon(QWidget):
+    """Small microphone mark for the floating window header."""
+
+    _SIZE = 16
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(self._SIZE, self._SIZE)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(96, 165, 250))
+        painter.drawRoundedRect(5, 1, 6, 9, 3, 3)
+
+        painter.setBrush(Qt.NoBrush)
+        painter.setPen(QColor(147, 197, 253))
+        painter.drawArc(3, 5, 10, 7, 180 * 16, 180 * 16)
+        painter.drawLine(8, 12, 8, 14)
+        painter.drawLine(5, 14, 11, 14)
+
+
 class AudioLevelWaveform(QWidget):
     """Compact level meter using recent microphone levels."""
 
@@ -176,10 +199,13 @@ class FloatingRecordingWindow(QWidget):
 
         # Top row
         top_row = QHBoxLayout()
-        top_row.setSpacing(4)
+        top_row.setSpacing(6)
 
-        self.dot = PulsingDot(self)
-        top_row.addWidget(self.dot)
+        self.app_icon = MicrophoneIcon(self)
+        top_row.addWidget(self.app_icon)
+        self.app_name_label = QLabel(t("app.name"))
+        self.app_name_label.setStyleSheet("color: #e5e7eb; font-size: 12px; font-weight: 700;")
+        top_row.addWidget(self.app_name_label)
         top_row.addStretch()
 
         # Settings button
@@ -210,12 +236,11 @@ class FloatingRecordingWindow(QWidget):
 
         status_row = QHBoxLayout()
         status_row.setSpacing(8)
-        self.status_label = QLabel()
-        self.status_label.setStyleSheet("color: #e5e7eb; font-size: 12px; font-weight: 600;")
+        self.dot = PulsingDot(self)
         self.duration_label = QLabel("00:00")
         self.duration_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self.duration_label.setStyleSheet("color: #9ca3af; font-size: 12px;")
-        status_row.addWidget(self.status_label)
+        status_row.addWidget(self.dot)
         status_row.addStretch()
         status_row.addWidget(self.duration_label)
         layout.addLayout(status_row)
@@ -247,15 +272,6 @@ class FloatingRecordingWindow(QWidget):
             )
         self.record_btn.setText(text)
         self.record_btn.setEnabled(enabled)
-        self._update_status_label()
-
-    def _update_status_label(self):
-        labels = {
-            RecorderState.RECORDING: t("status.recording"),
-            RecorderState.PROCESSING: t("status.polishing"),
-            RecorderState.ERROR: t("error.title"),
-        }
-        self.status_label.setText(labels.get(self._state, t("btn.record")))
 
     def _transition_to(self, new_state: RecorderState):
         """Centralized state transition — updates button and emits signals."""
@@ -349,6 +365,7 @@ class FloatingRecordingWindow(QWidget):
 
     def retranslate(self):
         """Retranslate all user-facing text after a language change."""
+        self.app_name_label.setText(t("app.name"))
         self._update_record_button()
 
     def set_audio_level(self, level: float):
