@@ -20,6 +20,7 @@ class AudioRecorder:
         self._frames: list[np.ndarray] = []
         self._stream: sd.InputStream | None = None
         self._temp_file: Path | None = None
+        self._input_level = 0.0
 
     @property
     def is_recording(self) -> bool:
@@ -28,6 +29,11 @@ class AudioRecorder:
     @property
     def audio_path(self) -> Path | None:
         return self._temp_file
+
+    @property
+    def input_level(self) -> float:
+        """Return the latest normalized microphone level in the range 0.0-1.0."""
+        return self._input_level
 
     def start(self) -> None:
         if self._recording:
@@ -69,6 +75,10 @@ class AudioRecorder:
             logger.debug("Stream status: %s", status)
         if self._recording:
             self._frames.append(indata.copy())
+            rms = float(np.sqrt(np.mean(np.square(indata), dtype=np.float64)))
+            self._input_level = min(1.0, rms * 12.0)
+        else:
+            self._input_level = 0.0
 
     def cleanup(self) -> None:
         if self._temp_file and self._temp_file.exists():

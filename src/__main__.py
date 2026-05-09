@@ -6,7 +6,7 @@ import sys
 import ctypes
 import pyperclip
 from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import QThread, Signal, QObject
+from PySide6.QtCore import QThread, Signal, QObject, QTimer
 from src.config import AppConfig
 from src.audio import AudioRecorder
 from src.asr import Transcriber
@@ -80,6 +80,9 @@ class Application:
         self._saved_hwnd = 0
         self._cancelled = False
         self._quitting = False
+        self._audio_level_timer = QTimer()
+        self._audio_level_timer.setInterval(100)
+        self._audio_level_timer.timeout.connect(self._sync_audio_level)
 
         self._init_ui()
 
@@ -146,6 +149,7 @@ class Application:
         """User started recording — save foreground window."""
         self._saved_hwnd = get_foreground_window()
         self.audio_recorder.start()
+        self._audio_level_timer.start()
         self.tray.set_recording(True)
         logger.info("Recording started, saved hwnd=%s", self._saved_hwnd)
 
@@ -155,6 +159,8 @@ class Application:
     def _on_recording_stopped(self):
         """User stopped recording — process audio and output text."""
         self.audio_recorder.stop()
+        self._audio_level_timer.stop()
+        self.window.set_audio_level(0.0)
         self.tray.set_recording(False)
 
         if self._cancelled:
@@ -285,6 +291,7 @@ class Application:
         self._quitting = True
         logger.info("Quitting application")
         self.hotkey_manager.stop()
+        self._audio_level_timer.stop()
         self.audio_recorder.stop()
         self.audio_recorder.cleanup()
         try:
@@ -301,6 +308,10 @@ class Application:
         self.app.quit()
         # Force exit — Qt tray icon can keep process alive after quit()
         os._exit(0)
+
+    def _sync_audio_level(self):
+        """Copy recorder level into the UI on the Qt thread."""
+        self.window.set_audio_level(self.audio_recorder.input_level)
 
     def run(self):
         sys.exit(self.app.exec())

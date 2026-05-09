@@ -118,34 +118,32 @@ class TestHotkeyManager:
         # Listener should only be created once
         mock_listener_cls.assert_called_once()
 
-    def test_alt_tap_emits_toggle(self, qtbot):
-        """Tapping Left Alt alone emits toggle_recording."""
+    def test_right_shift_tap_emits_toggle(self, qtbot):
+        """Tapping Right Shift alone emits toggle_recording."""
         mgr = HotkeyManager()
-        # Simulate Alt tap
-        mgr._on_press(keyboard.Key.alt_l)
+        mgr._on_press(keyboard.Key.shift_r)
         with qtbot.waitSignal(mgr.toggle_recording):
-            mgr._on_release(keyboard.Key.alt_l)
+            mgr._on_release(keyboard.Key.shift_r)
 
-    def test_alt_combo_does_not_emit(self, qtbot):
-        """Alt + another key does NOT emit toggle."""
+    def test_right_shift_combo_does_not_emit(self, qtbot):
+        """Right Shift + another key does NOT emit toggle."""
         mgr = HotkeyManager()
         emitted = []
         mgr.toggle_recording.connect(lambda: emitted.append(True))
-        # Simulate Alt + S (S is a KeyCode, not a Key)
         from pynput.keyboard import KeyCode
-        mgr._on_press(keyboard.Key.alt_l)
+        mgr._on_press(keyboard.Key.shift_r)
         mgr._on_press(KeyCode.from_char("s"))
         mgr._on_release(KeyCode.from_char("s"))
-        mgr._on_release(keyboard.Key.alt_l)
+        mgr._on_release(keyboard.Key.shift_r)
         assert emitted == []
 
-    def test_alt_r_not_treated_as_left_alt(self, qtbot):
-        """Right Alt release does not trigger toggle."""
+    def test_left_shift_not_treated_as_right_shift(self, qtbot):
+        """Left Shift release does not trigger toggle."""
         mgr = HotkeyManager()
         emitted = []
         mgr.toggle_recording.connect(lambda: emitted.append(True))
-        mgr._on_press(keyboard.Key.alt_r)
-        mgr._on_release(keyboard.Key.alt_r)
+        mgr._on_press(keyboard.Key.shift_l)
+        mgr._on_release(keyboard.Key.shift_l)
         assert emitted == []
 
     def test_release_without_press_does_not_emit(self, qtbot):
@@ -153,34 +151,43 @@ class TestHotkeyManager:
         mgr = HotkeyManager()
         emitted = []
         mgr.toggle_recording.connect(lambda: emitted.append(True))
-        mgr._on_release(keyboard.Key.alt_l)
+        mgr._on_release(keyboard.Key.shift_r)
         assert emitted == []
 
-    def test_alt_c_emits_cancel(self, qtbot):
-        """Alt+C emits cancel_recording signal."""
+    def test_right_shift_c_emits_cancel(self, qtbot):
+        """Right Shift+C emits cancel_recording signal."""
         from pynput.keyboard import KeyCode
         mgr = HotkeyManager()
-        mgr._on_press(keyboard.Key.alt_l)
+        mgr._on_press(keyboard.Key.shift_r)
         with qtbot.waitSignal(mgr.cancel_recording):
             mgr._on_press(KeyCode.from_char("c"))
 
-    def test_alt_c_does_not_emit_toggle(self, qtbot):
-        """Alt+C should NOT also emit toggle_recording."""
+    def test_right_shift_c_does_not_emit_toggle(self, qtbot):
+        """Right Shift+C should NOT also emit toggle_recording."""
         from pynput.keyboard import KeyCode
         mgr = HotkeyManager()
         toggle_emitted = []
         mgr.toggle_recording.connect(lambda: toggle_emitted.append(True))
-        # Simulate Alt+C
-        mgr._on_press(keyboard.Key.alt_l)
+        mgr._on_press(keyboard.Key.shift_r)
         mgr._on_press(KeyCode.from_char("c"))
         mgr._on_release(KeyCode.from_char("c"))
-        mgr._on_release(keyboard.Key.alt_l)
+        mgr._on_release(keyboard.Key.shift_r)
         assert toggle_emitted == []
 
-    def test_alt_uppercase_c_emits_cancel(self, qtbot):
-        """Alt+Shift+C (uppercase C) also emits cancel."""
+    def test_right_shift_uppercase_c_emits_cancel(self, qtbot):
+        """Right Shift+C with uppercase C also emits cancel."""
         from pynput.keyboard import KeyCode
         mgr = HotkeyManager()
-        mgr._on_press(keyboard.Key.alt_l)
+        mgr._on_press(keyboard.Key.shift_r)
         with qtbot.waitSignal(mgr.cancel_recording):
             mgr._on_press(KeyCode.from_char("C"))
+
+    def test_alt_c_no_longer_emits_cancel(self, qtbot):
+        """Alt+C is not a cancel shortcut."""
+        from pynput.keyboard import KeyCode
+        mgr = HotkeyManager()
+        emitted = []
+        mgr.cancel_recording.connect(lambda: emitted.append(True))
+        mgr._on_press(keyboard.Key.alt_l)
+        mgr._on_press(KeyCode.from_char("c"))
+        assert emitted == []

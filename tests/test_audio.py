@@ -146,15 +146,27 @@ class TestAudioRecorderCallback:
 
         assert len(recorder._frames) == 1
         assert np.array_equal(recorder._frames[0], data)
+        assert recorder.input_level > 0.0
+
+    def test_callback_updates_normalized_input_level(self):
+        """_callback() stores a clamped microphone level for UI meters."""
+        recorder = AudioRecorder()
+        recorder._recording = True
+        data = np.array([[10.0], [10.0]], dtype=np.float32)
+        recorder._callback(data, 2, None, None)
+
+        assert recorder.input_level == 1.0
 
     def test_callback_when_not_recording_does_not_append(self):
         """_callback() does not append when _recording is False."""
         recorder = AudioRecorder()
         recorder._recording = False
+        recorder._input_level = 0.5
         data = np.array([[0.1]], dtype=np.float32)
         recorder._callback(data, 1, None, None)
 
         assert len(recorder._frames) == 0
+        assert recorder.input_level == 0.0
 
 
 class TestAudioRecorderCleanup:

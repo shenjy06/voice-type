@@ -2,7 +2,7 @@
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QCloseEvent
-from src.ui.main_window import FloatingRecordingWindow, PulsingDot, Toast
+from src.ui.main_window import AudioLevelWaveform, FloatingRecordingWindow, PulsingDot, Toast
 from src.state import RecorderState
 
 
@@ -60,6 +60,8 @@ class TestFloatingRecordingWindow:
             win.start_recording()
         assert win.is_recording() is True
         assert win._state == RecorderState.RECORDING
+        assert win._level_timer.isActive()
+        assert win.duration_label.text() == "00:00"
 
     def test_start_recording_when_already_recording_noop(self, qtbot):
         win = FloatingRecordingWindow()
@@ -79,6 +81,8 @@ class TestFloatingRecordingWindow:
             win.stop_recording()
         assert win.is_recording() is False
         assert win._state == RecorderState.IDLE
+        assert not win._level_timer.isActive()
+        assert win.duration_label.text() == "00:00"
 
     def test_stop_recording_when_not_recording_noop(self, qtbot):
         win = FloatingRecordingWindow()
@@ -106,9 +110,11 @@ class TestFloatingRecordingWindow:
     def test_set_processing(self, qtbot):
         win = FloatingRecordingWindow()
         qtbot.addWidget(win)
+        win.start_recording()
         win.set_processing()
         assert win._state == RecorderState.PROCESSING
         assert win.is_recording() is False
+        assert not win._level_timer.isActive()
 
     def test_set_done(self, qtbot):
         win = FloatingRecordingWindow()
@@ -163,6 +169,38 @@ class TestFloatingRecordingWindow:
 
         win.start_recording()
         assert win._state == RecorderState.RECORDING
+
+    def test_set_audio_level_is_clamped(self, qtbot):
+        win = FloatingRecordingWindow()
+        qtbot.addWidget(win)
+        win.set_audio_level(2.0)
+        assert win._pending_audio_level == 1.0
+        win.set_audio_level(-1.0)
+        assert win._pending_audio_level == 0.0
+
+
+class TestAudioLevelWaveform:
+    def test_add_level_keeps_recent_levels(self, qtbot):
+        waveform = AudioLevelWaveform()
+        qtbot.addWidget(waveform)
+        waveform.add_level(0.5)
+        assert waveform._levels[-1] == 0.5
+        assert len(waveform._levels) == waveform._BAR_COUNT
+
+    def test_add_level_clamps_values(self, qtbot):
+        waveform = AudioLevelWaveform()
+        qtbot.addWidget(waveform)
+        waveform.add_level(2.0)
+        assert waveform._levels[-1] == 1.0
+        waveform.add_level(-1.0)
+        assert waveform._levels[-1] == 0.0
+
+    def test_reset_clears_levels(self, qtbot):
+        waveform = AudioLevelWaveform()
+        qtbot.addWidget(waveform)
+        waveform.add_level(0.5)
+        waveform.reset()
+        assert all(level == 0.0 for level in waveform._levels)
 
 
 class TestToast:

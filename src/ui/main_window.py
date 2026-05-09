@@ -3,9 +3,9 @@
 import logging
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-    QApplication,
+    QApplication, QLabel,
 )
-from PySide6.QtCore import Qt, QTimer, Signal, QPropertyAnimation, QEasingCurve
+from PySide6.QtCore import Qt, QTimer, Signal, QPropertyAnimation, QEasingCurve, QElapsedTimer
 from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QCursor, QCloseEvent
 from src.state import RecorderState
 from src.i18n import t
@@ -18,6 +18,8 @@ _COLOR_BORDER_WINDOW = QColor(55, 65, 81)
 _COLOR_BORDER_BUBBLE = QColor(75, 85, 99)
 _COLOR_TEXT = QColor(229, 231, 235)
 _COLOR_DOT = QColor(239, 68, 68)
+_COLOR_WAVE_ACTIVE = QColor(34, 197, 94)
+_COLOR_WAVE_IDLE = QColor(75, 85, 99)
 
 # Button style descriptors keyed by RecorderState
 _BUTTON_STYLES = {
@@ -95,6 +97,48 @@ class PulsingDot(QWidget):
         painter.drawEllipse(0, 0, self._SIZE, self._SIZE)
 
 
+class AudioLevelWaveform(QWidget):
+    """Compact level meter using recent microphone levels."""
+
+    _BAR_COUNT = 18
+    _MIN_BAR_HEIGHT = 3
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(22)
+        self._levels = [0.0] * self._BAR_COUNT
+
+    def reset(self):
+        self._levels = [0.0] * self._BAR_COUNT
+        self.update()
+
+    def add_level(self, level: float):
+        level = max(0.0, min(1.0, float(level)))
+        self._levels = self._levels[1:] + [level]
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        if not self._levels:
+            return
+
+        gap = 3
+        width = self.width()
+        height = self.height()
+        bar_w = max(2, (width - gap * (self._BAR_COUNT - 1)) / self._BAR_COUNT)
+
+        for index, level in enumerate(self._levels):
+            bar_h = self._MIN_BAR_HEIGHT + level * (height - self._MIN_BAR_HEIGHT)
+            x = int(index * (bar_w + gap))
+            y = int((height - bar_h) / 2)
+            color = QColor(_COLOR_WAVE_ACTIVE if level > 0.02 else _COLOR_WAVE_IDLE)
+            color.setAlphaF(0.35 + min(0.65, level))
+            painter.setBrush(color)
+            painter.setPen(Qt.NoPen)
+            painter.drawRoundedRect(x, y, int(bar_w), int(bar_h), 2, 2)
+
+
 class FloatingRecordingWindow(QWidget):
     """Compact floating window for recording control."""
 
@@ -107,6 +151,11 @@ class FloatingRecordingWindow(QWidget):
         super().__init__()
         self._state = RecorderState.IDLE
         self._hotkey_manager = None
+        self._elapsed = QElapsedTimer()
+        self._level_timer = QTimer(self)
+        self._level_timer.setInterval(100)
+        self._level_timer.timeout.connect(self._refresh_recording_indicators)
+        self._pending_audio_level = 0.0
         self._init_ui()
         if always_on_top:
             self.setWindowFlag(Qt.WindowStaysOnTopHint)
@@ -118,11 +167,11 @@ class FloatingRecordingWindow(QWidget):
             | Qt.WindowStaysOnTopHint
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setMinimumSize(240, 100)
-        self.resize(240, 100)
+        self.setMinimumSize(260, 152)
+        self.resize(260, 152)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setContentsMargins(16, 12, 16, 16)
         layout.setSpacing(8)
 
         # Top row
@@ -159,6 +208,21 @@ class FloatingRecordingWindow(QWidget):
 
         layout.addLayout(top_row)
 
+        status_row = QHBoxLayout()
+        status_row.setSpacing(8)
+        self.status_label = QLabel()
+        self.status_label.setStyleSheet("color: #e5e7eb; font-size: 12px; font-weight: 600;")
+        self.duration_label = QLabel("00:00")
+        self.duration_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.duration_label.setStyleSheet("color: #9ca3af; font-size: 12px;")
+        status_row.addWidget(self.status_label)
+        status_row.addStretch()
+        status_row.addWidget(self.duration_label)
+        layout.addLayout(status_row)
+
+        self.waveform = AudioLevelWaveform(self)
+        layout.addWidget(self.waveform)
+
         # Record button
         self.record_btn = QPushButton()
         self.record_btn.setCursor(QCursor(Qt.PointingHandCursor))
@@ -183,6 +247,15 @@ class FloatingRecordingWindow(QWidget):
             )
         self.record_btn.setText(text)
         self.record_btn.setEnabled(enabled)
+        self._update_status_label()
+
+    def _update_status_label(self):
+        labels = {
+            RecorderState.RECORDING: t("status.recording"),
+            RecorderState.PROCESSING: t("status.polishing"),
+            RecorderState.ERROR: t("error.title"),
+        }
+        self.status_label.setText(labels.get(self._state, t("btn.record")))
 
     def _transition_to(self, new_state: RecorderState):
         """Centralized state transition — updates button and emits signals."""
@@ -191,12 +264,29 @@ class FloatingRecordingWindow(QWidget):
 
         if old_state == RecorderState.RECORDING and new_state == RecorderState.IDLE:
             self.dot.stop()
+            self._level_timer.stop()
+            self.duration_label.setText("00:00")
+            self.waveform.reset()
             self.recording_stopped.emit()
         elif new_state == RecorderState.RECORDING:
             self.dot.start()
+            self._elapsed.restart()
+            self._pending_audio_level = 0.0
+            self.waveform.reset()
+            self.duration_label.setText("00:00")
+            self._level_timer.start()
             self.recording_started.emit()
 
         self._update_record_button()
+
+    def _refresh_recording_indicators(self):
+        if self._state != RecorderState.RECORDING:
+            return
+        elapsed_seconds = max(0, self._elapsed.elapsed() // 1000)
+        minutes = elapsed_seconds // 60
+        seconds = elapsed_seconds % 60
+        self.duration_label.setText(f"{minutes:02d}:{seconds:02d}")
+        self.waveform.add_level(self._pending_audio_level)
 
     def _toggle_recording(self):
         if self._state == RecorderState.RECORDING:
@@ -234,14 +324,20 @@ class FloatingRecordingWindow(QWidget):
 
     def set_processing(self):
         self._state = RecorderState.PROCESSING
+        self.dot.stop()
+        self._level_timer.stop()
         self._update_record_button()
 
     def set_done(self):
         self._state = RecorderState.DONE
+        self._level_timer.stop()
+        self.duration_label.setText("00:00")
+        self.waveform.reset()
         self._update_record_button()
 
     def set_error(self, msg: str = "Error"):
         self._state = RecorderState.ERROR
+        self._level_timer.stop()
         self._update_record_button()
 
     def closeEvent(self, event: QCloseEvent):
@@ -254,6 +350,10 @@ class FloatingRecordingWindow(QWidget):
     def retranslate(self):
         """Retranslate all user-facing text after a language change."""
         self._update_record_button()
+
+    def set_audio_level(self, level: float):
+        """Receive latest microphone level from the recorder."""
+        self._pending_audio_level = max(0.0, min(1.0, float(level)))
 
 
 class StatusBubble(QWidget):

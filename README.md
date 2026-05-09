@@ -104,10 +104,10 @@ Click the gear icon in the upper-right corner of the floating window, or access 
 
 | Hotkey | Default | Description |
 |--------|---------|-------------|
-| Toggle Recording | `Left Alt` (tap) | Start recording on first tap, stop on second tap |
-| Cancel Recording | `Alt + C` | Stop recording and discard audio, skip subsequent processing |
+| Toggle Recording | `Right Shift` (tap) | Start recording on first tap, stop on second tap |
+| Cancel Recording | `Right Shift + C` | Stop recording and discard audio, skip subsequent processing |
 
-The Left Alt hotkey distinguishes between a tap (start/stop toggle) and modifier use (e.g. `Alt+Tab` will not trigger recording).
+The Right Shift hotkey distinguishes between a tap (start/stop toggle) and modifier use (holding it with another key will not trigger recording).
 
 ### Output Configuration
 
@@ -172,10 +172,10 @@ Any API that supports the OpenAI-compatible protocol can be used (DashScope, Vol
 1. Launch the app — the setup wizard appears automatically on first run if no API key is configured
 2. Configure your API Key and models in Settings
 3. Place your cursor at the desired input position
-4. Press `Left Alt` (tap once) to start recording (status bubble shows "录制中...")
-5. When finished speaking, press `Left Alt` (tap again) to stop recording
+4. Press `Right Shift` (tap once) to start recording (status bubble shows "录制中...")
+5. When finished speaking, press `Right Shift` (tap again) to stop recording
 6. Wait for processing — status bubble shows "润色中...", then refined text automatically appears at the cursor position
-7. To discard the current recording, press `Alt + C` to cancel (audio will be discarded)
+7. To discard the current recording, press `Right Shift + C` to cancel (audio will be discarded)
 8. Click window X button to minimize to tray; use tray menu "Quit" to fully exit
 
 ## Project Structure
