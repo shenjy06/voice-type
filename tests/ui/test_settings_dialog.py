@@ -1,7 +1,15 @@
 """Tests for voice_type.ui.settings_dialog — SettingsDialog."""
 
 from PySide6.QtWidgets import QDialogButtonBox, QDialog
-from src.config import AppConfig, AsrConfig, PolishApiConfig, RecordingConfig, HotkeyConfig, OutputConfig
+from src.config import (
+    AppConfig,
+    AsrConfig,
+    PolishApiConfig,
+    RecordingConfig,
+    HotkeyConfig,
+    OutputConfig,
+    GlossaryEntry,
+)
 from src.ui.settings_dialog import SettingsDialog
 
 
@@ -43,6 +51,12 @@ class TestSettingsDialogCreation:
         assert dlg.mic_level_bar.value() == 0
         assert dlg.mic_test_btn.text() == "Test Microphone"
 
+    def test_glossary_controls_exist(self, qtbot):
+        dlg = SettingsDialog(AppConfig())
+        qtbot.addWidget(dlg)
+        assert dlg.glossary_table.columnCount() == 2
+        assert dlg.glossary_add_btn.text() == "Add Term"
+
 
 class TestSettingsDialogLoadConfig:
     def test_load_config_populates_fields(self, qtbot):
@@ -70,6 +84,14 @@ class TestSettingsDialogLoadConfig:
         dlg = SettingsDialog(cfg)
         qtbot.addWidget(dlg)
         assert dlg.paste_mode_combo.currentData() == "ctrl_shift_v"
+
+    def test_load_config_populates_glossary(self, qtbot):
+        cfg = AppConfig(glossary=[GlossaryEntry(source="派森", replacement="Python")])
+        dlg = SettingsDialog(cfg)
+        qtbot.addWidget(dlg)
+        assert dlg.glossary_table.rowCount() == 1
+        assert dlg.glossary_table.item(0, 0).text() == "派森"
+        assert dlg.glossary_table.item(0, 1).text() == "Python"
 
 
 class TestSettingsDialogHotkeyToggle:
@@ -266,6 +288,19 @@ class TestSettingsDialogSave:
         dlg._save_and_close()
 
         assert cfg.polish.enabled is False
+
+    def test_save_glossary_entries(self, qtbot, mocker):
+        mocker.patch("src.ui.settings_dialog.check_network_available", return_value=True)
+
+        cfg = AppConfig(asr=AsrConfig(api_key="sk-test"))
+        dlg = SettingsDialog(cfg)
+        qtbot.addWidget(dlg)
+        dlg._add_glossary_row(" 派森 ", " Python ")
+        dlg._add_glossary_row("", "ignored")
+
+        dlg._save_and_close()
+
+        assert cfg.glossary == [GlossaryEntry(source="派森", replacement="Python")]
 
     def test_save_and_close_accepts_dialog(self, qtbot, mocker):
         """_save_and_close calls accept() to close the dialog."""

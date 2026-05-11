@@ -56,14 +56,16 @@ class TestProcessingWorker:
     def test_polish_disabled_returns_transcript(self, qtbot, mocker):
         """When polish is disabled, ASR text is returned directly."""
         from src.__main__ import ProcessingWorker
+        from src.config import GlossaryEntry
 
         mock_transcriber = mocker.patch("src.__main__.Transcriber")
-        mock_transcriber.return_value.transcribe.return_value = "raw text"
+        mock_transcriber.return_value.transcribe.return_value = "raw 派森 text"
         mock_polisher = mocker.patch("src.__main__.TextPolisher")
         mocker.patch("os.remove")
 
         cfg = mocker.MagicMock()
         cfg.polish.enabled = False
+        cfg.glossary = [GlossaryEntry(source="派森", replacement="Python")]
         worker = ProcessingWorker(cfg, "/tmp/audio.wav")
 
         finished_text = None
@@ -75,8 +77,28 @@ class TestProcessingWorker:
         worker.finished.connect(on_finished)
         worker.run()
 
-        assert finished_text == "raw text"
+        assert finished_text == "raw Python text"
         mock_polisher.assert_not_called()
+
+    def test_glossary_applied_before_polish(self, qtbot, mocker):
+        from src.__main__ import ProcessingWorker
+        from src.config import GlossaryEntry
+
+        mock_transcriber = mocker.patch("src.__main__.Transcriber")
+        mock_transcriber.return_value.transcribe.return_value = "学习派森"
+        mock_polisher = mocker.patch("src.__main__.TextPolisher")
+        mock_polisher.return_value.polish.return_value = "学习 Python"
+        mocker.patch("os.remove")
+
+        cfg = mocker.MagicMock()
+        cfg.polish.enabled = True
+        cfg.glossary = [GlossaryEntry(source="派森", replacement="Python")]
+        worker = ProcessingWorker(cfg, "/tmp/audio.wav")
+
+        worker.finished.connect(lambda text: None)
+        worker.run()
+
+        mock_polisher.return_value.polish.assert_called_once_with("学习Python")
 
     def test_exception_emits_error(self, qtbot, mocker):
         """Exception in processing emits error signal."""

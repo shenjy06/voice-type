@@ -9,6 +9,7 @@ from src.config import (
     RecordingConfig,
     WindowConfig,
     HotkeyConfig,
+    GlossaryEntry,
     DEFAULT_BASE_URL,
 )
 
@@ -42,6 +43,11 @@ class TestDefaultConfigs:
         assert cfg.paste_delay_ms == 300
         assert cfg.auto_paste is True
         assert cfg.paste_mode == "auto"
+
+    def test_glossary_entry_defaults(self):
+        cfg = GlossaryEntry()
+        assert cfg.source == ""
+        assert cfg.replacement == ""
 
     def test_window_config_defaults(self):
         cfg = WindowConfig()
@@ -90,6 +96,7 @@ class TestAppConfigToDict:
         assert "asr" in d
         assert "recording" in d
         assert "output" in d
+        assert "glossary" in d
         assert "window" in d
 
     def test_to_dict_round_trip(self):
@@ -98,6 +105,7 @@ class TestAppConfigToDict:
             asr=AsrConfig(model="whisper-1", language="zh"),
             recording=RecordingConfig(sample_rate=48000),
             output=OutputConfig(paste_delay_ms=500, auto_paste=False),
+            glossary=[GlossaryEntry(source="派森", replacement="Python")],
             window=WindowConfig(show_on_start=False),
         )
         restored = AppConfig.from_dict(cfg.to_dict())
@@ -109,6 +117,8 @@ class TestAppConfigToDict:
         assert restored.output.paste_delay_ms == 500
         assert restored.output.auto_paste is False
         assert restored.output.paste_mode == "auto"
+        assert restored.glossary[0].source == "派森"
+        assert restored.glossary[0].replacement == "Python"
         assert restored.window.show_on_start is False
 
 
@@ -119,6 +129,7 @@ class TestAppConfigFromDict:
             "asr": {"base_url": "https://asr.com", "api_key": "sk-2", "model": "whisper", "language": "en"},
             "recording": {"sample_rate": 44100},
             "output": {"paste_delay_ms": 100, "auto_paste": False, "paste_mode": "ctrl_shift_v"},
+            "glossary": [{"source": "派森", "replacement": "Python"}],
             "window": {"show_on_start": False, "always_on_top": False},
             "hotkey": {"toggle_enabled": False},
         }
@@ -129,6 +140,7 @@ class TestAppConfigFromDict:
         assert cfg.recording.sample_rate == 44100
         assert cfg.output.auto_paste is False
         assert cfg.output.paste_mode == "ctrl_shift_v"
+        assert cfg.glossary == [GlossaryEntry(source="派森", replacement="Python")]
         assert cfg.window.show_on_start is False
         assert cfg.hotkey.toggle_enabled is False
 
@@ -147,6 +159,16 @@ class TestAppConfigFromDict:
         assert cfg.asr.language == "ja"
         # Polish uses defaults since not specified
         assert cfg.polish.model == "gpt-4o"
+
+    def test_from_dict_ignores_invalid_glossary_items(self):
+        data = {
+            "glossary": [
+                {"source": "派森", "replacement": "Python"},
+                "invalid",
+            ]
+        }
+        cfg = AppConfig.from_dict(data)
+        assert cfg.glossary == [GlossaryEntry(source="派森", replacement="Python")]
 
     def test_from_dict_ignores_legacy_hotkey_fields(self):
         """Old start/stop/cancel hotkey fields in recording section are ignored."""

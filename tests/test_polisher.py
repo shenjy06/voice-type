@@ -59,7 +59,9 @@ class TestTextPolisher:
         call_kwargs = mock_client.chat.completions.create.call_args[1]
         messages = call_kwargs["messages"]
         assert messages[1]["role"] == "user"
-        assert messages[1]["content"] == "my raw text"
+        assert "<text_to_polish>" in messages[1]["content"]
+        assert "my raw text" in messages[1]["content"]
+        assert "</text_to_polish>" in messages[1]["content"]
 
     def test_polish_temperature_fixed(self, mocker):
         """Temperature is fixed at 0.3."""

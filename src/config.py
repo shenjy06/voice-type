@@ -45,6 +45,12 @@ class OutputConfig:
 
 
 @dataclass
+class GlossaryEntry:
+    source: str = ""
+    replacement: str = ""
+
+
+@dataclass
 class WindowConfig:
     show_on_start: bool = True
     always_on_top: bool = True
@@ -57,6 +63,7 @@ class AppConfig:
     asr: AsrConfig = field(default_factory=AsrConfig)
     recording: RecordingConfig = field(default_factory=RecordingConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
+    glossary: list[GlossaryEntry] = field(default_factory=list)
     window: WindowConfig = field(default_factory=WindowConfig)
     hotkey: HotkeyConfig = field(default_factory=HotkeyConfig)
 
@@ -77,12 +84,22 @@ class AppConfig:
             hotkey_data = {"toggle_enabled": True}
         else:
             hotkey_data = data.get("hotkey", {})
+        glossary_entries = []
+        for item in data.get("glossary", []):
+            if isinstance(item, dict):
+                glossary_entries.append(
+                    GlossaryEntry(
+                        source=str(item.get("source", "")),
+                        replacement=str(item.get("replacement", "")),
+                    )
+                )
         return cls(
             language=data.get("language", "auto"),
             polish=PolishApiConfig(**data.get("polish", data.get("api", {}))),
             asr=AsrConfig(**data.get("asr", {})),
             recording=RecordingConfig(sample_rate=rec_data.get("sample_rate", 16000)),
             output=OutputConfig(**data.get("output", {})),
+            glossary=glossary_entries,
             window=WindowConfig(**data.get("window", {})),
             hotkey=HotkeyConfig(**hotkey_data),
         )

@@ -10,6 +10,7 @@ from PySide6.QtCore import QThread, Signal, QObject, QTimer
 from src.config import AppConfig
 from src.audio import AudioRecorder
 from src.asr import Transcriber
+from src.glossary import apply_glossary
 from src.history import HistoryStore
 from src.polisher import TextPolisher
 from src.typer import TextTyper
@@ -56,6 +57,7 @@ class ProcessingWorker(QObject):
             if not transcript:
                 self.finished.emit("")
                 return
+            transcript = apply_glossary(transcript, self.config.glossary)
             if not self.config.polish.enabled:
                 self.finished.emit(transcript)
                 return

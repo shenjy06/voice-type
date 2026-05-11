@@ -4,11 +4,12 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QLabel, QLineEdit,
     QComboBox, QFormLayout, QGroupBox, QSpinBox, QCheckBox,
     QDialogButtonBox, QTabWidget, QWidget, QPushButton, QProgressBar,
+    QHBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView,
 )
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QIcon
 from src.audio import MicrophoneMonitor, get_default_input_device_name
-from src.config import AppConfig, DEFAULT_BASE_URL
+from src.config import AppConfig, DEFAULT_BASE_URL, GlossaryEntry
 from src.network import check_network_available
 from src.ui.main_window import Toast
 from src.ui.icon_utils import make_circle_icon
@@ -187,6 +188,38 @@ class SettingsDialog(QDialog):
         polish_layout.addStretch()
         self._tabs.addTab(polish_tab, t("settings.polish_tab"))
 
+        # === Tab 3: Glossary ===
+        glossary_tab = QWidget()
+        glossary_layout = QVBoxLayout(glossary_tab)
+        glossary_layout.setSpacing(12)
+
+        glossary_group = QGroupBox(t("settings.glossary_group"))
+        glossary_group_layout = QVBoxLayout()
+
+        self.glossary_table = QTableWidget(0, 2)
+        self.glossary_table.setHorizontalHeaderLabels([
+            t("settings.glossary_source"),
+            t("settings.glossary_replacement"),
+        ])
+        self.glossary_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.glossary_table.verticalHeader().setVisible(False)
+        self.glossary_table.setSelectionBehavior(QTableWidget.SelectRows)
+        glossary_group_layout.addWidget(self.glossary_table)
+
+        glossary_buttons = QHBoxLayout()
+        self.glossary_add_btn = QPushButton(t("settings.glossary_add"))
+        self.glossary_remove_btn = QPushButton(t("settings.glossary_remove"))
+        self.glossary_add_btn.clicked.connect(lambda: self._add_glossary_row())
+        self.glossary_remove_btn.clicked.connect(self._remove_selected_glossary_rows)
+        glossary_buttons.addWidget(self.glossary_add_btn)
+        glossary_buttons.addWidget(self.glossary_remove_btn)
+        glossary_buttons.addStretch()
+        glossary_group_layout.addLayout(glossary_buttons)
+
+        glossary_group.setLayout(glossary_group_layout)
+        glossary_layout.addWidget(glossary_group)
+        self._tabs.addTab(glossary_tab, t("settings.glossary_tab"))
+
         layout.addWidget(self._tabs)
 
         # === Output Settings (always visible below tabs) ===
@@ -278,6 +311,11 @@ class SettingsDialog(QDialog):
         self.paste_mode_combo.setCurrentIndex(idx)
         self.auto_paste_check.setChecked(self.config.output.auto_paste)
 
+        # Glossary
+        self.glossary_table.setRowCount(0)
+        for entry in self.config.glossary:
+            self._add_glossary_row(entry.source, entry.replacement)
+
         # Hotkeys
         self.hotkey_toggle_check.setChecked(self.config.hotkey.toggle_enabled)
         self._update_microphone_device_label()
@@ -316,12 +354,40 @@ class SettingsDialog(QDialog):
         self.config.output.paste_mode = self.paste_mode_combo.currentData()
         self.config.output.auto_paste = self.auto_paste_check.isChecked()
 
+        # Glossary
+        self.config.glossary = self._collect_glossary_entries()
+
         # Hotkeys
         self.config.hotkey.toggle_enabled = self.hotkey_toggle_check.isChecked()
 
         self.config.save()
         self.settings_saved.emit()
         self.accept()
+
+    def _add_glossary_row(self, source: str = "", replacement: str = ""):
+        row = self.glossary_table.rowCount()
+        self.glossary_table.insertRow(row)
+        self.glossary_table.setItem(row, 0, QTableWidgetItem(source))
+        self.glossary_table.setItem(row, 1, QTableWidgetItem(replacement))
+
+    def _remove_selected_glossary_rows(self):
+        rows = sorted(
+            {index.row() for index in self.glossary_table.selectedIndexes()},
+            reverse=True,
+        )
+        for row in rows:
+            self.glossary_table.removeRow(row)
+
+    def _collect_glossary_entries(self) -> list[GlossaryEntry]:
+        entries = []
+        for row in range(self.glossary_table.rowCount()):
+            source_item = self.glossary_table.item(row, 0)
+            replacement_item = self.glossary_table.item(row, 1)
+            source = source_item.text().strip() if source_item else ""
+            replacement = replacement_item.text().strip() if replacement_item else ""
+            if source and replacement:
+                entries.append(GlossaryEntry(source=source, replacement=replacement))
+        return entries
 
     def _update_microphone_device_label(self):
         device_name = get_default_input_device_name()
