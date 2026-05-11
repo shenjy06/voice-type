@@ -9,6 +9,7 @@ Windows 语音转文字速记工具。录制语音 → 语音识别 → 文本�
 - **语音录制**: 全局热键一键录制/停止/取消，不抢占目标应用焦点
 - **语音识别 (STT)**: 将录制的音频转录为文本（支持 OpenAI 兼容协议）
 - **智能润色**: LLM 自动去除语气词、修正语法、提升表达清晰度
+- **词库修正**: 在润色前自动替换常见误识别的人名、项目名和技术名词
 - **文本注入**: 恢复原始焦点窗口，将润色后的文本粘贴到光标位置
 - **本地历史记录**: 使用本地 SQLite 保留最近识别文本，可从托盘菜单复制或重新粘贴
 - **浮动控制窗口**: 始终置顶的迷你窗口，支持拖拽移动，带脉冲红点动画
@@ -78,7 +79,7 @@ pyinstaller --clean --noconfirm VoiceType.spec
 
 ## 设置
 
-点击浮动窗口右上角的齿轮图标打开设置页面，或通过系统托盘菜单进入设置。设置页面分为四个标签页：STT、Polish、Output、Hotkeys。
+点击浮动窗口右上角的齿轮图标打开设置页面，或通过系统托盘菜单进入设置。设置页面分为五个标签页：STT、Polish、Glossary、Output、Hotkeys。
 
 ### STT（语音识别）配置
 
@@ -97,6 +98,15 @@ pyinstaller --clean --noconfirm VoiceType.spec
 | API Key | LLM 服务的认证密钥 | `sk-...` |
 | Base URL | LLM 服务的 API 地址 | `https://api.siliconflow.cn/v1` |
 | Model | 文本润色模型 | `gpt-4o` / `deepseek-chat` / `qwen-plus` |
+
+### Glossary（词库）配置
+
+在 Glossary 标签页维护专有名词修正规则。规则会在语音识别完成后、文本润色前执行，适合修正常见误识别的人名、项目名、缩写和技术名词。
+
+| 字段 | 说明 | 示例 |
+|------|------|------|
+| 识别文本 | ASR 返回的错误文本 | `派森` |
+| 替换为 | 最终输出的正确词 | `Python` |
 
 ### 热键配置
 
@@ -137,7 +147,10 @@ Voice Type 使用 OpenAI 兼容协议的 API，支持多种服务商。以下是
     "base_url": "https://api.siliconflow.cn/v1",
     "api_key": "sk-...",
     "model": "deepseek-ai/DeepSeek-V3"
-  }
+  },
+  "glossary": [
+    {"source": "派森", "replacement": "Python"}
+  ]
 }
 ```
 
@@ -157,7 +170,10 @@ Voice Type 使用 OpenAI 兼容协议的 API，支持多种服务商。以下是
     "base_url": "https://api.openai.com/v1",
     "api_key": "sk-...",
     "model": "gpt-4o"
-  }
+  },
+  "glossary": [
+    {"source": "派森", "replacement": "Python"}
+  ]
 }
 ```
 
@@ -187,6 +203,7 @@ voice-type/
 │   ├── history.py               # SQLite 本地识别文本历史记录
 │   ├── audio.py                 # 音频录制：sounddevice 异步录制 + soundfile 编码为 OGG
 │   ├── asr.py                   # 语音识别：OpenAI 兼容 API
+│   ├── glossary.py              # 词库修正：ASR 后专有名词替换
 │   ├── polisher.py              # 文本润色：LLM API + 系统提示词
 │   ├── typer.py                 # 文本注入：窗口管理 + 剪贴板
 │   ├── window_manager.py        # Windows 窗口控制：ctypes API
@@ -196,7 +213,7 @@ voice-type/
 │   └── ui/
 │       ├── history_dialog.py    # 最近文本历史查看/复制/重新粘贴
 │       ├── main_window.py       # 浮动录制窗口 + 脉冲红点动画 + 状态气泡 + Toast
-│       ├── settings_dialog.py   # 设置对话框（STT/Polish/Output/Hotkeys 四标签页）
+│       ├── settings_dialog.py   # 设置对话框（STT/Polish/Glossary/Output/Hotkeys）
 │       ├── system_tray.py       # 系统托盘 + 全局热键管理
 │       └── icon_utils.py        # 共享图标创建（圆形 + 居中文字）
 ├── tests/                       # 单元测试（171 项，覆盖全部模块）
@@ -206,6 +223,8 @@ voice-type/
 │   ├── test_config.py
 │   ├── test_main.py
 │   ├── test_network.py
+│   ├── test_glossary.py
+│   ├── test_i18n.py
 │   ├── test_polisher.py
 │   ├── test_typer.py
 │   ├── test_window_manager.py
@@ -228,7 +247,7 @@ pytest tests/ -v
 
 ## 配置文件
 
-用户配置存储在 `%USERPROFILE%\.voice-type\config.json`。本地历史记录存储在 `%USERPROFILE%\.voice-type\history.sqlite3`。首次启动时如果未检测到配置，会自动弹出设置页面引导配置。
+用户配置（包括词库词条）存储在 `%USERPROFILE%\.voice-type\config.json`。本地历史记录存储在 `%USERPROFILE%\.voice-type\history.sqlite3`。首次启动时如果未检测到配置，会自动弹出设置页面引导配置。
 
 ## 注意事项
 

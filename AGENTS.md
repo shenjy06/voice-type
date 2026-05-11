@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-Voice Type is a Python 3.10+ Windows desktop dictation app. Application code lives in `src/`, with the entry point in `src/__main__.py`. Core modules include audio capture (`src/audio.py`), ASR and polishing clients (`src/asr.py`, `src/polisher.py`, `src/api_client.py`), configuration/history storage (`src/config.py`, `src/history.py`), and text injection (`src/typer.py`). Qt UI code is under `src/ui/`. Tests live in `tests/`, with UI tests in `tests/ui/`. Packaging files are `VoiceType.spec`, `build.bat`, and the generated `build/` and `dist/` directories.
+Voice Type is a Python 3.10+ Windows desktop dictation app. Application code lives in `src/`, with the entry point in `src/__main__.py`. Core modules include audio capture (`src/audio.py`), ASR and polishing clients (`src/asr.py`, `src/polisher.py`, `src/api_client.py`), glossary post-processing (`src/glossary.py`), configuration/history storage (`src/config.py`, `src/history.py`), and text injection (`src/typer.py`). Qt UI code is under `src/ui/`. Tests live in `tests/`, with UI tests in `tests/ui/`. Packaging files are `VoiceType.spec`, `build.bat`, and the generated `build/` and `dist/` directories.
 
 ## Build, Test, and Development Commands
 
@@ -48,7 +48,7 @@ Follow idiomatic Python with 4-space indentation, type hints where they clarify 
 
 ## Testing Guidelines
 
-The test suite uses `pytest`, with `pytest-qt` for Qt widgets and `pytest-mock` for mocks. Name test files `test_*.py` and place them near the behavior they cover, for example `tests/test_config.py` for `src/config.py` or `tests/ui/test_main_window.py` for `src/ui/main_window.py`. Add focused tests for changed behavior, especially around API error handling, settings persistence, history, and paste modes. Run `pytest tests/ -v` before packaging.
+The test suite uses `pytest`, with `pytest-qt` for Qt widgets and `pytest-mock` for mocks. Name test files `test_*.py` and place them near the behavior they cover, for example `tests/test_config.py` for `src/config.py` or `tests/ui/test_main_window.py` for `src/ui/main_window.py`. Add focused tests for changed behavior, especially around API error handling, settings persistence, glossary replacements, history, and paste modes. Run `pytest tests/ -v` before packaging.
 
 ## Commit & Pull Request Guidelines
 

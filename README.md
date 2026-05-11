@@ -9,6 +9,7 @@ Licensed under [GPL-3.0](LICENSE).
 - **Voice Recording**: One-key record/stop/cancel via global hotkeys without stealing focus from the target application
 - **Speech Recognition (STT)**: Transcribe recorded audio to text (OpenAI-compatible protocol)
 - **Smart Refinement**: LLM automatically removes filler words, fixes grammar, and improves clarity
+- **Glossary Corrections**: Replace frequently misrecognized names, project terms, and technical terms before refinement
 - **Text Injection**: Restores the original foreground window and pastes the refined text at the cursor position
 - **Local History**: Keeps recent recognized text in local SQLite for copy or re-paste from the tray menu
 - **Floating Control Window**: Always-on-top mini window with drag support and pulsing red dot animation
@@ -80,7 +81,7 @@ The generated `dist/VoiceType.exe` is a standalone executable — no Python envi
 
 ## Settings
 
-Click the gear icon in the upper-right corner of the floating window, or access settings via the system tray menu. The settings dialog has four tabs: STT, Polish, Output, and Hotkeys.
+Click the gear icon in the upper-right corner of the floating window, or access settings via the system tray menu. The settings dialog has five tabs: STT, Polish, Glossary, Output, and Hotkeys.
 
 ### STT (Speech-to-Text) Configuration
 
@@ -99,6 +100,18 @@ Click the gear icon in the upper-right corner of the floating window, or access 
 | API Key | Authentication key for LLM service | `sk-...` |
 | Base URL | API address of LLM service | `https://api.siliconflow.cn/v1` |
 | Model | Text refinement model | `gpt-4o` / `deepseek-chat` / `qwen-plus` |
+
+### Glossary Configuration
+
+Use the Glossary tab to define term corrections that run immediately after
+speech recognition and before optional text refinement. This is useful for
+names, project names, acronyms, and technical terms that ASR often
+misrecognizes.
+
+| Field | Description | Example |
+|-------|-------------|---------|
+| Recognized text | Text returned by ASR | `pai sen` / `派森` |
+| Replace with | Correct term to output | `Python` |
 
 ### Hotkey Configuration
 
@@ -139,7 +152,10 @@ Register: https://cloud.siliconflow.cn
     "base_url": "https://api.siliconflow.cn/v1",
     "api_key": "sk-...",
     "model": "deepseek-ai/DeepSeek-V3"
-  }
+  },
+  "glossary": [
+    {"source": "派森", "replacement": "Python"}
+  ]
 }
 ```
 
@@ -159,7 +175,10 @@ Register: https://platform.openai.com
     "base_url": "https://api.openai.com/v1",
     "api_key": "sk-...",
     "model": "gpt-4o"
-  }
+  },
+  "glossary": [
+    {"source": "派森", "replacement": "Python"}
+  ]
 }
 ```
 
@@ -189,6 +208,7 @@ voice-type/
 │   ├── history.py               # SQLite local recognized text history storage
 │   ├── audio.py                 # Audio recording: sounddevice + soundfile OGG encoding
 │   ├── asr.py                   # Speech recognition: OpenAI-compatible transcriptions API
+│   ├── glossary.py              # User glossary term replacement after ASR
 │   ├── polisher.py              # Text refinement: LLM chat completions API
 │   ├── typer.py                 # Text output: clipboard + Ctrl+V paste
 │   ├── window_manager.py        # Windows foreground control: ctypes window/keyboard APIs
@@ -198,7 +218,7 @@ voice-type/
 │   └── ui/
 │       ├── history_dialog.py    # Recent text history viewer/copy/re-paste dialog
 │       ├── main_window.py       # Floating recording window + pulsing dot + StatusBubble + Toast
-│       ├── settings_dialog.py   # Settings dialog (STT/Polish/Output/Hotkeys)
+│       ├── settings_dialog.py   # Settings dialog (STT/Polish/Glossary/Output/Hotkeys)
 │       ├── system_tray.py       # System tray icon + pynput hotkey manager
 │       └── icon_utils.py        # Shared icon creation (circle + centered text)
 ├── tests/                       # Unit tests (171, covering all modules)
@@ -209,6 +229,8 @@ voice-type/
 │   ├── test_config.py
 │   ├── test_main.py
 │   ├── test_network.py
+│   ├── test_glossary.py
+│   ├── test_i18n.py
 │   ├── test_polisher.py
 │   ├── test_typer.py
 │   ├── test_window_manager.py
@@ -231,7 +253,7 @@ pytest tests/ -v
 
 ## Configuration File
 
-User configuration is stored at `%USERPROFILE%\.voice-type\config.json`. Local history is stored at `%USERPROFILE%\.voice-type\history.sqlite3`. On first launch, if no configuration is detected, the settings dialog will automatically appear to guide the user through setup.
+User configuration, including glossary entries, is stored at `%USERPROFILE%\.voice-type\config.json`. Local history is stored at `%USERPROFILE%\.voice-type\history.sqlite3`. On first launch, if no configuration is detected, the settings dialog will automatically appear to guide the user through setup.
 
 ## Notes
 
