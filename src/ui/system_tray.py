@@ -22,6 +22,7 @@ class TrayIcon(QObject):
     recording_toggled = Signal()
     auto_paste_toggled = Signal(bool)
     polish_toggled = Signal(bool)
+    polish_style_changed = Signal(str)
     paste_mode_changed = Signal(str)
     asr_language_changed = Signal(str)
     quit_requested = Signal()
@@ -32,7 +33,13 @@ class TrayIcon(QObject):
         ("settings.paste_mode_ctrl_shift_v", "ctrl_shift_v"),
         ("settings.paste_mode_clipboard", "clipboard"),
     )
-    ASR_LANGUAGES = ("auto", "zh", "en", "ja", "ko", "fr", "de", "es")
+    POLISH_STYLES = (
+        ("settings.polish_style_default", "default"),
+        ("settings.polish_style_formal", "formal"),
+        ("settings.polish_style_casual", "casual"),
+        ("settings.polish_style_concise", "concise"),
+    )
+    ASR_LANGUAGES = (("auto", None), ("zh", None), ("en", None), ("ja", None), ("ko", None), ("fr", None), ("de", None), ("es", None))
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -72,6 +79,16 @@ class TrayIcon(QObject):
         self.polish_action.toggled.connect(self.polish_toggled.emit)
         menu.addAction(self.polish_action)
 
+        self.polish_style_menu = QMenu(t("tray.polish_style"), menu)
+        self.polish_style_actions = {}
+        for label_key, value in self.POLISH_STYLES:
+            action = QAction(t(label_key), self.polish_style_menu)
+            action.setCheckable(True)
+            action.triggered.connect(lambda checked=False, s=value: self.polish_style_changed.emit(s))
+            self.polish_style_menu.addAction(action)
+            self.polish_style_actions[value] = action
+        menu.addMenu(self.polish_style_menu)
+
         self.paste_mode_menu = QMenu(t("tray.paste_mode"), menu)
         self.paste_mode_actions = {}
         for label_key, value in self.PASTE_MODES:
@@ -84,14 +101,15 @@ class TrayIcon(QObject):
 
         self.asr_language_menu = QMenu(t("tray.asr_language"), menu)
         self.asr_language_actions = {}
-        for language in self.ASR_LANGUAGES:
-            action = QAction(language, self.asr_language_menu)
+        for code, _ in self.ASR_LANGUAGES:
+            label = t("settings.lang_auto") if code == "auto" else code
+            action = QAction(label, self.asr_language_menu)
             action.setCheckable(True)
             action.triggered.connect(
-                lambda checked=False, lang=language: self.asr_language_changed.emit(lang)
+                lambda checked=False, lang=code: self.asr_language_changed.emit(lang)
             )
             self.asr_language_menu.addAction(action)
-            self.asr_language_actions[language] = action
+            self.asr_language_actions[code] = action
         menu.addMenu(self.asr_language_menu)
 
         self.settings_action = QAction(t("tray.settings"), menu)
@@ -115,6 +133,7 @@ class TrayIcon(QObject):
         self._set_action_checked(self.auto_paste_action, config.output.auto_paste)
         self._set_action_checked(self.polish_action, config.polish.enabled)
         self._check_action_group(self.paste_mode_actions, config.output.paste_mode, "auto")
+        self._check_action_group(self.polish_style_actions, config.polish.style, "default")
         self._check_action_group(self.asr_language_actions, config.asr.language, "auto")
 
     def _set_action_checked(self, action: QAction, checked: bool):
@@ -155,6 +174,9 @@ class TrayIcon(QObject):
         )
         self.auto_paste_action.setText(t("tray.auto_paste"))
         self.polish_action.setText(t("tray.polish"))
+        self.polish_style_menu.setTitle(t("tray.polish_style"))
+        for label_key, value in self.POLISH_STYLES:
+            self.polish_style_actions[value].setText(t(label_key))
         self.paste_mode_menu.setTitle(t("tray.paste_mode"))
         for label_key, value in self.PASTE_MODES:
             self.paste_mode_actions[value].setText(t(label_key))

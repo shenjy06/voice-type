@@ -16,6 +16,7 @@ class PolishApiConfig:
     api_key: str = ""
     model: str = "gpt-4o"
     enabled: bool = True
+    style: str = "default"
 
 
 @dataclass
@@ -54,6 +55,7 @@ class GlossaryEntry:
 class WindowConfig:
     show_on_start: bool = True
     always_on_top: bool = True
+    auto_start: bool = False
 
 
 @dataclass

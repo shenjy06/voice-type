@@ -20,12 +20,21 @@ from src.ui.history_dialog import HistoryDialog
 from src.ui.settings_dialog import SettingsDialog
 from src.ui.system_tray import TrayIcon, HotkeyManager
 from src.i18n import init_language, t
+from src.autostart import set_auto_start
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+def _global_exception_hook(exc_type, exc_value, exc_tb):
+    """Log unhandled exceptions instead of crashing silently."""
+    logger.critical("Unhandled exception: %s", exc_value, exc_info=(exc_type, exc_value, exc_tb))
+
+
+sys.excepthook = _global_exception_hook
 
 user32 = ctypes.windll.user32
 SW_SHOWNA = 4  # Show window without activating
@@ -77,6 +86,7 @@ class Application:
 
         self.config = AppConfig.load()
         init_language(self.config.language)
+        set_auto_start(self.config.window.auto_start)
         self.audio_recorder = AudioRecorder(self.config.recording.sample_rate)
         self.typer = TextTyper(self.config)
         self.history_store = HistoryStore()
@@ -88,6 +98,9 @@ class Application:
         self._audio_level_timer = QTimer()
         self._audio_level_timer.setInterval(100)
         self._audio_level_timer.timeout.connect(self._sync_audio_level)
+        self._hotkey_watchdog = QTimer()
+        self._hotkey_watchdog.setInterval(5000)
+        self._hotkey_watchdog.timeout.connect(self._check_hotkey)
 
         self._init_ui()
 
@@ -114,6 +127,7 @@ class Application:
         self.tray.recording_toggled.connect(self._toggle_recording)
         self.tray.auto_paste_toggled.connect(self._set_auto_paste)
         self.tray.polish_toggled.connect(self._set_polish_enabled)
+        self.tray.polish_style_changed.connect(self._set_polish_style)
         self.tray.paste_mode_changed.connect(self._set_paste_mode)
         self.tray.asr_language_changed.connect(self._set_asr_language)
         self.tray.quit_requested.connect(self._quit)
@@ -137,6 +151,7 @@ class Application:
         self.window.set_hotkey_manager(self.hotkey_manager)
         if self.config.hotkey.toggle_enabled:
             self.hotkey_manager.start()
+            self._hotkey_watchdog.start()
 
     def _cancel_recording(self):
         """Cancel recording and delete audio file."""
@@ -276,10 +291,13 @@ class Application:
 
     def _on_settings_saved(self):
         """Reload config and update hotkeys."""
+        set_auto_start(self.config.window.auto_start)
         init_language(self.config.language)
+        self._hotkey_watchdog.stop()
         self.hotkey_manager.stop()
         if self.config.hotkey.toggle_enabled:
             self.hotkey_manager.start()
+            self._hotkey_watchdog.start()
         self.audio_recorder.sample_rate = self.config.recording.sample_rate
         self.window.retranslate()
         self.tray.retranslate()
@@ -301,6 +319,7 @@ class Application:
             return
         self._quitting = True
         logger.info("Quitting application")
+        self._hotkey_watchdog.stop()
         self.hotkey_manager.stop()
         self._audio_level_timer.stop()
         self.audio_recorder.stop()
@@ -324,6 +343,13 @@ class Application:
         """Copy recorder level into the UI on the Qt thread."""
         self.window.set_audio_level(self.audio_recorder.input_level)
 
+    def _check_hotkey(self):
+        """Restart hotkey listener if it died."""
+        if self.hotkey_manager._listener and not self.hotkey_manager._listener.is_alive():
+            logger.warning("Hotkey listener died, restarting...")
+            self.hotkey_manager.stop()
+            self.hotkey_manager.start()
+
     def _save_quick_settings(self):
         self.config.save()
         self.tray.apply_config(self.config)
@@ -335,6 +361,10 @@ class Application:
 
     def _set_polish_enabled(self, enabled: bool):
         self.config.polish.enabled = enabled
+        self._save_quick_settings()
+
+    def _set_polish_style(self, style: str):
+        self.config.polish.style = style
         self._save_quick_settings()
 
     def _set_paste_mode(self, mode: str):

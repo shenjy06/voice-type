@@ -36,6 +36,13 @@ class SettingsDialog(QDialog):
         "qwen-plus", "qwen-max",
     ]
 
+    POLISH_STYLES = [
+        ("settings.polish_style_default", "default"),
+        ("settings.polish_style_formal", "formal"),
+        ("settings.polish_style_casual", "casual"),
+        ("settings.polish_style_concise", "concise"),
+    ]
+
     ASR_MODELS = [
         "FunAudioLLM/SenseVoiceSmall",
         "whisper-1",
@@ -83,6 +90,9 @@ class SettingsDialog(QDialog):
         self.language_combo.addItem("中文", "zh")
         lang_layout.addRow(t("settings.ui_language"), self.language_combo)
 
+        self.auto_start_check = QCheckBox(t("settings.auto_start"))
+        lang_layout.addRow("", self.auto_start_check)
+
         lang_group.setLayout(lang_layout)
         general_layout.addWidget(lang_group)
         general_layout.addStretch()
@@ -112,8 +122,9 @@ class SettingsDialog(QDialog):
         stt_api_layout.addRow(t("settings.model"), self.stt_model_combo)
 
         self.stt_lang_combo = QComboBox()
-        for lang in ["auto", "zh", "en", "ja", "ko", "fr", "de", "es"]:
-            self.stt_lang_combo.addItem(lang)
+        self.stt_lang_combo.addItem(t("settings.lang_auto"), "auto")
+        for code in ["zh", "en", "ja", "ko", "fr", "de", "es"]:
+            self.stt_lang_combo.addItem(code, code)
         stt_api_layout.addRow(t("settings.language"), self.stt_lang_combo)
 
         stt_api_group.setLayout(stt_api_layout)
@@ -181,6 +192,11 @@ class SettingsDialog(QDialog):
 
         self.polish_enabled_check = QCheckBox(t("settings.polish_enabled"))
         polish_api_layout.addRow("", self.polish_enabled_check)
+
+        self.polish_style_combo = QComboBox()
+        for label_key, value in self.POLISH_STYLES:
+            self.polish_style_combo.addItem(t(label_key), value)
+        polish_api_layout.addRow(t("settings.polish_style"), self.polish_style_combo)
 
         polish_api_group.setLayout(polish_api_layout)
         polish_layout.addWidget(polish_api_group)
@@ -279,6 +295,7 @@ class SettingsDialog(QDialog):
         idx = self.language_combo.findData(self.config.language)
         if idx >= 0:
             self.language_combo.setCurrentIndex(idx)
+        self.auto_start_check.setChecked(self.config.window.auto_start)
 
         # STT tab
         self.stt_api_key_input.setText(self.config.asr.api_key)
@@ -288,15 +305,20 @@ class SettingsDialog(QDialog):
             self.stt_model_combo.setCurrentIndex(idx)
         else:
             self.stt_model_combo.setEditText(self.config.asr.model)
-        idx = self.stt_lang_combo.findText(self.config.asr.language)
-        if idx >= 0:
-            self.stt_lang_combo.setCurrentIndex(idx)
+        idx = self.stt_lang_combo.findData(self.config.asr.language)
+        if idx < 0:
+            idx = self.stt_lang_combo.findData("auto")
+        self.stt_lang_combo.setCurrentIndex(idx)
         self.sample_rate_spin.setValue(self.config.recording.sample_rate)
 
         # Polish tab
         self.polish_api_key_input.setText(self.config.polish.api_key)
         self.polish_base_url_input.setText(self.config.polish.base_url)
         self.polish_enabled_check.setChecked(self.config.polish.enabled)
+        idx = self.polish_style_combo.findData(self.config.polish.style)
+        if idx < 0:
+            idx = self.polish_style_combo.findData("default")
+        self.polish_style_combo.setCurrentIndex(idx)
         idx = self.polish_model_combo.findText(self.config.polish.model)
         if idx >= 0:
             self.polish_model_combo.setCurrentIndex(idx)
@@ -335,12 +357,13 @@ class SettingsDialog(QDialog):
 
         # General — language
         self.config.language = self.language_combo.currentData()
+        self.config.window.auto_start = self.auto_start_check.isChecked()
 
         # STT
         self.config.asr.api_key = api_key
         self.config.asr.base_url = self.stt_base_url_input.text().strip() or DEFAULT_BASE_URL
         self.config.asr.model = self.stt_model_combo.currentText()
-        self.config.asr.language = self.stt_lang_combo.currentText()
+        self.config.asr.language = self.stt_lang_combo.currentData()
         self.config.recording.sample_rate = self.sample_rate_spin.value()
 
         # Polish
@@ -348,6 +371,7 @@ class SettingsDialog(QDialog):
         self.config.polish.base_url = self.polish_base_url_input.text().strip() or DEFAULT_BASE_URL
         self.config.polish.model = self.polish_model_combo.currentText()
         self.config.polish.enabled = self.polish_enabled_check.isChecked()
+        self.config.polish.style = self.polish_style_combo.currentData()
 
         # Output
         self.config.output.paste_delay_ms = self.paste_delay_spin.value()

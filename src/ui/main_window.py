@@ -190,6 +190,7 @@ class FloatingRecordingWindow(QWidget):
             | Qt.WindowStaysOnTopHint
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_QuitOnClose, False)
         self.setMinimumSize(260, 152)
         self.resize(260, 152)
 
@@ -391,6 +392,7 @@ class StatusBubble(QWidget):
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
+        self.setAttribute(Qt.WA_QuitOnClose, False)
 
     def show_status(self, text: str):
         """Show or update the bubble with the given text."""
@@ -454,6 +456,7 @@ class Toast(QWidget):
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
+        self.setAttribute(Qt.WA_QuitOnClose, False)
 
         fm = QFontMetrics(QFont(self._FONT_FAMILY, self._FONT_SIZE))
         text_w = fm.horizontalAdvance(self._text)

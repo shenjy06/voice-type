@@ -6,6 +6,10 @@ from src.config import AppConfig
 
 logger = logging.getLogger(__name__)
 
+# Prompt hint for auto-detect mode to improve Chinese-English mixed recognition.
+# Whisper uses the prompt parameter as context to bias language detection.
+_AUTO_DETECT_PROMPT = "以下是普通话和English混合的句子。"
+
 
 class Transcriber:
     def __init__(self, config: AppConfig):
@@ -22,8 +26,11 @@ class Transcriber:
         kwargs = {
             "model": self.config.asr.model,
         }
-        if self.config.asr.language and self.config.asr.language != "auto":
-            kwargs["language"] = self.config.asr.language
+        lang = self.config.asr.language
+        if lang and lang != "auto":
+            kwargs["language"] = lang
+        else:
+            kwargs["prompt"] = _AUTO_DETECT_PROMPT
         with open(audio_path, "rb") as f:
             response = self._client.audio.transcriptions.create(file=f, **kwargs)
         text = response.text.strip()
