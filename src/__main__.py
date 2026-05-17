@@ -13,8 +13,9 @@ from src.asr import Transcriber
 from src.glossary import apply_glossary
 from src.history import HistoryStore
 from src.polisher import TextPolisher
-from src.typer import TextTyper
+from src.typer import TextTyper, TERMINAL_WINDOW_CLASSES, TERMINAL_TITLE_MARKERS
 from src.window_manager import get_foreground_window
+from src.context import get_cursor_context
 from src.ui.main_window import FloatingRecordingWindow, Toast, StatusBubble
 from src.ui.history_dialog import HistoryDialog
 from src.ui.settings_dialog import SettingsDialog
@@ -47,10 +48,12 @@ class ProcessingWorker(QObject):
     finished = Signal(str)  # refined text
     error = Signal(str)
 
-    def __init__(self, config: AppConfig, audio_path: str):
+    def __init__(self, config: AppConfig, audio_path: str, context_before: str = "", context_after: str = ""):
         super().__init__()
         self.config = config
         self.audio_path = audio_path
+        self.context_before = context_before
+        self.context_after = context_after
 
     def run(self):
         try:
@@ -71,7 +74,7 @@ class ProcessingWorker(QObject):
                 self.finished.emit(transcript)
                 return
             polisher = TextPolisher(self.config)
-            refined = polisher.polish(transcript)
+            refined = polisher.polish(transcript, self.context_before, self.context_after)
             self.finished.emit(refined)
         except Exception as e:
             logger.exception("Processing failed")
@@ -93,6 +96,8 @@ class Application:
         self._processing_thread = None
         self._processing_worker = None
         self._saved_hwnd = 0
+        self._context_before = ""
+        self._context_after = ""
         self._cancelled = False
         self._quitting = False
         self._audio_level_timer = QTimer()
@@ -170,13 +175,38 @@ class Application:
         else:
             self.window.start_recording()
 
+    def _is_terminal_window(self, hwnd: int) -> bool:
+        """Check if the given window is a terminal/console."""
+        if not hwnd or hwnd == 0:
+            return False
+        buf = ctypes.create_unicode_buffer(256)
+        if user32.GetClassNameW(hwnd, buf, 256):
+            if buf.value in TERMINAL_WINDOW_CLASSES:
+                return True
+        length = user32.GetWindowTextLengthW(hwnd)
+        if length:
+            title_buf = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hwnd, title_buf, length + 1)
+            title = title_buf.value.lower()
+            if any(marker in title for marker in TERMINAL_TITLE_MARKERS):
+                return True
+        return False
+
     def _on_recording_started(self):
-        """User started recording — save foreground window."""
+        """User started recording — save foreground window and capture cursor context."""
         self._saved_hwnd = get_foreground_window()
+        # Only capture context when polish is enabled (context is only used by the polisher)
+        # Skip in terminal windows — Ctrl+C would interrupt the terminal instead of copying
+        if self.config.polish.enabled and not self._is_terminal_window(self._saved_hwnd):
+            self._context_before, self._context_after = get_cursor_context()
+        else:
+            self._context_before = ""
+            self._context_after = ""
         self.audio_recorder.start()
         self._audio_level_timer.start()
         self.tray.set_recording(True)
-        logger.info("Recording started, saved hwnd=%s", self._saved_hwnd)
+        logger.info("Recording started, saved hwnd=%s, context_before=%d, context_after=%d",
+                     self._saved_hwnd, len(self._context_before), len(self._context_after))
 
         # Show persistent status bubble
         self._status_bubble.show_status(t("status.recording"))
@@ -223,7 +253,10 @@ class Application:
     def _start_processing(self, audio_path: str):
         """Run ASR + LLM in a background thread."""
         self._processing_thread = QThread()
-        self._processing_worker = ProcessingWorker(self.config, str(audio_path))
+        self._processing_worker = ProcessingWorker(
+            self.config, str(audio_path),
+            self._context_before, self._context_after,
+        )
         self._processing_worker.moveToThread(self._processing_thread)
 
         self._processing_thread.started.connect(self._processing_worker.run)

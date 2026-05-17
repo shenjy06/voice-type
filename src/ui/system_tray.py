@@ -197,7 +197,7 @@ class TrayIcon(QObject):
 
 
 class HotkeyManager(QObject):
-    """Global hotkeys using Right Shift as toggle and Right Shift+C as cancel."""
+    """Global hotkeys using Right Alt as toggle and Right Alt+C as cancel."""
 
     toggle_recording = Signal()
     cancel_recording = Signal()
@@ -219,7 +219,7 @@ class HotkeyManager(QObject):
             on_release=self._on_release,
         )
         self._listener.start()
-        logger.info("Right Shift hotkey monitoring started")
+        logger.info("Right Alt hotkey monitoring started")
 
     def stop(self):
         """Stop monitoring."""
@@ -229,11 +229,13 @@ class HotkeyManager(QObject):
             self._listener = None
         self._toggle_key_pressed = False
         self._combo_used = False
-        logger.info("Right Shift hotkey monitoring stopped")
+        logger.info("Right Alt hotkey monitoring stopped")
+
+    _RIGHT_ALT_KEYS = {keyboard.Key.alt_r, keyboard.Key.alt_gr}
 
     def _on_press(self, key):
         """Handle key press event."""
-        if key == keyboard.Key.shift_r:
+        if key in self._RIGHT_ALT_KEYS:
             self._toggle_key_pressed = True
             self._combo_used = False
             return
@@ -246,7 +248,7 @@ class HotkeyManager(QObject):
                 and key.char.lower() == "c"
             ):
                 self._combo_used = True
-                logger.info("Right Shift+C cancel triggered")
+                logger.info("Right Alt+C cancel triggered")
                 self.cancel_recording.emit()
                 return
         except AttributeError:
@@ -256,8 +258,8 @@ class HotkeyManager(QObject):
             self._combo_used = True
 
     def _on_release(self, key):
-        """Handle key release event and detect Right Shift tap vs combo."""
-        if key != keyboard.Key.shift_r:
+        """Handle key release event and detect Right Alt tap vs combo."""
+        if key not in self._RIGHT_ALT_KEYS:
             if self._toggle_key_pressed:
                 self._combo_used = True
             return
@@ -269,5 +271,5 @@ class HotkeyManager(QObject):
         if self._combo_used:
             return
 
-        logger.info("Right Shift toggle triggered")
+        logger.info("Right Alt toggle triggered")
         self.toggle_recording.emit()
