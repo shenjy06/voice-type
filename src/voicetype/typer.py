@@ -105,25 +105,42 @@ class TextTyper:
         threading.Thread(target=_restore, daemon=True).start()
 
     def _send_paste(self, use_terminal_paste: bool = False) -> bool:
-        """Send Ctrl+V, or Ctrl+Shift+V for terminal windows."""
+        """Send Ctrl+V, or Ctrl+Shift+V for terminal windows.
+
+        Returns False if any key injection call reports failure (keybd_event
+        returns nonzero on success, zero on failure — e.g. UIPI blocking), so
+        a silently-dropped paste surfaces to the user as a "copied instead"
+        toast instead of looking like success.
+        """
         try:
             VK_CONTROL = 0x11
             VK_SHIFT = 0x10
             VK_V = 0x56
 
-            user32.keybd_event(VK_CONTROL, 0, 0, 0)
+            def _send(vk: int, flags: int) -> bool:
+                # keybd_event returns nonzero on success; ctypes default
+                # restype is c_int, so a falsy return means injection failed.
+                return bool(user32.keybd_event(vk, 0, flags, 0))
+
+            if not _send(VK_CONTROL, 0):
+                return False
             time.sleep(0.05)
             if use_terminal_paste:
-                user32.keybd_event(VK_SHIFT, 0, 0, 0)
+                if not _send(VK_SHIFT, 0):
+                    return False
                 time.sleep(0.05)
-            user32.keybd_event(VK_V, 0, 0, 0)
+            if not _send(VK_V, 0):
+                return False
             time.sleep(0.05)
-            user32.keybd_event(VK_V, 0, KEYEVENTF_KEYUP, 0)
+            if not _send(VK_V, KEYEVENTF_KEYUP):
+                return False
             time.sleep(0.05)
             if use_terminal_paste:
-                user32.keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYUP, 0)
+                if not _send(VK_SHIFT, KEYEVENTF_KEYUP):
+                    return False
                 time.sleep(0.05)
-            user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
+            if not _send(VK_CONTROL, KEYEVENTF_KEYUP):
+                return False
             return True
         except Exception:
             return False
@@ -133,8 +150,8 @@ class TextTyper:
             return True
         if paste_mode == PASTE_MODE_CTRL_V:
             return False
-        if paste_mode != PASTE_MODE_AUTO:
-            pass
+        # AUTO (or any unrecognised mode): detect terminal windows and use
+        # Ctrl+Shift+V for them so paste works in Windows Terminal / consoles.
         return self._is_terminal_window(hwnd)
 
     def _is_terminal_window(self, hwnd: int) -> bool:

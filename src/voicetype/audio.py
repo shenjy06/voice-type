@@ -169,6 +169,11 @@ class AudioRecorder:
         with self._lock:
             self._frames = []
             self._input_level = 0.0
+        # Initialise before the try-block: if sd.InputStream(...) itself raises
+        # (e.g. no input device / permission denied), `stream` would otherwise
+        # be unbound in the handler and the cleanup check would raise
+        # UnboundLocalError, masking the original failure.
+        stream = None
         try:
             stream = sd.InputStream(
                 samplerate=self.sample_rate,
@@ -177,7 +182,7 @@ class AudioRecorder:
                 callback=self._callback,
             )
             stream.start()
-        except Exception as e:
+        except Exception:
             if stream is not None:
                 try:
                     stream.close()
@@ -227,10 +232,15 @@ class AudioRecorder:
         return self._temp_file
 
     def _callback(self, indata, frames, time_info, status):
+        # Do the (CPU) level computation and the array copy OUTSIDE the lock —
+        # they don't touch shared mutable state. Only the list append and the
+        # level write need the lock, so we hold it for the minimum span.
+        level = _calculate_input_level(indata)
+        frame = indata.copy()
         with self._lock:
             if self._recording:
-                self._frames.append(indata.copy())
-                self._input_level = _calculate_input_level(indata)
+                self._frames.append(frame)
+                self._input_level = level
             else:
                 self._input_level = 0.0
 

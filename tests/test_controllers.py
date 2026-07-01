@@ -21,6 +21,7 @@ class _RecordingControllerDoubles:
 
 def _make_controller(cancelled=False, saved_hwnd=0):
     d = _RecordingControllerDoubles()
+    d.ui.is_processing.return_value = False  # not processing by default
     hwnd_provider = MagicMock(return_value=12345)
     rc = RecordingController(
         recorder=d.recorder,
@@ -52,14 +53,31 @@ class TestRecordingController:
 
     def test_toggle_ignored_when_processing(self):
         """Toggle must not start a new recording while processing is in progress."""
-        from voicetype.state import RecorderState
-
         rc, d, _ = _make_controller()
         d.ui.is_recording.return_value = False
-        d.ui._state = RecorderState.PROCESSING
+        d.ui.is_processing.return_value = True
         rc.toggle()
         d.ui.start_recording.assert_not_called()
         d.ui.stop_recording.assert_not_called()
+
+    def test_toggle_falls_back_to_state_when_no_is_processing(self):
+        """When the UI lacks is_processing(), _state is consulted as a fallback."""
+        from voicetype.state import RecorderState
+
+        d = _RecordingControllerDoubles()
+        # Build a UI double with no is_processing attribute at all.
+        ui = MagicMock(spec=["is_recording", "start_recording", "stop_recording",
+                             "set_audio_level", "set_processing", "set_done",
+                             "set_error", "isVisible", "winId"])
+        ui.is_recording.return_value = False
+        ui._state = RecorderState.PROCESSING
+        rc = RecordingController(
+            recorder=d.recorder, ui=ui, tray=d.tray, bubble=d.bubble,
+            level_timer=d.level_timer,
+        )
+        rc.toggle()
+        ui.start_recording.assert_not_called()
+        ui.stop_recording.assert_not_called()
 
     def test_on_recording_started_captures_hwnd_and_starts_recorder(self):
         rc, d, hwnd_provider = _make_controller()
@@ -75,6 +93,46 @@ class TestRecordingController:
         rc, d, _ = _make_controller(cancelled=True)
         rc.on_recording_started()
         assert rc._cancelled is False
+
+    def test_on_recording_started_captures_cursor_context(self):
+        """The context_provider is invoked and its result exposed."""
+        d = _RecordingControllerDoubles()
+        hwnd_provider = MagicMock(return_value=12345)
+        context_provider = MagicMock(return_value=("hello ", " world"))
+        rc = RecordingController(
+            recorder=d.recorder,
+            ui=d.ui,
+            tray=d.tray,
+            bubble=d.bubble,
+            level_timer=d.level_timer,
+            hwnd_provider=hwnd_provider,
+            context_provider=context_provider,
+        )
+        rc.on_recording_started()
+        context_provider.assert_called_once()
+        assert rc.cursor_context == ("hello ", " world")
+
+    def test_on_recording_started_context_capture_failure_is_safe(self):
+        """A raising provider must not break the recording start."""
+        d = _RecordingControllerDoubles()
+        hwnd_provider = MagicMock(return_value=12345)
+        context_provider = MagicMock(side_effect=RuntimeError("boom"))
+        rc = RecordingController(
+            recorder=d.recorder,
+            ui=d.ui,
+            tray=d.tray,
+            bubble=d.bubble,
+            level_timer=d.level_timer,
+            hwnd_provider=hwnd_provider,
+            context_provider=context_provider,
+        )
+        result = rc.on_recording_started()
+        assert result == 12345
+        assert rc.cursor_context == ("", "")
+
+    def test_cursor_context_defaults_empty_without_provider(self):
+        rc, d, _ = _make_controller()
+        assert rc.cursor_context == ("", "")
 
     def test_cancel_when_recording_stops_ui(self):
         rc, d, _ = _make_controller()
@@ -95,37 +153,24 @@ class TestRecordingController:
     def test_stop_recording_event_when_cancelled_resets(self):
         rc, d, _ = _make_controller(cancelled=True)
         rc._cancelled = True
-        on_no_audio = MagicMock()
-        on_save_error = MagicMock()
-        result = rc.stop_recording_event(
-            on_no_audio=on_no_audio,
-            on_save_error=on_save_error,
-        )
-        assert result is None
+        result = rc.stop_recording_event()
+        assert result is False
         assert rc._cancelled is False
         d.recorder.cleanup.assert_called_once()
         d.bubble.dismiss.assert_called_once()
         d.ui.set_done.assert_called_once()
-        on_no_audio.assert_not_called()
-        on_save_error.assert_not_called()
 
-    def test_stop_recording_event_saves_and_returns_path(self):
+    def test_stop_recording_event_proceeds_without_saving(self):
+        """stop_recording_event stops the stream and signals proceed; saving is
+        deferred to the processing worker so the UI thread never blocks on it."""
         rc, d, _ = _make_controller()
-        d.recorder.save.return_value = "/tmp/audio.ogg"
-        result = rc.stop_recording_event(MagicMock(), MagicMock())
-        assert result == "/tmp/audio.ogg"
+        result = rc.stop_recording_event()
+        assert result is True
         d.recorder.stop.assert_called_once()
+        d.recorder.save.assert_not_called()
         d.level_timer.stop.assert_called_once()
         d.ui.set_audio_level.assert_called_once_with(0.0)
         d.ui.set_processing.assert_called_once()
-
-    def test_stop_recording_event_save_failure_invokes_callback(self):
-        rc, d, _ = _make_controller()
-        d.recorder.save.side_effect = ValueError("no audio")
-        on_save_error = MagicMock()
-        result = rc.stop_recording_event(MagicMock(), on_save_error)
-        assert result is None
-        on_save_error.assert_called_once()
 
     def test_reset_after_processing(self):
         rc, d, _ = _make_controller()

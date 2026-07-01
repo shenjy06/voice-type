@@ -1,5 +1,7 @@
 """Settings dialog — configure API, models, hotkey, etc."""
 
+import threading
+
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QLabel, QLineEdit,
     QComboBox, QFormLayout, QGroupBox, QSpinBox, QCheckBox,
@@ -30,6 +32,11 @@ def _get_settings_icon() -> QIcon:
 class SettingsDialog(QDialog):
 
     settings_saved = Signal()
+    # Emitted (on the UI thread) when the background network check finishes;
+    # carries True if the network is reachable.
+    _network_check_done = Signal(bool)
+    # Emitted (on the UI thread) with the resolved default input device name.
+    _device_name_ready = Signal(str)
 
     POLISH_MODELS = [
         "gpt-4o", "gpt-4o-mini", "gpt-4-turbo",
@@ -65,6 +72,10 @@ class SettingsDialog(QDialog):
         self._load_config()
         # Snapshot original API-related fields to detect changes on save
         self._initial_api_state = self._snapshot_api_state()
+        # Route the background network-check result back to the UI thread.
+        self._network_check_done.connect(self._on_network_check_done)
+        # Route the background device-name query back to the UI thread.
+        self._device_name_ready.connect(self._set_microphone_device_label)
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
@@ -353,18 +364,48 @@ class SettingsDialog(QDialog):
         return current != self._initial_api_state
 
     def _save_and_close(self):
-        # Only require network access if an API-related field actually changed.
-        if self._api_state_changed() and not check_network_available():
-            self._toast = Toast(t("settings.network_error"), parent=self)
-            self._toast.show()
-            return
-
+        # Validate keys synchronously first — no network needed for that.
         api_key = self.stt_api_key_input.text().strip()
         polish_key = self.polish_api_key_input.text().strip()
         if not api_key and not polish_key:
             self._toast = Toast(t("settings.api_key_required"), parent=self)
             self._toast.show()
             return
+
+        # Only require network access if an API-related field actually changed.
+        if not self._api_state_changed():
+            self._apply_save()
+            return
+
+        # Run the (blocking, up to ~2s offline) network check on a background
+        # thread so the dialog stays responsive. Disable the save button and
+        # show a checking state until the result lands back on the UI thread.
+        self._set_checking_network(True)
+
+        def _check():
+            ok = check_network_available()
+            self._network_check_done.emit(ok)
+
+        threading.Thread(target=_check, daemon=True).start()
+
+    def _on_network_check_done(self, ok: bool):
+        self._set_checking_network(False)
+        if not ok:
+            self._toast = Toast(t("settings.network_error"), parent=self)
+            self._toast.show()
+            return
+        self._apply_save()
+
+    def _set_checking_network(self, checking: bool):
+        """Toggle the save button into/out of the network-checking state."""
+        self._save_btn.setEnabled(not checking)
+        self._save_btn.setText(
+            t("settings.network_checking") if checking else t("settings.save")
+        )
+
+    def _apply_save(self):
+        """Write all fields into config, persist, and close the dialog."""
+        api_key = self.stt_api_key_input.text().strip()
 
         # General — language
         self.config.language = self.language_combo.currentData()
@@ -426,7 +467,17 @@ class SettingsDialog(QDialog):
         return entries
 
     def _update_microphone_device_label(self):
-        device_name = get_default_input_device_name()
+        # sd.query_devices(kind="input") enumerates PortAudio devices, which
+        # can take 50-200ms on systems with many audio endpoints. Run it on a
+        # background thread and apply the result via signal so dialog open is
+        # not blocked. Defer the thread start to the next event-loop tick so
+        # the signal is delivered cleanly after construction completes.
+        def _query():
+            self._device_name_ready.emit(get_default_input_device_name())
+
+        QTimer.singleShot(0, lambda: threading.Thread(target=_query, daemon=True).start())
+
+    def _set_microphone_device_label(self, device_name: str):
         self.mic_device_label.setText(device_name or t("settings.mic_device_none"))
 
     def _toggle_microphone_monitor(self):

@@ -62,15 +62,28 @@ class ProcessingController(QObject):
             self._worker = None
             return False
 
-    def start(self, audio_path: str) -> None:
-        """Start a new processing cycle for the given audio file."""
+    def start(
+        self,
+        recorder,
+        context_before: str = "",
+        context_after: str = "",
+    ) -> None:
+        """Start a new processing cycle for the given recorder.
+
+        The worker saves the recorder's captured audio (encoding it to OGG on
+        the background thread) before transcribing. ``context_before`` /
+        ``context_after`` carry optional cursor context captured at recording
+        start, enabling context-aware polishing.
+        """
         if self.is_running():
             return
 
         self._completed = False
 
         thread = QThread()
-        worker = ProcessingWorker(self._config, audio_path)
+        worker = ProcessingWorker(
+            self._config, recorder, context_before, context_after
+        )
         worker.moveToThread(thread)
 
         # Worker signals: route results to the UI thread, then quit the thread.

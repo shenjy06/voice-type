@@ -24,16 +24,17 @@ warnings.filterwarnings(
     category=UserWarning,
 )
 
-import os
 import sys
+import threading
 
 import ctypes
 import pyperclip
 from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QObject, QTimer, Signal
 
 from voicetype.audio import AudioRecorder, cleanup_stale_audio
 from voicetype.config import AppConfig
+from voicetype.context import get_cursor_context
 from voicetype.history import HistoryStore
 from voicetype.processing_controller import ProcessingController
 from voicetype.recording_controller import RecordingController
@@ -45,6 +46,20 @@ from voicetype.ui.system_tray import HotkeyManager, TrayIcon
 from voicetype.window_manager import get_foreground_window
 from voicetype.i18n import init_language, t
 
+
+class _PasteBridge(QObject):
+    """Marshals a background-thread paste failure to the UI thread.
+
+    Qt signals are the correct cross-thread mechanism here: a signal emitted
+    from the paste worker thread is delivered to this object's thread (the UI
+    thread) via a queued connection. ``QTimer.singleShot`` cannot be used from
+    a worker thread because timers are thread-affine and the worker has no
+    event loop.
+    """
+
+    paste_failed = Signal()
+
+
 class Application:
     """Top-level orchestrator. Delegates stateful work to controllers."""
 
@@ -53,8 +68,10 @@ class Application:
         self.app.setApplicationName("Voice Type")
         self.app.setQuitOnLastWindowClosed(False)
 
-        # Clean up stale audio files from previous sessions
-        cleanup_stale_audio()
+        # Clean up stale audio files from previous sessions on a background
+        # thread — a glob + stat sweep is not time-critical and shouldn't add
+        # latency to startup on the UI thread.
+        threading.Thread(target=cleanup_stale_audio, daemon=True).start()
 
         self.config = AppConfig.load()
         init_language(self.config.language)
@@ -72,6 +89,11 @@ class Application:
         # Keep references to active toasts so they aren't GC'd mid-animation.
         # Toasts auto-remove themselves via their destroyed signal.
         self._toasts = []
+
+        # Bridge for marshaling background-thread paste failures to the UI
+        # thread (created here so it lives on the UI/main thread).
+        self._paste_bridge = _PasteBridge()
+        self._paste_bridge.paste_failed.connect(self._on_paste_failed)
 
         self._init_ui()
         self._init_controllers()
@@ -123,6 +145,7 @@ class Application:
             tray=self.tray,
             bubble=self._status_bubble,
             level_timer=self._audio_level_timer,
+            context_provider=self._capture_cursor_context,
         )
         self._processing_controller = ProcessingController(
             config=self.config,
@@ -151,18 +174,26 @@ class Application:
         self._recording_controller.on_recording_started()
 
     def _on_recording_stopped(self):
-        audio_path = self._recording_controller.stop_recording_event(
-            on_no_audio=lambda: None,  # legacy hook unused; UI surfaces error below
-            on_save_error=self._on_recording_save_error,
+        if not self._recording_controller.stop_recording_event():
+            return  # cancelled; UI already reset to idle
+        context_before, context_after = self._recording_controller.cursor_context
+        self._processing_controller.start(
+            self.audio_recorder, context_before, context_after
         )
-        if audio_path is None:
-            return  # either cancelled or save failed; error UI was shown
-        self._processing_controller.start(audio_path)
 
-    def _on_recording_save_error(self):
-        self.window.set_error(t("error.no_audio"))
-        self.tray.show_message(t("error.title"), t("error.no_audio_detail"))
-        self.window.show()
+    def _capture_cursor_context(self) -> tuple[str, str]:
+        """Capture text around the cursor for context-aware polishing.
+
+        Returns empty strings when polishing is disabled (so the polisher
+        falls back to standalone mode) or when capture fails for any reason —
+        context is a best-effort enhancement, never a hard dependency.
+        """
+        if not self.config.polish.enabled:
+            return ("", "")
+        try:
+            return get_cursor_context()
+        except Exception:
+            return ("", "")
 
     # ---- processing result handlers ---------------------------------------
 
@@ -172,11 +203,35 @@ class Application:
         if refined_text:
             self.history_store.add(refined_text)
             if self.config.output.auto_paste:
-                pasted = self.typer.output_text(refined_text, self._recording_controller.saved_hwnd)
-                if not pasted:
-                    self._show_toast(t("msg.paste_failed_copied"))
+                self._paste_async(refined_text, self._recording_controller.saved_hwnd)
             else:
-                pyperclip.copy(refined_text)
+                # Copy on a background thread: clipboard contention (another
+                # app holding the clipboard open) can make pyperclip.copy block
+                # for hundreds of ms, which would freeze the UI thread.
+                threading.Thread(
+                    target=pyperclip.copy, args=(refined_text,), daemon=True
+                ).start()
+
+    def _paste_async(self, text: str, hwnd: int) -> None:
+        """Paste text on a background thread so the pre-paste delay and the
+        keystroke sequence never block the UI thread.
+
+        Window focus (``set_foreground_window``) and keyboard injection
+        (``keybd_event``) are OS-level and thread-agnostic — the foreground
+        restriction is handled via ``AttachThreadInput`` inside
+        ``set_foreground_window``. A paste failure is surfaced as a toast,
+        marshaled back to the UI thread via the ``_paste_bridge`` signal.
+        """
+        def _work():
+            pasted = self.typer.output_text(text, hwnd)
+            if not pasted:
+                self._paste_bridge.paste_failed.emit()
+
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _on_paste_failed(self):
+        """Show the paste-failed toast (invoked on the UI thread via signal)."""
+        self._show_toast(t("msg.paste_failed_copied"))
 
     def _on_processing_error(self, error_msg: str):
         self._recording_controller.cancel_during_processing(error_msg)
@@ -200,11 +255,12 @@ class Application:
 
     def _paste_history_text(self, text: str):
         if self.config.output.auto_paste:
-            pasted = self.typer.output_text(text, get_foreground_window())
-            if not pasted:
-                self._show_toast(t("msg.paste_failed_copied"))
+            self._paste_async(text, get_foreground_window())
         else:
-            pyperclip.copy(text)
+            # Background thread — see _on_processing_done for rationale.
+            threading.Thread(
+                target=pyperclip.copy, args=(text,), daemon=True
+            ).start()
 
     def _show_toast(self, message: str):
         toast = Toast(message, parent=self.window)
@@ -229,6 +285,10 @@ class Application:
         self.tray.apply_config(self.config)
         if self._history_dialog is not None:
             self._history_dialog.retranslate()
+        # API keys / base URLs / models may have changed — drop cached API
+        # clients so the next cycle rebuilds them with fresh settings.
+        from voicetype.processing import invalidate_clients
+        invalidate_clients()
         self._settings_dialog = None
         self._show_toast(t("msg.settings_saved"))
 
@@ -245,6 +305,7 @@ class Application:
         self._quitting = True
         self.hotkey_manager.stop()
         self._audio_level_timer.stop()
+        self._flush_config_save()
         self.audio_recorder.stop()
         self.audio_recorder.cleanup()
         self._processing_controller.shutdown()
@@ -253,7 +314,9 @@ class Application:
         # Give Qt's event loop a brief window to flush the quit. If the
         # tray icon (or anything else) keeps the process alive past this,
         # force-exit so the process does not hang after the window is gone.
-        QTimer.singleShot(3000, lambda: os._exit(0))
+        # Use sys.exit (not os._exit) so atexit handlers, finally blocks and
+        # buffered I/O (config / history writes) still get a chance to flush.
+        QTimer.singleShot(3000, lambda: sys.exit(0))
         self.app.quit()
 
     def _sync_audio_level(self):
@@ -263,9 +326,30 @@ class Application:
     # ---- quick settings ----------------------------------------------------
 
     def _save_quick_settings(self):
-        self.config.save()
+        # Update in-memory state and the live UI immediately (cheap), but
+        # debounce the disk write so rapid tray toggles coalesce into a
+        # single config.json write instead of one per click.
         self.tray.apply_config(self.config)
         self.typer.config = self.config
+        self._schedule_config_save()
+
+    def _schedule_config_save(self):
+        """Coalesce rapid config changes into a single delayed disk write."""
+        timer = getattr(self, "_config_save_timer", None)
+        if timer is None:
+            timer = QTimer()
+            timer.setSingleShot(True)
+            timer.setInterval(500)
+            timer.timeout.connect(self.config.save)
+            self._config_save_timer = timer
+        timer.start()
+
+    def _flush_config_save(self):
+        """Write config now if a debounced save is pending (call at quit)."""
+        timer = getattr(self, "_config_save_timer", None)
+        if timer is not None and timer.isActive():
+            timer.stop()
+            self.config.save()
 
     def _set_auto_paste(self, enabled: bool):
         self.config.output.auto_paste = enabled
@@ -322,8 +406,11 @@ def _start_show_window_watcher(callback) -> None:
     """Watch for the show-window signal from a second instance.
 
     Runs a background daemon thread that blocks on a named event. When a
-    second process signals the event, *callback* is invoked on the Qt main
-    thread via QTimer.singleShot.
+    second process signals the event, ``callback`` is invoked on the Qt main
+    thread. The cross-thread handoff uses a Qt signal (the correct mechanism —
+    emitted on the worker thread, delivered queued to the bridge's thread)
+    rather than ``QTimer.singleShot``, which is thread-affine and would not
+    fire from a thread without a running event loop.
     """
     import threading
 
@@ -334,13 +421,22 @@ def _start_show_window_watcher(callback) -> None:
     if not event_handle:
         return
 
+    # QObject living on the calling (UI) thread; its signal is connected to the
+    # callback, so emitting it from the watcher thread marshals the call via a
+    # queued connection to the UI thread.
+    class _Bridge(QObject):
+        triggered = Signal()
+
+    bridge = _Bridge()
+    bridge.triggered.connect(callback)
+
     INFINITE = 0xFFFFFFFF
 
     def _watch():
         while True:
             result = kernel32.WaitForSingleObject(event_handle, INFINITE)
             if result == 0:  # WAIT_OBJECT_0 — event signaled
-                QTimer.singleShot(0, callback)
+                bridge.triggered.emit()
             else:
                 break
 
