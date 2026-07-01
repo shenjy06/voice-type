@@ -23,6 +23,7 @@ dependencies = [
 voice-type = "voicetype.__main__:main"
 
 [tool.setuptools.packages.find]
+where = ["src"]
 include = ["voicetype*"]
 
 [project.optional-dependencies]

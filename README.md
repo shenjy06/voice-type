@@ -222,26 +222,27 @@ Any API that supports the OpenAI-compatible protocol can be used (DashScope, Vol
 
 ```
 voice-type/
-├── voicetype/
-│   ├── __main__.py              # Entry point: Application orchestrator
-│   ├── api_client.py            # Base OpenAI-compatible API client wrapper
-│   ├── config.py                # Config management: dataclass + JSON persistence
-│   ├── history.py               # SQLite local recognized text history storage
-│   ├── audio.py                 # Audio recording: sounddevice + soundfile OGG encoding
-│   ├── asr.py                   # Speech recognition: OpenAI-compatible transcriptions API
-│   ├── glossary.py              # User glossary term replacement after ASR
-│   ├── polisher.py              # Text refinement: LLM chat completions API
-│   ├── typer.py                 # Text output: clipboard + Ctrl+V paste
-│   ├── window_manager.py        # Windows foreground control: ctypes window/keyboard APIs
-│   ├── network.py               # Network detection: HTTP connectivity check
-│   ├── state.py                 # Application state enum (RecorderState)
-│   ├── i18n.py                  # Internationalization: Chinese/English translations
-│   └── ui/
-│       ├── history_dialog.py    # Recent text history viewer/copy/re-paste dialog
-│       ├── main_window.py       # Floating recording window + pulsing dot + StatusBubble + Toast
-│       ├── settings_dialog.py   # Settings dialog (STT/Polish/Glossary/Output/Hotkeys)
-│       ├── system_tray.py       # System tray icon + pynput hotkey manager
-│       └── icon_utils.py        # Shared icon creation (circle + centered text)
+├── src/
+│   └── voicetype/
+│       ├── __main__.py              # Entry point: Application orchestrator
+│       ├── api_client.py            # Base OpenAI-compatible API client wrapper
+│       ├── config.py                # Config management: dataclass + JSON persistence
+│       ├── history.py               # SQLite local recognized text history storage
+│       ├── audio.py                 # Audio recording: sounddevice + soundfile OGG encoding
+│       ├── asr.py                   # Speech recognition: OpenAI-compatible transcriptions API
+│       ├── glossary.py              # User glossary term replacement after ASR
+│       ├── polisher.py              # Text refinement: LLM chat completions API
+│       ├── typer.py                 # Text output: clipboard + Ctrl+V paste
+│       ├── window_manager.py        # Windows foreground control: ctypes window/keyboard APIs
+│       ├── network.py               # Network detection: HTTP connectivity check
+│       ├── state.py                 # Application state enum (RecorderState)
+│       ├── i18n.py                  # Internationalization: Chinese/English translations
+│       └── ui/
+│           ├── history_dialog.py    # Recent text history viewer/copy/re-paste dialog
+│           ├── main_window.py       # Floating recording window + pulsing dot + StatusBubble + Toast
+│           ├── settings_dialog.py   # Settings dialog (STT/Polish/Glossary/Output/Hotkeys)
+│           ├── system_tray.py       # System tray icon + pynput hotkey manager
+│           └── icon_utils.py        # Shared icon creation (circle + centered text)
 ├── tests/                       # Unit tests (243, covering all modules)
 │   ├── conftest.py
 │   ├── test_audio.py

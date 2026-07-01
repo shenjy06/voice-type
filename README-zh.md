@@ -217,26 +217,27 @@ Voice Type 使用 OpenAI 兼容协议的 API，支持多种服务商。以下是
 
 ```
 voice-type/
-├── voicetype/
-│   ├── __main__.py              # 入口：Application 类，连接所有组件
-│   ├── api_client.py            # OpenAI 兼容 API 客户端封装
-│   ├── config.py                # 配置管理：dataclass + JSON 序列化/持久化
-│   ├── history.py               # SQLite 本地识别文本历史记录
-│   ├── audio.py                 # 音频录制：sounddevice 异步录制 + soundfile 编码为 OGG
-│   ├── asr.py                   # 语音识别：OpenAI 兼容 API
-│   ├── glossary.py              # 词库修正：ASR 后专有名词替换
-│   ├── polisher.py              # 文本润色：LLM API + 系统提示词
-│   ├── typer.py                 # 文本注入：窗口管理 + 剪贴板
-│   ├── window_manager.py        # Windows 窗口控制：ctypes API
-│   ├── network.py               # 网络检测：HTTP 连通性检查
-│   ├── state.py                 # 应用状态枚举 (RecorderState)
-│   ├── i18n.py                  # 国际化：中英文翻译
-│   └── ui/
-│       ├── history_dialog.py    # 最近文本历史查看/复制/重新粘贴
-│       ├── main_window.py       # 浮动录制窗口 + 脉冲红点动画 + 状态气泡 + Toast
-│       ├── settings_dialog.py   # 设置对话框（STT/Polish/Glossary/Output/Hotkeys）
-│       ├── system_tray.py       # 系统托盘 + 全局热键管理
-│       └── icon_utils.py        # 共享图标创建（圆形 + 居中文字）
+├── src/
+│   └── voicetype/
+│       ├── __main__.py              # 入口：Application 类，连接所有组件
+│       ├── api_client.py            # OpenAI 兼容 API 客户端封装
+│       ├── config.py                # 配置管理：dataclass + JSON 序列化/持久化
+│       ├── history.py               # SQLite 本地识别文本历史记录
+│       ├── audio.py                 # 音频录制：sounddevice 异步录制 + soundfile 编码为 OGG
+│       ├── asr.py                   # 语音识别：OpenAI 兼容 API
+│       ├── glossary.py              # 词库修正：ASR 后专有名词替换
+│       ├── polisher.py              # 文本润色：LLM API + 系统提示词
+│       ├── typer.py                 # 文本注入：窗口管理 + 剪贴板
+│       ├── window_manager.py        # Windows 窗口控制：ctypes API
+│       ├── network.py               # 网络检测：HTTP 连通性检查
+│       ├── state.py                 # 应用状态枚举 (RecorderState)
+│       ├── i18n.py                  # 国际化：中英文翻译
+│       └── ui/
+│           ├── history_dialog.py    # 最近文本历史查看/复制/重新粘贴
+│           ├── main_window.py       # 浮动录制窗口 + 脉冲红点动画 + 状态气泡 + Toast
+│           ├── settings_dialog.py   # 设置对话框（STT/Polish/Glossary/Output/Hotkeys）
+│           ├── system_tray.py       # 系统托盘 + 全局热键管理
+│           └── icon_utils.py        # 共享图标创建（圆形 + 居中文字）
 ├── tests/                       # 单元测试（243 项，覆盖全部模块）
 │   ├── conftest.py
 │   ├── test_audio.py

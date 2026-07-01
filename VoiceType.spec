@@ -167,7 +167,7 @@ excluded_optional_modules = (
 
 
 a = Analysis(
-    ['voicetype/__main__.py'],
+    ['src/voicetype/__main__.py'],
     pathex=[],
     binaries=binaries,
     datas=datas,

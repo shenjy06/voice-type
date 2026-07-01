@@ -14,9 +14,9 @@ call :clean_dir "dist"
 call :clean_dir ".pytest_cache"
 call :clean_dir "voice_type.egg-info"
 
-call :clean_pycache "voicetype"
+call :clean_pycache "src\voicetype"
 call :clean_pycache "tests"
-call :clean_pycache "voicetype\ui"
+call :clean_pycache "src\voicetype\ui"
 call :clean_pycache "tests\ui"
 
 echo.

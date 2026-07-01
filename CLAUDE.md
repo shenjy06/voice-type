@@ -26,7 +26,7 @@ Config file lives at `%USERPROFILE%\.voice-type\config.json`, created automatica
 
 ## Architecture
 
-The app follows a pipeline architecture with a central `Application` orchestrator in `voicetype/__main__.py`:
+The app follows a pipeline architecture with a central `Application` orchestrator in `src/voicetype/__main__.py`:
 
 ```
 [Hotkey/UI] → [AudioRecorder] → [WAV file] → [Transcriber] → [TextPolisher] → [TextTyper] → Cursor
@@ -36,27 +36,27 @@ The app follows a pipeline architecture with a central `Application` orchestrato
 
 | Module | Responsibility |
 |--------|---------------|
-| `voicetype/__main__.py` | `Application` class — wires all components together, manages Qt event loop, background processing thread, hotkey lifecycle |
-| `voicetype/api_client.py` | `ApiClient` — wraps OpenAI client creation with common defaults |
-| `voicetype/config.py` | Dataclass-based config with JSON persistence (`AppConfig`, `AsrConfig`, `PolishApiConfig`, `RecordingConfig`, `OutputConfig`, `GlossaryEntry`, `WindowConfig`) |
-| `voicetype/audio.py` | `AudioRecorder` — sounddevice-based async recording, saves to temp OGG via soundfile |
-| `voicetype/asr.py` | `Transcriber` — OpenAI SDK `audio.transcriptions.create()` for STT |
-| `voicetype/glossary.py` | `apply_glossary()` — user-defined term replacements applied after STT and before polishing |
-| `voicetype/polisher.py` | `TextPolisher` — OpenAI SDK `chat.completions.create()` with system prompt for text refinement, supports context-aware polishing |
-| `voicetype/context.py` | `get_cursor_context()` — captures text before/after cursor via Shift+Home/End + Ctrl+C clipboard trick, restores original clipboard |
-| `voicetype/typer.py` | `TextTyper` — clipboard copy + ctypes `keybd_event` Ctrl+V to inject text at cursor |
-| `voicetype/window_manager.py` | Windows foreground control — `SetForegroundWindow` strategies, thread attachment, Alt tap |
-| `voicetype/state.py` | `RecorderState` enum for recording workflow states |
-| `voicetype/network.py` | Network connectivity check with multiple probe endpoints |
+| `src/voicetype/__main__.py` | `Application` class — wires all components together, manages Qt event loop, background processing thread, hotkey lifecycle |
+| `src/voicetype/api_client.py` | `ApiClient` — wraps OpenAI client creation with common defaults |
+| `src/voicetype/config.py` | Dataclass-based config with JSON persistence (`AppConfig`, `AsrConfig`, `PolishApiConfig`, `RecordingConfig`, `OutputConfig`, `GlossaryEntry`, `WindowConfig`) |
+| `src/voicetype/audio.py` | `AudioRecorder` — sounddevice-based async recording, saves to temp OGG via soundfile |
+| `src/voicetype/asr.py` | `Transcriber` — OpenAI SDK `audio.transcriptions.create()` for STT |
+| `src/voicetype/glossary.py` | `apply_glossary()` — user-defined term replacements applied after STT and before polishing |
+| `src/voicetype/polisher.py` | `TextPolisher` — OpenAI SDK `chat.completions.create()` with system prompt for text refinement, supports context-aware polishing |
+| `src/voicetype/context.py` | `get_cursor_context()` — captures text before/after cursor via Shift+Home/End + Ctrl+C clipboard trick, restores original clipboard |
+| `src/voicetype/typer.py` | `TextTyper` — clipboard copy + ctypes `keybd_event` Ctrl+V to inject text at cursor |
+| `src/voicetype/window_manager.py` | Windows foreground control — `SetForegroundWindow` strategies, thread attachment, Alt tap |
+| `src/voicetype/state.py` | `RecorderState` enum for recording workflow states |
+| `src/voicetype/network.py` | Network connectivity check with multiple probe endpoints |
 
 ### UI Modules
 
 | Module | Responsibility |
 |--------|---------------|
-| `voicetype/ui/main_window.py` | `FloatingRecordingWindow` — frameless, draggable, always-on-top window with pulsing dot animation and state machine. `Toast` — auto-dismissing notification |
-| `voicetype/ui/system_tray.py` | `TrayIcon` — system tray with context menu. `HotkeyManager` — pynput keyboard listener for global hotkeys |
-| `voicetype/ui/settings_dialog.py` | `SettingsDialog` — tabbed dialog (STT/Polish/Glossary/Output/Hotkeys) with config load/save |
-| `voicetype/ui/icon_utils.py` | `make_circle_icon()` — shared circular icon creation with centered text |
+| `src/voicetype/ui/main_window.py` | `FloatingRecordingWindow` — frameless, draggable, always-on-top window with pulsing dot animation and state machine. `Toast` — auto-dismissing notification |
+| `src/voicetype/ui/system_tray.py` | `TrayIcon` — system tray with context menu. `HotkeyManager` — pynput keyboard listener for global hotkeys |
+| `src/voicetype/ui/settings_dialog.py` | `SettingsDialog` — tabbed dialog (STT/Polish/Glossary/Output/Hotkeys) with config load/save |
+| `src/voicetype/ui/icon_utils.py` | `make_circle_icon()` — shared circular icon creation with centered text |
 
 ### Threading Model
 
@@ -108,7 +108,7 @@ excludes = [
 ]
 
 a = Analysis(
-    ['voicetype\\__main__.py'],
+    ['src\\voicetype\\__main__.py'],
     pathex=[],
     binaries=needed_binaries,
     datas=needed_datas,

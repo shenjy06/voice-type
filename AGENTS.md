@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-Voice Type is a Python 3.10+ Windows desktop dictation app. Application code lives in `voicetype/`, with the entry point in `voicetype/__main__.py`. Core modules include audio capture (`voicetype/audio.py`), ASR and polishing clients (`voicetype/asr.py`, `voicetype/polisher.py`, `voicetype/api_client.py`), glossary post-processing (`voicetype/glossary.py`), configuration/history storage (`voicetype/config.py`, `voicetype/history.py`), and text injection (`voicetype/typer.py`). Qt UI code is under `voicetype/ui/`. Tests live in `tests/`, with UI tests in `tests/ui/`. Packaging files are `VoiceType.spec`, `build.bat`, and the generated `build/` and `dist/` directories.
+Voice Type is a Python 3.10+ Windows desktop dictation app. Application code lives in `src/voicetype/`, with the entry point in `src/voicetype/__main__.py`. Core modules include audio capture (`src/voicetype/audio.py`), ASR and polishing clients (`src/voicetype/asr.py`, `src/voicetype/polisher.py`, `src/voicetype/api_client.py`), glossary post-processing (`src/voicetype/glossary.py`), configuration/history storage (`src/voicetype/config.py`, `src/voicetype/history.py`), and text injection (`src/voicetype/typer.py`). Qt UI code is under `src/voicetype/ui/`. Tests live in `tests/`, with UI tests in `tests/ui/`. Packaging files are `VoiceType.spec`, `build.bat`, and the generated `build/` and `dist/` directories.
 
 ## Build, Test, and Development Commands
 
@@ -44,11 +44,11 @@ pyinstaller --clean --noconfirm VoiceType.spec
 
 ## Coding Style & Naming Conventions
 
-Follow idiomatic Python with 4-space indentation, type hints where they clarify interfaces, and small modules that match existing boundaries. Use `snake_case` for functions, methods, variables, and module files; use `PascalCase` for classes. Keep UI-specific logic in `voicetype/ui/` and avoid mixing Qt widget code into service modules. No formatter or linter is currently configured, so keep edits consistent with surrounding files.
+Follow idiomatic Python with 4-space indentation, type hints where they clarify interfaces, and small modules that match existing boundaries. Use `snake_case` for functions, methods, variables, and module files; use `PascalCase` for classes. Keep UI-specific logic in `src/voicetype/ui/` and avoid mixing Qt widget code into service modules. No formatter or linter is currently configured, so keep edits consistent with surrounding files.
 
 ## Testing Guidelines
 
-The test suite uses `pytest`, with `pytest-qt` for Qt widgets and `pytest-mock` for mocks. Name test files `test_*.py` and place them near the behavior they cover, for example `tests/test_config.py` for `voicetype/config.py` or `tests/ui/test_main_window.py` for `voicetype/ui/main_window.py`. Add focused tests for changed behavior, especially around API error handling, settings persistence, glossary replacements, history, and paste modes. Run `pytest tests/ -v` before packaging.
+The test suite uses `pytest`, with `pytest-qt` for Qt widgets and `pytest-mock` for mocks. Name test files `test_*.py` and place them near the behavior they cover, for example `tests/test_config.py` for `src/voicetype/config.py` or `tests/ui/test_main_window.py` for `src/voicetype/ui/main_window.py`. Add focused tests for changed behavior, especially around API error handling, settings persistence, glossary replacements, history, and paste modes. Run `pytest tests/ -v` before packaging.
 
 ## Commit & Pull Request Guidelines
 
