@@ -14,7 +14,7 @@ def _mock_api_client(mocker, mock_client):
 
 class TestTextPolisher:
     def test_polish_returns_refined_text(self, mocker):
-        """Normal polish returns the refined text, stripped."""
+        """Normal polish returns the refined text, stripped, no trailing punctuation."""
         mock_resp = MagicMock()
         mock_resp.choices = [MagicMock()]
         mock_resp.choices[0].message.content = "  Hello, world!  \n"
@@ -25,7 +25,44 @@ class TestTextPolisher:
         polisher = TextPolisher(cfg)
         result = polisher.polish("hello world")
 
-        assert result == "Hello, world!"
+        # Trailing '!' is stripped per the no-trailing-punctuation requirement.
+        assert result == "Hello, world"
+
+    def test_polish_strips_trailing_period(self, mocker):
+        """A trailing period added by the model is removed."""
+        mock_resp = MagicMock()
+        mock_resp.choices = [MagicMock()]
+        mock_resp.choices[0].message.content = "今天天气不错。"
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = mock_resp
+        _mock_api_client(mocker, mock_client)
+        cfg = make_config(polish={"api_key": "sk", "base_url": "https://api", "model": "gpt-4o"})
+        polisher = TextPolisher(cfg)
+        assert polisher.polish("今天天气") == "今天天气不错"
+
+    def test_polish_strips_trailing_question_mark(self, mocker):
+        """A trailing '?' (and combinations like '?!') is removed."""
+        mock_resp = MagicMock()
+        mock_resp.choices = [MagicMock()]
+        mock_resp.choices[0].message.content = "What time is it?!"
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = mock_resp
+        _mock_api_client(mocker, mock_client)
+        cfg = make_config(polish={"api_key": "sk", "base_url": "https://api", "model": "gpt-4o"})
+        polisher = TextPolisher(cfg)
+        assert polisher.polish("what time") == "What time is it"
+
+    def test_polish_keeps_internal_punctuation(self, mocker):
+        """Internal punctuation is preserved; only trailing marks are stripped."""
+        mock_resp = MagicMock()
+        mock_resp.choices = [MagicMock()]
+        mock_resp.choices[0].message.content = "Hello, world. How are you?"
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = mock_resp
+        _mock_api_client(mocker, mock_client)
+        cfg = make_config(polish={"api_key": "sk", "base_url": "https://api", "model": "gpt-4o"})
+        polisher = TextPolisher(cfg)
+        assert polisher.polish("hello") == "Hello, world. How are you"
 
     def test_polish_uses_system_prompt(self, mocker):
         """System prompt built from base + default style is included in the messages."""
