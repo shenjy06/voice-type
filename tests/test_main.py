@@ -1,5 +1,14 @@
 """Tests for voice_type.__main__ — ProcessingWorker and Application."""
 
+from unittest.mock import MagicMock
+
+
+def _make_recorder(path="/tmp/audio.wav"):
+    """A recorder double whose save() returns the given audio path."""
+    rec = MagicMock()
+    rec.save.return_value = path
+    return rec
+
 
 class TestProcessingWorker:
     def test_success_path(self, qtbot, mocker):
@@ -14,7 +23,7 @@ class TestProcessingWorker:
         mocker.patch("voicetype.processing.os.remove")
 
         cfg = mocker.MagicMock()
-        worker = ProcessingWorker(cfg, "/tmp/audio.wav")
+        worker = ProcessingWorker(cfg, _make_recorder())
 
         signals = {"started": False, "finished_text": None}
 
@@ -31,6 +40,51 @@ class TestProcessingWorker:
         assert signals["started"] is True
         assert signals["finished_text"] == "Hello, world!"
 
+    def test_save_runs_on_worker_thread(self, qtbot, mocker):
+        """The worker saves the recorder's audio itself (off the UI thread)."""
+        from voicetype.processing import ProcessingWorker
+
+        mock_transcriber = mocker.patch("voicetype.processing.Transcriber")
+        mock_transcriber.return_value.transcribe.return_value = "text"
+        mocker.patch("voicetype.processing.TextPolisher")
+        mocker.patch("voicetype.processing.os.remove")
+
+        cfg = mocker.MagicMock()
+        cfg.polish.enabled = False
+        recorder = _make_recorder("/tmp/saved.ogg")
+        worker = ProcessingWorker(cfg, recorder)
+
+        worker.finished.connect(lambda t: None)
+        worker.run()
+
+        recorder.save.assert_called_once()
+        mock_transcriber.return_value.transcribe.assert_called_once_with(
+            "/tmp/saved.ogg"
+        )
+
+    def test_save_failure_emits_error(self, qtbot, mocker):
+        """A save failure (e.g. no audio data) surfaces as a processing error."""
+        from voicetype.processing import ProcessingWorker
+
+        mocker.patch("voicetype.processing.Transcriber")
+        mocker.patch("voicetype.processing.os.remove")
+
+        cfg = mocker.MagicMock()
+        recorder = _make_recorder()
+        recorder.save.side_effect = ValueError("No audio data recorded")
+        worker = ProcessingWorker(cfg, recorder)
+
+        error_msg = None
+
+        def on_error(msg):
+            nonlocal error_msg
+            error_msg = msg
+
+        worker.error.connect(on_error)
+        worker.run()
+
+        assert "No audio data" in error_msg
+
     def test_empty_transcript_emits_finished_empty(self, qtbot, mocker):
         """Empty transcript emits finished with empty string (no error)."""
         from voicetype.processing import ProcessingWorker
@@ -40,7 +94,7 @@ class TestProcessingWorker:
         mocker.patch("voicetype.processing.os.remove")
 
         cfg = mocker.MagicMock()
-        worker = ProcessingWorker(cfg, "/tmp/audio.wav")
+        worker = ProcessingWorker(cfg, _make_recorder())
 
         finished_text = None
 
@@ -66,7 +120,7 @@ class TestProcessingWorker:
         cfg = mocker.MagicMock()
         cfg.polish.enabled = False
         cfg.glossary = [GlossaryEntry(source="派森", replacement="Python")]
-        worker = ProcessingWorker(cfg, "/tmp/audio.wav")
+        worker = ProcessingWorker(cfg, _make_recorder())
 
         finished_text = None
 
@@ -93,12 +147,14 @@ class TestProcessingWorker:
         cfg = mocker.MagicMock()
         cfg.polish.enabled = True
         cfg.glossary = [GlossaryEntry(source="派森", replacement="Python")]
-        worker = ProcessingWorker(cfg, "/tmp/audio.wav")
+        worker = ProcessingWorker(cfg, _make_recorder())
 
         worker.finished.connect(lambda text: None)
         worker.run()
 
-        mock_polisher.return_value.polish.assert_called_once_with("学习Python")
+        mock_polisher.return_value.polish.assert_called_once_with(
+            "学习Python", context_before="", context_after=""
+        )
 
     def test_exception_emits_error(self, qtbot, mocker):
         """Exception in processing emits error signal."""
@@ -108,7 +164,7 @@ class TestProcessingWorker:
         mock_transcriber.return_value.transcribe.side_effect = RuntimeError("API timeout")
 
         cfg = mocker.MagicMock()
-        worker = ProcessingWorker(cfg, "/tmp/audio.wav")
+        worker = ProcessingWorker(cfg, _make_recorder())
 
         error_msg = None
 
@@ -132,7 +188,7 @@ class TestProcessingWorker:
         mock_remove = mocker.patch("voicetype.processing.os.remove")
 
         cfg = mocker.MagicMock()
-        worker = ProcessingWorker(cfg, "/tmp/test_audio.wav")
+        worker = ProcessingWorker(cfg, _make_recorder("/tmp/test_audio.wav"))
 
         worker.finished.connect(lambda t: None)
         worker.run()
@@ -150,7 +206,7 @@ class TestProcessingWorker:
         mocker.patch("os.remove", side_effect=OSError("Permission denied"))
 
         cfg = mocker.MagicMock()
-        worker = ProcessingWorker(cfg, "/tmp/audio.wav")
+        worker = ProcessingWorker(cfg, _make_recorder())
 
         results = []
         worker.finished.connect(lambda t: results.append(t))
@@ -158,6 +214,76 @@ class TestProcessingWorker:
 
         # Processing continues despite deletion failure
         assert results == ["refined"]
+
+
+class TestProcessingClientCache:
+    """API clients are cached across cycles and rebuilt when config changes."""
+
+    def test_transcriber_reused_across_cycles(self, mocker):
+        from voicetype import processing
+
+        processing.invalidate_clients()
+        mock_transcriber_cls = mocker.patch("voicetype.processing.Transcriber")
+        mock_transcriber_cls.return_value.transcribe.return_value = "text"
+        mocker.patch("voicetype.processing.os.remove")
+
+        cfg = mocker.MagicMock()
+        cfg.polish.enabled = False
+
+        for _ in range(3):
+            worker = processing.ProcessingWorker(cfg, _make_recorder())
+            worker.finished.connect(lambda t: None)
+            worker.run()
+
+        # Same config fingerprint -> Transcriber constructed only once.
+        mock_transcriber_cls.assert_called_once()
+
+    def test_transcriber_rebuilt_when_api_key_changes(self, mocker):
+        from voicetype import processing
+
+        processing.invalidate_clients()
+        mock_transcriber_cls = mocker.patch("voicetype.processing.Transcriber")
+        mock_transcriber_cls.return_value.transcribe.return_value = "text"
+        mocker.patch("voicetype.processing.os.remove")
+
+        cfg1 = mocker.MagicMock()
+        cfg1.polish.enabled = False
+        cfg1.asr.api_key = "key-A"
+        worker = processing.ProcessingWorker(cfg1, _make_recorder())
+        worker.finished.connect(lambda t: None)
+        worker.run()
+
+        cfg2 = mocker.MagicMock()
+        cfg2.polish.enabled = False
+        cfg2.asr.api_key = "key-B"
+        worker = processing.ProcessingWorker(cfg2, _make_recorder())
+        worker.finished.connect(lambda t: None)
+        worker.run()
+
+        # Different api_key -> different fingerprint -> rebuilt.
+        assert mock_transcriber_cls.call_count == 2
+
+    def test_invalidate_drops_cache(self, mocker):
+        from voicetype import processing
+
+        processing.invalidate_clients()
+        mock_transcriber_cls = mocker.patch("voicetype.processing.Transcriber")
+        mock_transcriber_cls.return_value.transcribe.return_value = "text"
+        mocker.patch("voicetype.processing.os.remove")
+
+        cfg = mocker.MagicMock()
+        cfg.polish.enabled = False
+
+        worker = processing.ProcessingWorker(cfg, _make_recorder())
+        worker.finished.connect(lambda t: None)
+        worker.run()
+        assert mock_transcriber_cls.call_count == 1
+
+        processing.invalidate_clients()
+        worker = processing.ProcessingWorker(cfg, _make_recorder())
+        worker.finished.connect(lambda t: None)
+        worker.run()
+        assert mock_transcriber_cls.call_count == 2
 
 
 class TestApplication:
@@ -183,9 +309,13 @@ class TestApplication:
         mocker.patch("voicetype.__main__.StatusBubble")
         mocker.patch("voicetype.__main__.TrayIcon")
         mocker.patch("voicetype.__main__.HotkeyManager")
+        mocker.patch("voicetype.__main__.ProcessingController")
 
         from voicetype.__main__ import Application
         app = Application()
+        # The window is a MagicMock, whose is_processing auto-attributes to a
+        # truthy MagicMock — default it to False so toggle() isn't blocked.
+        app.window.is_processing.return_value = False
         return app
 
     def test_on_recording_stopped_cancelled_skips_processing(self, qtbot, mocker):
@@ -200,18 +330,21 @@ class TestApplication:
         assert app._recording_controller._cancelled is False  # flag reset
         app.audio_recorder.cleanup.assert_called_once()
         app.window.set_done.assert_called_once()
+        app._processing_controller.start.assert_not_called()
 
-    def test_on_recording_stopped_save_valueerror_shows_error(self, qtbot, mocker):
+    def test_on_recording_stopped_starts_processing_with_recorder(self, qtbot, mocker):
+        """A non-cancelled stop hands the recorder (not a pre-saved path) to the
+        processing controller, so OGG encoding runs on the worker thread."""
         app = self._make_application(qtbot, mocker)
-        app._cancelled = False
         app.audio_recorder.stop = mocker.MagicMock()
-        app.audio_recorder.save = mocker.MagicMock(side_effect=ValueError("no audio"))
         app.tray.set_recording = mocker.MagicMock()
+        app._recording_controller._cursor_context = ("hi ", " bye")
 
         app._on_recording_stopped()
 
-        app.window.set_error.assert_called_once()
-        app.tray.show_message.assert_called_once()
+        app._processing_controller.start.assert_called_once_with(
+            app.audio_recorder, "hi ", " bye"
+        )
 
     def test_on_processing_done_with_auto_paste(self, qtbot, mocker):
         app = self._make_application(qtbot, mocker)
@@ -224,6 +357,8 @@ class TestApplication:
         app._on_processing_done("Hello, world!")
 
         app.history_store.add.assert_called_once_with("Hello, world!")
+        # Paste runs on a background thread — wait for it to land.
+        qtbot.waitUntil(lambda: app.typer.output_text.called, timeout=2000)
         app.typer.output_text.assert_called_once_with("Hello, world!", 12345)
         app.tray.show_message.assert_not_called()
         mock_toast.assert_not_called()
@@ -240,6 +375,10 @@ class TestApplication:
         app._on_processing_done("Hello, world!")
 
         app.history_store.add.assert_called_once_with("Hello, world!")
+        # Paste fails on the background thread; the failure toast is marshaled
+        # back to the UI thread via QTimer.singleShot — run the event loop so it
+        # fires before asserting.
+        qtbot.waitUntil(lambda: mock_toast.called, timeout=2000)
         app.typer.output_text.assert_called_once_with("Hello, world!", 12345)
         app.tray.show_message.assert_not_called()
         mock_toast.assert_called_once()
@@ -331,6 +470,7 @@ class TestApplication:
 
         app._paste_history_text("from history")
 
+        qtbot.waitUntil(lambda: app.typer.output_text.called, timeout=2000)
         app.typer.output_text.assert_called_once_with("from history", 456)
         app.tray.show_message.assert_not_called()
         mock_toast.assert_not_called()
@@ -344,6 +484,7 @@ class TestApplication:
 
         app._paste_history_text("from history")
 
+        qtbot.waitUntil(lambda: mock_toast.called, timeout=2000)
         app.typer.output_text.assert_called_once_with("from history", 456)
         app.tray.show_message.assert_not_called()
         mock_toast.assert_called_once()

@@ -169,6 +169,11 @@ class AudioRecorder:
         with self._lock:
             self._frames = []
             self._input_level = 0.0
+        # Initialise before the try-block: if sd.InputStream(...) itself raises
+        # (e.g. no input device / permission denied), `stream` would otherwise
+        # be unbound in the handler and the cleanup check would raise
+        # UnboundLocalError, masking the original failure.
+        stream = None
         try:
             stream = sd.InputStream(
                 samplerate=self.sample_rate,
@@ -177,7 +182,7 @@ class AudioRecorder:
                 callback=self._callback,
             )
             stream.start()
-        except Exception as e:
+        except Exception:
             if stream is not None:
                 try:
                     stream.close()

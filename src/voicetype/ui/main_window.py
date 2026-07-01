@@ -1,5 +1,7 @@
 """Floating recording window — compact widget with record button."""
 
+import collections
+
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QApplication, QLabel,
@@ -142,15 +144,17 @@ class AudioLevelWaveform(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedHeight(22)
-        self._levels = [0.0] * self._BAR_COUNT
+        # deque(maxlen=...) gives O(1) bounded append vs. rebuilding an
+        # 18-element list every 100ms; iteration/indexing still work.
+        self._levels = collections.deque([0.0] * self._BAR_COUNT, maxlen=self._BAR_COUNT)
 
     def reset(self):
-        self._levels = [0.0] * self._BAR_COUNT
+        self._levels = collections.deque([0.0] * self._BAR_COUNT, maxlen=self._BAR_COUNT)
         self.update()
 
     def add_level(self, level: float):
         level = max(0.0, min(1.0, float(level)))
-        self._levels = self._levels[1:] + [level]
+        self._levels.append(level)
         self.update()
 
     def paintEvent(self, event):
@@ -359,6 +363,9 @@ class FloatingRecordingWindow(QWidget):
 
     def is_recording(self) -> bool:
         return self._state == RecorderState.RECORDING
+
+    def is_processing(self) -> bool:
+        return self._state == RecorderState.PROCESSING
 
     def set_processing(self):
         self._transition_to(RecorderState.PROCESSING)

@@ -8,7 +8,7 @@ integration tests in your target environment first.
 """
 
 import json
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field, asdict, fields
 from pathlib import Path
 
 CONFIG_DIR = Path.home() / ".voice-type"
@@ -94,6 +94,16 @@ class AppConfig:
                 return value
             return default or {}
 
+        def _filtered(dataclass_cls, section: dict) -> dict:
+            """Keep only keys that are known fields of ``dataclass_cls``.
+
+            This makes config loading forward/backward-compatible: a config
+            file written by a newer (or older) version with extra keys won't
+            crash ``__init__`` with an unexpected-keyword TypeError.
+            """
+            known = {f.name for f in fields(dataclass_cls)}
+            return {k: v for k, v in section.items() if k in known}
+
         rec_data = _safe_dict(data.get("recording"))
         # Migrate old hotkey fields: if start_hotkey_modifiers exists in recording,
         # the user had hotkeys configured — preserve them by enabling the toggle
@@ -116,13 +126,13 @@ class AppConfig:
 
         return cls(
             language=data.get("language", "auto"),
-            polish=PolishApiConfig(**polish_data),
-            asr=AsrConfig(**_safe_dict(data.get("asr"))),
+            polish=PolishApiConfig(**_filtered(PolishApiConfig, polish_data)),
+            asr=AsrConfig(**_filtered(AsrConfig, _safe_dict(data.get("asr")))),
             recording=RecordingConfig(sample_rate=rec_data.get("sample_rate", 16000)),
-            output=OutputConfig(**_safe_dict(data.get("output"))),
+            output=OutputConfig(**_filtered(OutputConfig, _safe_dict(data.get("output")))),
             glossary=glossary_entries,
-            window=WindowConfig(**_safe_dict(data.get("window"))),
-            hotkey=HotkeyConfig(**hotkey_data),
+            window=WindowConfig(**_filtered(WindowConfig, _safe_dict(data.get("window")))),
+            hotkey=HotkeyConfig(**_filtered(HotkeyConfig, hotkey_data)),
         )
 
     @classmethod

@@ -308,6 +308,16 @@ class TestTextTyperSendPaste:
 
         assert mock_user32.keybd_event.call_count == 6
 
+    def test_send_paste_reports_injection_failure(self, mocker):
+        """A zero return from keybd_event (injection failed) surfaces as False."""
+        mock_user32 = mocker.patch("voicetype.typer.user32")
+        mocker.patch("voicetype.typer.time.sleep")
+        mock_user32.keybd_event.return_value = 0  # failure
+
+        cfg = make_config()
+        typer = TextTyper(cfg)
+        assert typer._send_paste() is False
+
 
 class TestTextTyperTerminalDetection:
     def test_detects_windows_terminal_class(self, mocker):

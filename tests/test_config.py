@@ -227,6 +227,33 @@ class TestAppConfigFromDict:
         cfg = AppConfig.from_dict(data)
         assert cfg.polish.base_url == "https://polish.api"
 
+    def test_from_dict_ignores_unknown_keys(self):
+        """Unknown keys (e.g. from a newer version's config) don't crash load."""
+        data = {
+            "polish": {
+                "base_url": "https://api", "api_key": "pk", "model": "gpt-4",
+                "future_setting": True, "temperature": 0.1,
+            },
+            "asr": {"api_key": "sk", "base_url": "https://api", "model": "whisper-1",
+                    "language": "auto", "deprecated_field": "x"},
+            "output": {"auto_paste": False, "paste_mode": "auto",
+                       "paste_delay_ms": 300, "unknown_output_key": 1},
+            "window": {"show_on_start": True, "always_on_top": True,
+                       "auto_start": False, "ghost_field": None},
+            "hotkey": {"toggle_enabled": True, "toggle_hotkey": "right_shift",
+                       "old_combo": "ctrl+space"},
+            "recording": {"sample_rate": 16000, "legacy_format": "wav"},
+            "language": "auto",
+            "top_level_future_key": {"nested": True},
+        }
+        cfg = AppConfig.from_dict(data)
+        assert cfg.polish.api_key == "pk"
+        assert cfg.polish.model == "gpt-4"
+        assert cfg.asr.language == "auto"
+        assert cfg.output.auto_paste is False
+        assert cfg.window.show_on_start is True
+        assert cfg.hotkey.toggle_hotkey == "right_shift"
+
 
 class TestAppConfigLoadSave:
     def test_save_creates_directory_and_writes_json(self, tmp_config_path):

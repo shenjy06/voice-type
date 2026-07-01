@@ -47,7 +47,9 @@ The app follows a pipeline architecture with a central `Application` orchestrato
 | `src/voicetype/typer.py` | `TextTyper` — clipboard copy + ctypes `keybd_event` Ctrl+V to inject text at cursor |
 | `src/voicetype/window_manager.py` | Windows foreground control — `SetForegroundWindow` strategies, thread attachment, Alt tap |
 | `src/voicetype/state.py` | `RecorderState` enum for recording workflow states |
-| `src/voicetype/network.py` | Network connectivity check with multiple probe endpoints |
+| `src/voicetype/network.py` | Network connectivity check — parallel probes, first success wins |
+| `src/voicetype/retry.py` | `retry_call()` — bounded exponential backoff for transient OpenAI SDK errors (connection/timeout/429/5xx) |
+| `src/voicetype/processing.py` | `ProcessingWorker` + `get_transcriber`/`get_polisher`/`invalidate_clients` — cached API clients keyed by config fingerprint |
 
 ### UI Modules
 
@@ -60,7 +62,7 @@ The app follows a pipeline architecture with a central `Application` orchestrato
 
 ### Threading Model
 
-ASR + LLM processing runs in a `QThread` via `ProcessingWorker` to avoid blocking the UI. Audio recording uses a callback-based `sounddevice.InputStream` running on its own thread.
+Audio save (OGG/Vorbis encoding) + ASR + LLM processing all run in a `QThread` via `ProcessingWorker` to avoid blocking the UI — the recorder is passed to the worker, which calls `recorder.save()` on the background thread. Audio recording uses a callback-based `sounddevice.InputStream` running on its own thread. Text pasting (`TextTyper.output_text`) runs on a daemon `threading.Thread` from `Application._paste_async`; paste failures are marshaled back to the UI thread via the `_PasteBridge` Qt signal (not `QTimer.singleShot`, which is thread-affine and won't fire from a worker thread).
 
 ### State Machine
 
@@ -71,7 +73,7 @@ ASR + LLM processing runs in a `QThread` via `ProcessingWorker` to avoid blockin
 - **Windows-only**: Window management (`GetForegroundWindow`, `SetForegroundWindow`) uses Windows ctypes APIs. Hotkeys use `pynput` (cross-platform library).
 - **Two separate API configs**: STT and Polish can use different providers/keys (e.g., SiliconFlow for STT, OpenAI for Polish)
 - **Config migration**: `AppConfig.from_dict()` handles migration from old single hotkey format to toggle/cancel hotkey format
-- **Temp audio lifecycle**: OGG file created in `tempfile.mktemp()`, deleted after STT or on cancel
+- **Temp audio lifecycle**: OGG file created by `AudioRecorder.save()` on the processing worker thread (not the UI thread), deleted after STT or on cancel
 - **Right Alt tap detection**: `HotkeyManager` uses pynput to distinguish Right Alt tap (toggle) from Right Alt+key combo (e.g., Right Alt+C for cancel). Tap = release without any other key pressed while Right Alt was held.
 - **Centralized state transitions**: `FloatingRecordingWindow._transition_to()` handles signal emission and button updates in one place.
 - **Shared icon creation**: `make_circle_icon()` in `icon_utils.py` eliminates duplicate QPixmap+QPainter code across UI modules.
