@@ -7,8 +7,9 @@ from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 from pynput import keyboard
 
-from src.i18n import t
-from src.ui.icon_utils import make_circle_icon
+from voicetype.constants import PASTE_MODES, ASR_LANGUAGES, POLISH_STYLES
+from voicetype.i18n import t
+from voicetype.ui.icon_utils import make_circle_icon
 
 logger = logging.getLogger(__name__)
 
@@ -27,19 +28,10 @@ class TrayIcon(QObject):
     asr_language_changed = Signal(str)
     quit_requested = Signal()
 
-    PASTE_MODES = (
-        ("settings.paste_mode_auto", "auto"),
-        ("settings.paste_mode_ctrl_v", "ctrl_v"),
-        ("settings.paste_mode_ctrl_shift_v", "ctrl_shift_v"),
-        ("settings.paste_mode_clipboard", "clipboard"),
-    )
-    POLISH_STYLES = (
-        ("settings.polish_style_default", "default"),
-        ("settings.polish_style_formal", "formal"),
-        ("settings.polish_style_casual", "casual"),
-        ("settings.polish_style_concise", "concise"),
-    )
-    ASR_LANGUAGES = (("auto", None), ("zh", None), ("en", None), ("ja", None), ("ko", None), ("fr", None), ("de", None), ("es", None))
+    # Backward-compatible aliases — prefer importing from voicetype.constants directly
+    PASTE_MODES = PASTE_MODES
+    ASR_LANGUAGES = ASR_LANGUAGES
+    POLISH_STYLES = POLISH_STYLES
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -101,7 +93,7 @@ class TrayIcon(QObject):
 
         self.asr_language_menu = QMenu(t("tray.asr_language"), menu)
         self.asr_language_actions = {}
-        for code, _ in self.ASR_LANGUAGES:
+        for code in self.ASR_LANGUAGES:
             label = t("settings.lang_auto") if code == "auto" else code
             action = QAction(label, self.asr_language_menu)
             action.setCheckable(True)
@@ -217,6 +209,7 @@ class HotkeyManager(QObject):
         self._listener = keyboard.Listener(
             on_press=self._on_press,
             on_release=self._on_release,
+            daemon=True,  # Allow process to exit even if listener is running
         )
         self._listener.start()
         logger.info("Right Alt hotkey monitoring started")

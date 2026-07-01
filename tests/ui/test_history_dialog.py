@@ -1,7 +1,7 @@
 """Tests for the history dialog."""
 
-from src.history import HistoryStore
-from src.ui.history_dialog import HistoryDialog
+from voicetype.history import HistoryStore
+from voicetype.ui.history_dialog import HistoryDialog
 
 
 class TestHistoryDialog:

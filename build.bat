@@ -39,6 +39,15 @@ if errorlevel 1 (
     exit /b 1
 )
 
+:: Install the project itself so entry points / metadata are present
+echo [INFO] Installing project in editable mode...
+pip install -e .
+if errorlevel 1 (
+    echo [ERROR] Failed to install project.
+    pause
+    exit /b 1
+)
+
 echo.
 echo [INFO] Building VoiceType EXE...
 echo.

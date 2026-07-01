@@ -56,7 +56,7 @@ pip install -r requirements.txt
 ## 运行
 
 ```bash
-python -m src
+python -m voicetype
 ```
 
 ## 打包为 EXE
@@ -196,7 +196,7 @@ Voice Type 使用 OpenAI 兼容协议的 API，支持多种服务商。以下是
 
 ```
 voice-type/
-├── src/
+├── voicetype/
 │   ├── __main__.py              # 入口：Application 类，连接所有组件
 │   ├── api_client.py            # OpenAI 兼容 API 客户端封装
 │   ├── config.py                # 配置管理：dataclass + JSON 序列化/持久化
@@ -216,7 +216,7 @@ voice-type/
 │       ├── settings_dialog.py   # 设置对话框（STT/Polish/Glossary/Output/Hotkeys）
 │       ├── system_tray.py       # 系统托盘 + 全局热键管理
 │       └── icon_utils.py        # 共享图标创建（圆形 + 居中文字）
-├── tests/                       # 单元测试（171 项，覆盖全部模块）
+├── tests/                       # 单元测试（243 项，覆盖全部模块）
 │   ├── conftest.py
 │   ├── test_audio.py
 │   ├── test_asr.py
@@ -227,7 +227,6 @@ voice-type/
 │   ├── test_i18n.py
 │   ├── test_polisher.py
 │   ├── test_typer.py
-│   ├── test_window_manager.py
 │   └── ui/
 │       ├── test_main_window.py
 │       ├── test_settings_dialog.py

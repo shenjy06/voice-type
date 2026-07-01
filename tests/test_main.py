@@ -4,14 +4,14 @@
 class TestProcessingWorker:
     def test_success_path(self, qtbot, mocker):
         """Successful processing emits finished with refined text."""
-        from src.__main__ import ProcessingWorker
+        from voicetype.processing import ProcessingWorker
 
         # Mock Transcriber and TextPolisher
-        mock_transcriber = mocker.patch("src.__main__.Transcriber")
+        mock_transcriber = mocker.patch("voicetype.processing.Transcriber")
         mock_transcriber.return_value.transcribe.return_value = "hello world"
-        mock_polisher = mocker.patch("src.__main__.TextPolisher")
+        mock_polisher = mocker.patch("voicetype.processing.TextPolisher")
         mock_polisher.return_value.polish.return_value = "Hello, world!"
-        mocker.patch("os.remove")
+        mocker.patch("voicetype.processing.os.remove")
 
         cfg = mocker.MagicMock()
         worker = ProcessingWorker(cfg, "/tmp/audio.wav")
@@ -33,11 +33,11 @@ class TestProcessingWorker:
 
     def test_empty_transcript_emits_finished_empty(self, qtbot, mocker):
         """Empty transcript emits finished with empty string (no error)."""
-        from src.__main__ import ProcessingWorker
+        from voicetype.processing import ProcessingWorker
 
-        mock_transcriber = mocker.patch("src.__main__.Transcriber")
+        mock_transcriber = mocker.patch("voicetype.processing.Transcriber")
         mock_transcriber.return_value.transcribe.return_value = ""
-        mocker.patch("os.remove")
+        mocker.patch("voicetype.processing.os.remove")
 
         cfg = mocker.MagicMock()
         worker = ProcessingWorker(cfg, "/tmp/audio.wav")
@@ -55,13 +55,13 @@ class TestProcessingWorker:
 
     def test_polish_disabled_returns_transcript(self, qtbot, mocker):
         """When polish is disabled, ASR text is returned directly."""
-        from src.__main__ import ProcessingWorker
-        from src.config import GlossaryEntry
+        from voicetype.processing import ProcessingWorker
+        from voicetype.config import GlossaryEntry
 
-        mock_transcriber = mocker.patch("src.__main__.Transcriber")
+        mock_transcriber = mocker.patch("voicetype.processing.Transcriber")
         mock_transcriber.return_value.transcribe.return_value = "raw 派森 text"
-        mock_polisher = mocker.patch("src.__main__.TextPolisher")
-        mocker.patch("os.remove")
+        mock_polisher = mocker.patch("voicetype.processing.TextPolisher")
+        mocker.patch("voicetype.processing.os.remove")
 
         cfg = mocker.MagicMock()
         cfg.polish.enabled = False
@@ -81,14 +81,14 @@ class TestProcessingWorker:
         mock_polisher.assert_not_called()
 
     def test_glossary_applied_before_polish(self, qtbot, mocker):
-        from src.__main__ import ProcessingWorker
-        from src.config import GlossaryEntry
+        from voicetype.processing import ProcessingWorker
+        from voicetype.config import GlossaryEntry
 
-        mock_transcriber = mocker.patch("src.__main__.Transcriber")
+        mock_transcriber = mocker.patch("voicetype.processing.Transcriber")
         mock_transcriber.return_value.transcribe.return_value = "学习派森"
-        mock_polisher = mocker.patch("src.__main__.TextPolisher")
+        mock_polisher = mocker.patch("voicetype.processing.TextPolisher")
         mock_polisher.return_value.polish.return_value = "学习 Python"
-        mocker.patch("os.remove")
+        mocker.patch("voicetype.processing.os.remove")
 
         cfg = mocker.MagicMock()
         cfg.polish.enabled = True
@@ -102,9 +102,9 @@ class TestProcessingWorker:
 
     def test_exception_emits_error(self, qtbot, mocker):
         """Exception in processing emits error signal."""
-        from src.__main__ import ProcessingWorker
+        from voicetype.processing import ProcessingWorker
 
-        mock_transcriber = mocker.patch("src.__main__.Transcriber")
+        mock_transcriber = mocker.patch("voicetype.processing.Transcriber")
         mock_transcriber.return_value.transcribe.side_effect = RuntimeError("API timeout")
 
         cfg = mocker.MagicMock()
@@ -123,13 +123,13 @@ class TestProcessingWorker:
 
     def test_deletes_audio_after_stt(self, qtbot, mocker):
         """Audio file is deleted after STT."""
-        from src.__main__ import ProcessingWorker
+        from voicetype.processing import ProcessingWorker
 
-        mock_transcriber = mocker.patch("src.__main__.Transcriber")
+        mock_transcriber = mocker.patch("voicetype.processing.Transcriber")
         mock_transcriber.return_value.transcribe.return_value = "text"
-        mock_polisher = mocker.patch("src.__main__.TextPolisher")
+        mock_polisher = mocker.patch("voicetype.processing.TextPolisher")
         mock_polisher.return_value.polish.return_value = "refined"
-        mock_remove = mocker.patch("os.remove")
+        mock_remove = mocker.patch("voicetype.processing.os.remove")
 
         cfg = mocker.MagicMock()
         worker = ProcessingWorker(cfg, "/tmp/test_audio.wav")
@@ -141,11 +141,11 @@ class TestProcessingWorker:
 
     def test_audio_deletion_failure_logs_warning(self, qtbot, mocker, caplog):
         """Failed audio deletion logs a warning but continues."""
-        from src.__main__ import ProcessingWorker
+        from voicetype.processing import ProcessingWorker
 
-        mock_transcriber = mocker.patch("src.__main__.Transcriber")
+        mock_transcriber = mocker.patch("voicetype.processing.Transcriber")
         mock_transcriber.return_value.transcribe.return_value = "text"
-        mock_polisher = mocker.patch("src.__main__.TextPolisher")
+        mock_polisher = mocker.patch("voicetype.processing.TextPolisher")
         mock_polisher.return_value.polish.return_value = "refined"
         mocker.patch("os.remove", side_effect=OSError("Permission denied"))
 
@@ -162,8 +162,8 @@ class TestProcessingWorker:
 class TestApplication:
     def _make_application(self, qtbot, mocker, is_configured=True):
         """Create an Application with all dependencies mocked."""
-        mocker.patch("src.__main__.QApplication")
-        mock_config = mocker.patch("src.__main__.AppConfig")
+        mocker.patch("voicetype.__main__.QApplication")
+        mock_config = mocker.patch("voicetype.__main__.AppConfig")
         mock_cfg = mocker.MagicMock(
             recording=mocker.MagicMock(sample_rate=16000),
             output=mocker.MagicMock(auto_paste=True, paste_delay_ms=300, paste_mode="auto"),
@@ -175,27 +175,28 @@ class TestApplication:
         mock_cfg.is_configured.return_value = is_configured
         mock_config.load.return_value = mock_cfg
 
-        mocker.patch("src.__main__.AudioRecorder")
-        mocker.patch("src.__main__.TextTyper")
-        mocker.patch("src.__main__.HistoryStore")
-        mocker.patch("src.__main__.FloatingRecordingWindow")
-        mocker.patch("src.__main__.TrayIcon")
-        mocker.patch("src.__main__.HotkeyManager")
+        mocker.patch("voicetype.__main__.AudioRecorder")
+        mocker.patch("voicetype.__main__.TextTyper")
+        mocker.patch("voicetype.__main__.HistoryStore")
+        mocker.patch("voicetype.__main__.FloatingRecordingWindow")
+        mocker.patch("voicetype.__main__.StatusBubble")
+        mocker.patch("voicetype.__main__.TrayIcon")
+        mocker.patch("voicetype.__main__.HotkeyManager")
 
-        from src.__main__ import Application
+        from voicetype.__main__ import Application
         app = Application()
         return app
 
     def test_on_recording_stopped_cancelled_skips_processing(self, qtbot, mocker):
         app = self._make_application(qtbot, mocker)
-        app._cancelled = True
+        app._recording_controller._cancelled = True
         app.audio_recorder.stop = mocker.MagicMock()
         app.audio_recorder.cleanup = mocker.MagicMock()
         app.tray.set_recording = mocker.MagicMock()
 
         app._on_recording_stopped()
 
-        assert app._cancelled is False  # flag reset
+        assert app._recording_controller._cancelled is False  # flag reset
         app.audio_recorder.cleanup.assert_called_once()
         app.window.set_done.assert_called_once()
 
@@ -213,9 +214,9 @@ class TestApplication:
 
     def test_on_processing_done_with_auto_paste(self, qtbot, mocker):
         app = self._make_application(qtbot, mocker)
-        mock_toast = mocker.patch("src.__main__.Toast")
+        mock_toast = mocker.patch("voicetype.__main__.Toast")
         app.config.output.auto_paste = True
-        app._saved_hwnd = 12345
+        app._recording_controller._saved_hwnd = 12345
         app.typer.output_text = mocker.MagicMock(return_value=True)
         app.audio_recorder.cleanup = mocker.MagicMock()
 
@@ -229,9 +230,9 @@ class TestApplication:
 
     def test_on_processing_done_auto_paste_failure_shows_copied_toast(self, qtbot, mocker):
         app = self._make_application(qtbot, mocker)
-        mock_toast = mocker.patch("src.__main__.Toast")
+        mock_toast = mocker.patch("voicetype.__main__.Toast")
         app.config.output.auto_paste = True
-        app._saved_hwnd = 12345
+        app._recording_controller._saved_hwnd = 12345
         app.typer.output_text = mocker.MagicMock(return_value=False)
         app.audio_recorder.cleanup = mocker.MagicMock()
 
@@ -247,7 +248,7 @@ class TestApplication:
     def test_on_processing_done_without_auto_paste(self, qtbot, mocker):
         app = self._make_application(qtbot, mocker)
         app.config.output.auto_paste = False
-        app._saved_hwnd = 12345
+        app._recording_controller._saved_hwnd = 12345
         mock_copy = mocker.patch("pyperclip.copy")
         app.audio_recorder.cleanup = mocker.MagicMock()
 
@@ -278,7 +279,7 @@ class TestApplication:
 
     def test_show_settings_lazy_loads_dialog(self, qtbot, mocker):
         app = self._make_application(qtbot, mocker)
-        mock_dialog_cls = mocker.patch("src.__main__.SettingsDialog")
+        mock_dialog_cls = mocker.patch("voicetype.__main__.SettingsDialog")
         mock_dialog = mocker.MagicMock()
         mock_dialog_cls.return_value = mock_dialog
 
@@ -300,7 +301,7 @@ class TestApplication:
 
     def test_show_history_lazy_loads_dialog(self, qtbot, mocker):
         app = self._make_application(qtbot, mocker)
-        mock_dialog_cls = mocker.patch("src.__main__.HistoryDialog")
+        mock_dialog_cls = mocker.patch("voicetype.__main__.HistoryDialog")
         mock_dialog = mocker.MagicMock()
         mock_dialog_cls.return_value = mock_dialog
 
@@ -322,10 +323,10 @@ class TestApplication:
 
     def test_paste_history_text_with_auto_paste(self, qtbot, mocker):
         app = self._make_application(qtbot, mocker)
-        mock_toast = mocker.patch("src.__main__.Toast")
+        mock_toast = mocker.patch("voicetype.__main__.Toast")
         app.config.output.auto_paste = True
         app.typer.output_text = mocker.MagicMock(return_value=True)
-        mocker.patch("src.__main__.get_foreground_window", return_value=456)
+        mocker.patch("voicetype.__main__.get_foreground_window", return_value=456)
 
         app._paste_history_text("from history")
 
@@ -335,10 +336,10 @@ class TestApplication:
 
     def test_paste_history_text_auto_paste_failure_shows_copied_toast(self, qtbot, mocker):
         app = self._make_application(qtbot, mocker)
-        mock_toast = mocker.patch("src.__main__.Toast")
+        mock_toast = mocker.patch("voicetype.__main__.Toast")
         app.config.output.auto_paste = True
         app.typer.output_text = mocker.MagicMock(return_value=False)
-        mocker.patch("src.__main__.get_foreground_window", return_value=456)
+        mocker.patch("voicetype.__main__.get_foreground_window", return_value=456)
 
         app._paste_history_text("from history")
 
@@ -357,7 +358,7 @@ class TestApplication:
         mock_copy.assert_called_once_with("from history")
 
     def test_on_settings_saved_respects_toggle(self, qtbot, mocker):
-        mocker.patch("src.__main__.Toast")
+        mocker.patch("voicetype.__main__.Toast")
         app = self._make_application(qtbot, mocker)
         app.hotkey_manager.stop = mocker.MagicMock()
         app.hotkey_manager.start = mocker.MagicMock()
@@ -369,7 +370,7 @@ class TestApplication:
         app.hotkey_manager.start.assert_called_once()
 
     def test_on_settings_saved_disables_when_toggle_off(self, qtbot, mocker):
-        mocker.patch("src.__main__.Toast")
+        mocker.patch("voicetype.__main__.Toast")
         app = self._make_application(qtbot, mocker)
         app.hotkey_manager.stop = mocker.MagicMock()
         app.hotkey_manager.start = mocker.MagicMock()
@@ -408,7 +409,7 @@ class TestApplication:
         app.window.is_recording.return_value = True
         app.window.stop_recording.reset_mock()
         app._cancel_recording()
-        assert app._cancelled is True
+        assert app._recording_controller._cancelled is True
         app.window.stop_recording.assert_called_once()
 
     def test_cancel_recording_when_not_recording(self, qtbot, mocker):
@@ -416,13 +417,13 @@ class TestApplication:
         app.window.is_recording.return_value = False
         app.audio_recorder.cleanup = mocker.MagicMock()
         app._cancel_recording()
-        assert app._cancelled is True
+        assert app._recording_controller._cancelled is True
         app.audio_recorder.cleanup.assert_called_once()
 
     def test_shows_settings_when_not_configured(self, qtbot, mocker):
         """When no API key is set, settings dialog is shown on startup."""
         mock_dialog = mocker.MagicMock()
-        mocker.patch("src.__main__.SettingsDialog", return_value=mock_dialog)
+        mocker.patch("voicetype.__main__.SettingsDialog", return_value=mock_dialog)
 
         self._make_application(qtbot, mocker, is_configured=False)
 
@@ -430,7 +431,7 @@ class TestApplication:
 
     def test_skips_settings_when_configured(self, qtbot, mocker):
         """When API key is set, settings dialog is NOT shown on startup."""
-        mock_dialog_cls = mocker.patch("src.__main__.SettingsDialog")
+        mock_dialog_cls = mocker.patch("voicetype.__main__.SettingsDialog")
 
         self._make_application(qtbot, mocker, is_configured=True)
 

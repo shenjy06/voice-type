@@ -25,7 +25,8 @@ def check_network_available(timeout_ms: int = 3000) -> bool:
     timeout = timeout_ms / 1000.0
     for url in PROBE_URLS:
         try:
-            urllib.request.urlopen(url, timeout=timeout)
+            with urllib.request.urlopen(url, timeout=timeout):
+                pass
             return True
         except (OSError, urllib.error.URLError) as e:
             logger.debug("Probe failed: %s (%s)", url, e)

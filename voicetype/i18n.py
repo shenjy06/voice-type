@@ -81,6 +81,7 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "history.title": "History",
         "history.empty": "No history yet",
         "history.copy": "Copy",
+        "history.copied": "Copied!",
         "history.paste": "Paste",
         "history.clear": "Clear",
         "status.recording": "Recording...",
@@ -167,6 +168,7 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "history.title": "历史记录",
         "history.empty": "暂无历史记录",
         "history.copy": "复制",
+        "history.copied": "已复制！",
         "history.paste": "粘贴",
         "history.clear": "清空",
         "status.recording": "录制中...",
@@ -183,8 +185,8 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
 _current_lang: str = "en"
 
 
-def _detect_system_language() -> str:
-    """Detect system locale, return 'zh' or 'en'."""
+def _detect_chinese_locale() -> str:
+    """Return 'zh' if the system uses Chinese locale, otherwise 'en'."""
     try:
         loc = locale.getlocale()[0]
         if loc and "chinese" in loc.lower():
@@ -201,11 +203,15 @@ def _detect_system_language() -> str:
     return "en"
 
 
+# Backward-compatible alias — older versions of the codebase used this name.
+_detect_system_language = _detect_chinese_locale
+
+
 def init_language(lang: str = "auto") -> None:
     """Set the active language. 'auto' defers to system locale detection."""
     global _current_lang
     if lang == "auto":
-        lang = _detect_system_language()
+        lang = _detect_chinese_locale()
     if lang not in _TRANSLATIONS:
         lang = "en"
     _current_lang = lang

@@ -7,8 +7,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QTimer, Signal, QPropertyAnimation, QEasingCurve, QElapsedTimer
 from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QCursor, QCloseEvent
-from src.state import RecorderState
-from src.i18n import t
+from voicetype.state import RecorderState
+from voicetype.i18n import t
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +20,22 @@ _COLOR_TEXT = QColor(229, 231, 235)
 _COLOR_DOT = QColor(239, 68, 68)
 _COLOR_WAVE_ACTIVE = QColor(34, 197, 94)
 _COLOR_WAVE_IDLE = QColor(75, 85, 99)
+
+# Default font family — fall back to a platform-appropriate list if unavailable
+_DEFAULT_FONT_FAMILIES = ("Segoe UI", "Microsoft YaHei", "Helvetica", "Arial")
+
+
+def _default_font(size: int) -> QFont:
+    """Return a font using the application default family when available."""
+    base = QApplication.font()
+    if base.family():
+        return QFont(base.family(), size)
+    for family in _DEFAULT_FONT_FAMILIES:
+        font = QFont(family, size)
+        if font.exactMatch() or QFontMetrics(font).height() > 0:
+            return font
+    return QFont("", size)
+
 
 # Button style descriptors keyed by RecorderState
 _BUTTON_STYLES = {
@@ -180,8 +196,6 @@ class FloatingRecordingWindow(QWidget):
         self._level_timer.timeout.connect(self._refresh_recording_indicators)
         self._pending_audio_level = 0.0
         self._init_ui()
-        if always_on_top:
-            self.setWindowFlag(Qt.WindowStaysOnTopHint)
 
     def _init_ui(self):
         self.setWindowFlags(
@@ -274,10 +288,15 @@ class FloatingRecordingWindow(QWidget):
         self.record_btn.setText(text)
         self.record_btn.setEnabled(enabled)
 
-    def _transition_to(self, new_state: RecorderState):
-        """Centralized state transition — updates button and emits signals."""
-        old_state = self._state
+    def _set_state(self, new_state: RecorderState) -> None:
+        """Centralized state setter — updates the state and refreshes the button."""
         self._state = new_state
+        self._update_record_button()
+
+    def _transition_to(self, new_state: RecorderState):
+        """Centralized state transition — updates button, indicators, and emits signals."""
+        old_state = self._state
+        self._set_state(new_state)
 
         if old_state == RecorderState.RECORDING and new_state == RecorderState.IDLE:
             self.dot.stop()
@@ -293,8 +312,13 @@ class FloatingRecordingWindow(QWidget):
             self.duration_label.setText("00:00")
             self._level_timer.start()
             self.recording_started.emit()
-
-        self._update_record_button()
+        else:
+            # Any other transition (PROCESSING/DONE/ERROR) stops background indicators
+            self.dot.stop()
+            self._level_timer.stop()
+            if new_state in (RecorderState.DONE, RecorderState.ERROR):
+                self.duration_label.setText("00:00")
+                self.waveform.reset()
 
     def _refresh_recording_indicators(self):
         if self._state != RecorderState.RECORDING:
@@ -340,22 +364,15 @@ class FloatingRecordingWindow(QWidget):
         return self._state == RecorderState.RECORDING
 
     def set_processing(self):
-        self._state = RecorderState.PROCESSING
-        self.dot.stop()
-        self._level_timer.stop()
-        self._update_record_button()
+        self._transition_to(RecorderState.PROCESSING)
 
     def set_done(self):
-        self._state = RecorderState.DONE
-        self._level_timer.stop()
-        self.duration_label.setText("00:00")
-        self.waveform.reset()
-        self._update_record_button()
+        self._transition_to(RecorderState.DONE)
 
     def set_error(self, msg: str = "Error"):
-        self._state = RecorderState.ERROR
-        self._level_timer.stop()
-        self._update_record_button()
+        # The error message is optional UI context; state machine is what matters.
+        logger.debug("Recording window error: %s", msg)
+        self._transition_to(RecorderState.ERROR)
 
     def closeEvent(self, event: QCloseEvent):
         self.hide_requested.emit()
@@ -377,7 +394,6 @@ class FloatingRecordingWindow(QWidget):
 class StatusBubble(QWidget):
     """A persistent status bubble shown at screen bottom during recording/processing."""
 
-    _FONT_FAMILY = "Microsoft YaHei"
     _FONT_SIZE = 13
     _TARGET_OPACITY = 0.9
     _BOTTOM_MARGIN = 60
@@ -387,6 +403,7 @@ class StatusBubble(QWidget):
         super().__init__(parent)
         self._text = ""
         self._fade_out = None
+        self._font = _default_font(self._FONT_SIZE)
         self.setWindowFlags(
             Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint | Qt.BypassWindowManagerHint
         )
@@ -403,7 +420,7 @@ class StatusBubble(QWidget):
         self.raise_()
 
     def _resize_and_repaint(self):
-        fm = QFontMetrics(QFont(self._FONT_FAMILY, self._FONT_SIZE))
+        fm = QFontMetrics(self._font)
         text_w = fm.horizontalAdvance(self._text)
         w = text_w + self._H_PADDING
         h = 40
@@ -429,14 +446,13 @@ class StatusBubble(QWidget):
         painter.setPen(_COLOR_BORDER_BUBBLE)
         painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 8, 8)
         painter.setPen(_COLOR_TEXT)
-        painter.setFont(QFont(self._FONT_FAMILY, self._FONT_SIZE))
+        painter.setFont(self._font)
         painter.drawText(self.rect(), Qt.AlignCenter, self._text)
 
 
 class Toast(QWidget):
     """A brief toast-style notification that appears at screen bottom center and auto-dismisses."""
 
-    _FONT_FAMILY = "Microsoft YaHei"
     _FONT_SIZE = 13
     _FADE_IN_MS = 150
     _FADE_OUT_MS = 200
@@ -448,6 +464,7 @@ class Toast(QWidget):
         super().__init__(parent)
         self._text = text
         self._duration_ms = duration_ms
+        self._font = _default_font(self._FONT_SIZE)
         self._init_ui()
 
     def _init_ui(self):
@@ -458,7 +475,7 @@ class Toast(QWidget):
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setAttribute(Qt.WA_QuitOnClose, False)
 
-        fm = QFontMetrics(QFont(self._FONT_FAMILY, self._FONT_SIZE))
+        fm = QFontMetrics(self._font)
         text_w = fm.horizontalAdvance(self._text)
         w = text_w + self._H_PADDING
         h = 40
@@ -498,5 +515,5 @@ class Toast(QWidget):
         painter.setPen(_COLOR_BORDER_BUBBLE)
         painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 8, 8)
         painter.setPen(_COLOR_TEXT)
-        painter.setFont(QFont(self._FONT_FAMILY, self._FONT_SIZE))
+        painter.setFont(self._font)
         painter.drawText(self.rect(), Qt.AlignCenter, self._text)

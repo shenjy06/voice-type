@@ -24,12 +24,15 @@ class KeyboardInput(ctypes.Structure):
         ("wScan", ctypes.c_ushort),
         ("dwFlags", ctypes.c_ulong),
         ("time", ctypes.c_ulong),
-        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
+        ("dwExtraInfo", ctypes.c_void_p),  # ULONG_PTR, pointer-sized integer
     ]
 
 
-def _tap_alt():
-    """Tap Alt key to bypass Windows foreground window restriction."""
+def _tap_alt() -> bool:
+    """Tap Alt key to bypass Windows foreground window restriction.
+
+    Returns True if at least one input was successfully injected.
+    """
     inputs = (KeyboardInput * 2)()
     inputs[0].type = INPUT_KEYBOARD
     inputs[0].wVk = VK_MENU
@@ -37,18 +40,32 @@ def _tap_alt():
     inputs[1].type = INPUT_KEYBOARD
     inputs[1].wVk = VK_MENU
     inputs[1].dwFlags = KEYEVENTF_KEYUP
-    user32.SendInput(2, inputs, ctypes.sizeof(KeyboardInput))
+    result = user32.SendInput(2, inputs, ctypes.sizeof(KeyboardInput))
+    if result == 0:
+        logger.warning("SendInput failed: no events injected")
+        return False
+    if result != 2:
+        logger.debug("SendInput partially succeeded: expected 2, got %d", result)
+    return True
 
 
-def _attach_thread_input(target_hwnd: int):
-    """Attach our input thread to the target window's thread."""
+def _attach_thread_input(target_hwnd: int) -> bool:
+    """Attach our input thread to the target window's thread.
+
+    Returns True if attachment was performed (threads were different).
+    """
     our_tid = user32.GetCurrentThreadId()
     target_tid = user32.GetWindowThreadProcessId(target_hwnd, None)
     if our_tid != target_tid:
-        user32.AttachThreadInput(target_tid, our_tid, True)
+        result = user32.AttachThreadInput(target_tid, our_tid, True)
+        if not result:
+            logger.warning("AttachThreadInput failed")
+            return False
+        return True
+    return False
 
 
-def _detach_thread_input(target_hwnd: int):
+def _detach_thread_input(target_hwnd: int) -> None:
     """Detach input threads after use."""
     our_tid = user32.GetCurrentThreadId()
     target_tid = user32.GetWindowThreadProcessId(target_hwnd, None)
@@ -70,25 +87,34 @@ def set_foreground_window(hwnd: int) -> bool:
         return False
 
     # Strategy 1: AttachThreadInput + SetForegroundWindow
+    attached = False
     try:
-        _attach_thread_input(hwnd)
+        attached = _attach_thread_input(hwnd)
         time.sleep(0.01)
         result = user32.SetForegroundWindow(hwnd)
-        _detach_thread_input(hwnd)
         if result:
             return True
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Strategy 1 failed: %s", e)
+    finally:
+        if attached:
+            _detach_thread_input(hwnd)
 
     # Strategy 2: Alt tap + SetForegroundWindow
-    _tap_alt()
-    time.sleep(0.02)
-    result = user32.SetForegroundWindow(hwnd)
-    if result:
-        return True
+    if _tap_alt():
+        time.sleep(0.02)
+        result = user32.SetForegroundWindow(hwnd)
+        if result:
+            return True
 
     # Strategy 3: ShowWindow(RESTORE) + Alt tap + SetForegroundWindow
-    user32.ShowWindow(hwnd, SW_RESTORE)
-    _tap_alt()
-    time.sleep(0.02)
-    return bool(user32.SetForegroundWindow(hwnd))
+    restore_result = user32.ShowWindow(hwnd, SW_RESTORE)
+    if not restore_result:
+        logger.debug("ShowWindow returned %d", restore_result)
+    if _tap_alt():
+        time.sleep(0.02)
+        result = user32.SetForegroundWindow(hwnd)
+        if result:
+            return True
+
+    return False

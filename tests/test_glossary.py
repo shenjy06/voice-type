@@ -1,7 +1,7 @@
 """Tests for voice_type.glossary."""
 
-from src.config import GlossaryEntry
-from src.glossary import apply_glossary
+from voicetype.config import GlossaryEntry
+from voicetype.glossary import apply_glossary
 
 
 def test_apply_glossary_replaces_terms():

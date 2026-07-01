@@ -1,8 +1,8 @@
 """Speech-to-text via OpenAI-compatible API."""
 
 import logging
-from src.api_client import ApiClient
-from src.config import AppConfig
+from voicetype.api_client import ApiClient
+from voicetype.config import AppConfig
 
 logger = logging.getLogger(__name__)
 

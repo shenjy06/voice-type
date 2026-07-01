@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from src.config import CONFIG_DIR
+from voicetype.config import CONFIG_DIR
 
 HISTORY_DB_FILE = CONFIG_DIR / "history.sqlite3"
 DEFAULT_HISTORY_LIMIT = 20

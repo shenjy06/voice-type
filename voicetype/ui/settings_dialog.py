@@ -8,12 +8,13 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QIcon
-from src.audio import MicrophoneMonitor, get_default_input_device_name
-from src.config import AppConfig, DEFAULT_BASE_URL, GlossaryEntry
-from src.network import check_network_available
-from src.ui.main_window import Toast
-from src.ui.icon_utils import make_circle_icon
-from src.i18n import t
+from voicetype.audio import MicrophoneMonitor, get_default_input_device_name
+from voicetype.config import AppConfig, DEFAULT_BASE_URL, GlossaryEntry
+from voicetype.constants import PASTE_MODES, ASR_LANGUAGES
+from voicetype.network import check_network_available
+from voicetype.ui.main_window import Toast
+from voicetype.ui.icon_utils import make_circle_icon
+from voicetype.i18n import t
 
 _SETTINGS_ICON = None
 
@@ -48,13 +49,6 @@ class SettingsDialog(QDialog):
         "whisper-1",
     ]
 
-    PASTE_MODES = [
-        ("settings.paste_mode_auto", "auto"),
-        ("settings.paste_mode_ctrl_v", "ctrl_v"),
-        ("settings.paste_mode_ctrl_shift_v", "ctrl_shift_v"),
-        ("settings.paste_mode_clipboard", "clipboard"),
-    ]
-
     def __init__(self, config: AppConfig, parent=None):
         super().__init__(parent)
         self.config = config
@@ -69,6 +63,8 @@ class SettingsDialog(QDialog):
         self._mic_timer.timeout.connect(self._refresh_microphone_level)
         self._init_ui()
         self._load_config()
+        # Snapshot original API-related fields to detect changes on save
+        self._initial_api_state = self._snapshot_api_state()
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
@@ -122,9 +118,9 @@ class SettingsDialog(QDialog):
         stt_api_layout.addRow(t("settings.model"), self.stt_model_combo)
 
         self.stt_lang_combo = QComboBox()
-        self.stt_lang_combo.addItem(t("settings.lang_auto"), "auto")
-        for code in ["zh", "en", "ja", "ko", "fr", "de", "es"]:
-            self.stt_lang_combo.addItem(code, code)
+        for code in ASR_LANGUAGES:
+            label = t("settings.lang_auto") if code == "auto" else code
+            self.stt_lang_combo.addItem(label, code)
         stt_api_layout.addRow(t("settings.language"), self.stt_lang_combo)
 
         stt_api_group.setLayout(stt_api_layout)
@@ -248,7 +244,7 @@ class SettingsDialog(QDialog):
         output_layout.addRow(t("settings.paste_delay"), self.paste_delay_spin)
 
         self.paste_mode_combo = QComboBox()
-        for label_key, value in self.PASTE_MODES:
+        for label_key, value in PASTE_MODES:
             self.paste_mode_combo.addItem(t(label_key), value)
         output_layout.addRow(t("settings.paste_mode"), self.paste_mode_combo)
 
@@ -342,8 +338,23 @@ class SettingsDialog(QDialog):
         self.hotkey_toggle_check.setChecked(self.config.hotkey.toggle_enabled)
         self._update_microphone_device_label()
 
+    def _snapshot_api_state(self) -> dict:
+        """Capture current API-related fields so we can detect changes on save."""
+        return {
+            "stt_api_key": self.stt_api_key_input.text(),
+            "stt_base_url": self.stt_base_url_input.text(),
+            "polish_api_key": self.polish_api_key_input.text(),
+            "polish_base_url": self.polish_base_url_input.text(),
+        }
+
+    def _api_state_changed(self) -> bool:
+        """Return True if any API-related field differs from the snapshot."""
+        current = self._snapshot_api_state()
+        return current != self._initial_api_state
+
     def _save_and_close(self):
-        if not check_network_available():
+        # Only require network access if an API-related field actually changed.
+        if self._api_state_changed() and not check_network_available():
             self._toast = Toast(t("settings.network_error"), parent=self)
             self._toast.show()
             return
@@ -391,8 +402,9 @@ class SettingsDialog(QDialog):
     def _add_glossary_row(self, source: str = "", replacement: str = ""):
         row = self.glossary_table.rowCount()
         self.glossary_table.insertRow(row)
-        self.glossary_table.setItem(row, 0, QTableWidgetItem(source))
-        self.glossary_table.setItem(row, 1, QTableWidgetItem(replacement))
+        # Store stripped values so users don't see trailing whitespace reload later
+        self.glossary_table.setItem(row, 0, QTableWidgetItem(source.strip()))
+        self.glossary_table.setItem(row, 1, QTableWidgetItem(replacement.strip()))
 
     def _remove_selected_glossary_rows(self):
         rows = sorted(

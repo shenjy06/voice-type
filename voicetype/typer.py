@@ -1,12 +1,19 @@
 """Text output — clipboard paste via Ctrl+V."""
 
 import logging
+import threading
 import time
 import ctypes
 
 import pyperclip
-from src.config import AppConfig
-from src.window_manager import set_foreground_window
+from voicetype.config import AppConfig
+from voicetype.constants import (
+    PASTE_MODE_AUTO,
+    PASTE_MODE_CTRL_V,
+    PASTE_MODE_CTRL_SHIFT_V,
+    PASTE_MODE_CLIPBOARD,
+)
+from voicetype.window_manager import set_foreground_window
 
 logger = logging.getLogger(__name__)
 
@@ -26,15 +33,19 @@ TERMINAL_TITLE_MARKERS = (
     "windows powershell",
 )
 
-PASTE_MODE_AUTO = "auto"
-PASTE_MODE_CTRL_V = "ctrl_v"
-PASTE_MODE_CTRL_SHIFT_V = "ctrl_shift_v"
-PASTE_MODE_CLIPBOARD = "clipboard"
+# Re-exported for backward compatibility with existing imports.
+PASTE_MODE_AUTO = PASTE_MODE_AUTO
+PASTE_MODE_CTRL_V = PASTE_MODE_CTRL_V
+PASTE_MODE_CTRL_SHIFT_V = PASTE_MODE_CTRL_SHIFT_V
+PASTE_MODE_CLIPBOARD = PASTE_MODE_CLIPBOARD
 
 
 class TextTyper:
     def __init__(self, config: AppConfig):
         self.config = config
+        # Clipboard operations on Windows are not thread-safe; serialize
+        # copy/paste so the restore thread cannot race with the main thread.
+        self._clipboard_lock = threading.Lock()
 
     def output_text(self, text: str, saved_hwnd: int = 0) -> bool:
         """
@@ -42,6 +53,7 @@ class TextTyper:
 
         Strategy: clipboard copy + configured paste shortcut.
         Attempts to restore the saved foreground window first.
+        Saves and restores the user's previous clipboard content.
 
         Returns True if text was successfully pasted, False otherwise.
         """
@@ -60,7 +72,14 @@ class TextTyper:
         # Small delay to ensure window focus is settled
         time.sleep(self.config.output.paste_delay_ms / 1000.0)
 
-        pyperclip.copy(text)
+        # Preserve the user's previous clipboard content so we can restore it.
+        try:
+            with self._clipboard_lock:
+                original_clipboard = pyperclip.paste()
+                pyperclip.copy(text)
+        except Exception:
+            original_clipboard = None
+
         logger.info("Text copied to clipboard (%d chars)", len(text))
 
         paste_mode = self.config.output.paste_mode
@@ -77,8 +96,25 @@ class TextTyper:
             logger.error("Failed to paste text; text remains on clipboard")
             return False
 
+        # Restore the original clipboard content if paste succeeded.
+        # Delay slightly so the target app can read the new content first.
+        if original_clipboard is not None and original_clipboard != text:
+            self._schedule_clipboard_restore(original_clipboard)
+
         logger.info("Text pasted successfully, window_restored=%s", window_restored)
         return True
+
+    def _schedule_clipboard_restore(self, original: str) -> None:
+        """Restore the original clipboard in a background thread after a short delay."""
+        def _restore():
+            time.sleep(1.0)
+            try:
+                with self._clipboard_lock:
+                    pyperclip.copy(original)
+            except Exception as e:
+                logger.debug("Failed to restore clipboard: %s", e)
+
+        threading.Thread(target=_restore, daemon=True).start()
 
     def _send_paste(self, use_terminal_paste: bool = False) -> bool:
         """Send Ctrl+V, or Ctrl+Shift+V for terminal windows."""

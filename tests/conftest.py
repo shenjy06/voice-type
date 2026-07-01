@@ -1,11 +1,21 @@
 import pytest
-from src.config import AppConfig
+import os
+import pytest
+
+# Force offscreen qt platform when running tests on a headless display (CI,
+# SSH sessions, or any machine without an X server). pytest-qt picks this
+# up automatically; this env var only kicks in when QT_QPA_PLATFORM has
+# NOT already been set by the user.
+if not os.environ.get("QT_QPA_PLATFORM"):
+    os.environ["QT_QPA_PLATFORM"] = "offscreen"
+
+from voicetype.config import AppConfig  # noqa: E402
 
 
 @pytest.fixture
 def tmp_config_path(tmp_path, monkeypatch):
     """Redirect CONFIG_DIR/CONFIG_FILE to a temporary directory and return the config dir path."""
-    import src.config as config_mod
+    import voicetype.config as config_mod
     config_dir = tmp_path / ".voice-type"
     monkeypatch.setattr(config_mod, "CONFIG_DIR", config_dir)
     monkeypatch.setattr(config_mod, "CONFIG_FILE", config_dir / "config.json")

@@ -57,7 +57,7 @@ pip install -r requirements.txt
 ## Running
 
 ```bash
-python -m src
+python -m voicetype
 ```
 
 ## Packaging as EXE
@@ -201,7 +201,7 @@ Any API that supports the OpenAI-compatible protocol can be used (DashScope, Vol
 
 ```
 voice-type/
-├── src/
+├── voicetype/
 │   ├── __main__.py              # Entry point: Application orchestrator
 │   ├── api_client.py            # Base OpenAI-compatible API client wrapper
 │   ├── config.py                # Config management: dataclass + JSON persistence
@@ -221,9 +221,8 @@ voice-type/
 │       ├── settings_dialog.py   # Settings dialog (STT/Polish/Glossary/Output/Hotkeys)
 │       ├── system_tray.py       # System tray icon + pynput hotkey manager
 │       └── icon_utils.py        # Shared icon creation (circle + centered text)
-├── tests/                       # Unit tests (171, covering all modules)
+├── tests/                       # Unit tests (243, covering all modules)
 │   ├── conftest.py
-│   ├── test_api_client.py
 │   ├── test_audio.py
 │   ├── test_asr.py
 │   ├── test_config.py
@@ -233,7 +232,6 @@ voice-type/
 │   ├── test_i18n.py
 │   ├── test_polisher.py
 │   ├── test_typer.py
-│   ├── test_window_manager.py
 │   └── ui/
 │       ├── test_main_window.py
 │       ├── test_settings_dialog.py

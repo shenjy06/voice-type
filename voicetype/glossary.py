@@ -1,6 +1,6 @@
 """Glossary-based transcript correction."""
 
-from src.config import GlossaryEntry
+from voicetype.config import GlossaryEntry
 
 
 def apply_glossary(text: str, entries: list[GlossaryEntry]) -> str:

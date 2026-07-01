@@ -1,7 +1,7 @@
 """Tests for voice_type.asr — Transcriber."""
 
 from unittest.mock import MagicMock, patch
-from src.asr import Transcriber
+from voicetype.asr import Transcriber
 from tests.conftest import make_config
 
 
@@ -9,7 +9,7 @@ def _mock_api_client(mocker, mock_client):
     """Patch ApiClient to return a mock client wrapper."""
     mock_api = MagicMock()
     mock_api.client = mock_client
-    return mocker.patch("src.asr.ApiClient", return_value=mock_api)
+    return mocker.patch("voicetype.asr.ApiClient", return_value=mock_api)
 
 
 class TestTranscriber:
@@ -109,7 +109,7 @@ class TestTranscriber:
         mock_client.audio.transcriptions.create.return_value = MagicMock(text="x")
         mock_api = MagicMock()
         mock_api.client = mock_client
-        mock_api_cls = mocker.patch("src.asr.ApiClient", return_value=mock_api)
+        mock_api_cls = mocker.patch("voicetype.asr.ApiClient", return_value=mock_api)
 
         cfg = make_config(asr={"api_key": "my-key", "base_url": "https://my-api.com/v1"})
         Transcriber(cfg)

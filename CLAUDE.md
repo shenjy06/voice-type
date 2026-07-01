@@ -12,7 +12,7 @@ Voice Type is a Windows voice-to-text dictation tool with AI refinement. Workflo
 
 ```bash
 pip install -r requirements.txt
-python -m src
+python -m voicetype
 ```
 
 Or install as a package:
@@ -26,7 +26,7 @@ Config file lives at `%USERPROFILE%\.voice-type\config.json`, created automatica
 
 ## Architecture
 
-The app follows a pipeline architecture with a central `Application` orchestrator in `src/__main__.py`:
+The app follows a pipeline architecture with a central `Application` orchestrator in `voicetype/__main__.py`:
 
 ```
 [Hotkey/UI] → [AudioRecorder] → [WAV file] → [Transcriber] → [TextPolisher] → [TextTyper] → Cursor
@@ -36,27 +36,27 @@ The app follows a pipeline architecture with a central `Application` orchestrato
 
 | Module | Responsibility |
 |--------|---------------|
-| `src/__main__.py` | `Application` class — wires all components together, manages Qt event loop, background processing thread, hotkey lifecycle |
-| `src/api_client.py` | `ApiClient` — wraps OpenAI client creation with common defaults |
-| `src/config.py` | Dataclass-based config with JSON persistence (`AppConfig`, `AsrConfig`, `PolishApiConfig`, `RecordingConfig`, `OutputConfig`, `GlossaryEntry`, `WindowConfig`) |
-| `src/audio.py` | `AudioRecorder` — sounddevice-based async recording, saves to temp OGG via soundfile |
-| `src/asr.py` | `Transcriber` — OpenAI SDK `audio.transcriptions.create()` for STT |
-| `src/glossary.py` | `apply_glossary()` — user-defined term replacements applied after STT and before polishing |
-| `src/polisher.py` | `TextPolisher` — OpenAI SDK `chat.completions.create()` with system prompt for text refinement, supports context-aware polishing |
-| `src/context.py` | `get_cursor_context()` — captures text before/after cursor via Shift+Home/End + Ctrl+C clipboard trick, restores original clipboard |
-| `src/typer.py` | `TextTyper` — clipboard copy + ctypes `keybd_event` Ctrl+V to inject text at cursor |
-| `src/window_manager.py` | Windows foreground control — `SetForegroundWindow` strategies, thread attachment, Alt tap |
-| `src/state.py` | `RecorderState` enum for recording workflow states |
-| `src/network.py` | Network connectivity check with multiple probe endpoints |
+| `voicetype/__main__.py` | `Application` class — wires all components together, manages Qt event loop, background processing thread, hotkey lifecycle |
+| `voicetype/api_client.py` | `ApiClient` — wraps OpenAI client creation with common defaults |
+| `voicetype/config.py` | Dataclass-based config with JSON persistence (`AppConfig`, `AsrConfig`, `PolishApiConfig`, `RecordingConfig`, `OutputConfig`, `GlossaryEntry`, `WindowConfig`) |
+| `voicetype/audio.py` | `AudioRecorder` — sounddevice-based async recording, saves to temp OGG via soundfile |
+| `voicetype/asr.py` | `Transcriber` — OpenAI SDK `audio.transcriptions.create()` for STT |
+| `voicetype/glossary.py` | `apply_glossary()` — user-defined term replacements applied after STT and before polishing |
+| `voicetype/polisher.py` | `TextPolisher` — OpenAI SDK `chat.completions.create()` with system prompt for text refinement, supports context-aware polishing |
+| `voicetype/context.py` | `get_cursor_context()` — captures text before/after cursor via Shift+Home/End + Ctrl+C clipboard trick, restores original clipboard |
+| `voicetype/typer.py` | `TextTyper` — clipboard copy + ctypes `keybd_event` Ctrl+V to inject text at cursor |
+| `voicetype/window_manager.py` | Windows foreground control — `SetForegroundWindow` strategies, thread attachment, Alt tap |
+| `voicetype/state.py` | `RecorderState` enum for recording workflow states |
+| `voicetype/network.py` | Network connectivity check with multiple probe endpoints |
 
 ### UI Modules
 
 | Module | Responsibility |
 |--------|---------------|
-| `src/ui/main_window.py` | `FloatingRecordingWindow` — frameless, draggable, always-on-top window with pulsing dot animation and state machine. `Toast` — auto-dismissing notification |
-| `src/ui/system_tray.py` | `TrayIcon` — system tray with context menu. `HotkeyManager` — pynput keyboard listener for global hotkeys |
-| `src/ui/settings_dialog.py` | `SettingsDialog` — tabbed dialog (STT/Polish/Glossary/Output/Hotkeys) with config load/save |
-| `src/ui/icon_utils.py` | `make_circle_icon()` — shared circular icon creation with centered text |
+| `voicetype/ui/main_window.py` | `FloatingRecordingWindow` — frameless, draggable, always-on-top window with pulsing dot animation and state machine. `Toast` — auto-dismissing notification |
+| `voicetype/ui/system_tray.py` | `TrayIcon` — system tray with context menu. `HotkeyManager` — pynput keyboard listener for global hotkeys |
+| `voicetype/ui/settings_dialog.py` | `SettingsDialog` — tabbed dialog (STT/Polish/Glossary/Output/Hotkeys) with config load/save |
+| `voicetype/ui/icon_utils.py` | `make_circle_icon()` — shared circular icon creation with centered text |
 
 ### Threading Model
 
@@ -80,17 +80,17 @@ ASR + LLM processing runs in a `QThread` via `ProcessingWorker` to avoid blockin
 
 ## Building & Packaging
 
-### PyInstaller 白名单打包策略
+### PyInstaller whitelist build strategy
 
-项目使用白名单方式打包，只收集明确需要的模块，避免全局 Python 环境中的无关包（torch、pandas 等）被拉入。
+The project packs only the modules it explicitly needs, pulling in a small set from PyInstaller.utils.hooks.collect_all so unrelated packages in the user's Python environment (torch, pandas, etc.) are not dragged into the bundle.
 
-**核心原则**：在 `.spec` 中用 `collect_all` 声明"我需要什么"，而不是用 `excludes` 列"我不用什么"。
+**Core rule**: declare what you need via a whitelist collect_all, then add a conservative denylist as a safety net.
 
-```python
-# VoiceType.spec 核心逻辑
+`python
+# VoiceType.spec core logic
 from PyInstaller.utils.hooks import collect_all
 
-# 1. 白名单：只收集需要的 PySide6 模块
+# 1. Whitelist: only collect the PySide6 modules we use
 needed_binaries = []
 needed_datas = []
 needed_imports = []
@@ -100,7 +100,7 @@ for qt_module in ['PySide6.QtCore', 'PySide6.QtGui', 'PySide6.QtWidgets']:
     needed_datas.extend(datas)
     needed_imports.extend(hiddenimports)
 
-# 2. 排除全局环境中的无关大包（黑名单作为补充保险）
+# 2. Exclude heavy unrelated packages from the global environment
 excludes = [
     'torch', 'torchvision', 'torchaudio',
     'pandas', 'pyarrow', 'scipy',
@@ -108,25 +108,25 @@ excludes = [
 ]
 
 a = Analysis(
-    ['src\\__main__.py'],
+    ['voicetype\\__main__.py'],
     pathex=[],
-    binaries=needed_binaries,   # 白名单收集的二进制文件
-    datas=needed_datas,          # 白名单收集的数据文件
-    hiddenimports=needed_imports,# 白名单收集的隐藏导入
+    binaries=needed_binaries,
+    datas=needed_datas,
+    hiddenimports=needed_imports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=excludes,           # 补充排除全局大环境包
+    excludes=excludes,
     noarchive=False,
     optimize=1,
 )
-```
+`
 
-**效果**：体积从 178MB 降到 80MB（减少 55%）。
+**Result**: bundle size dropped from ~178MB to ~80MB (~55% reduction).
 
-**注意事项**：
-- 新增 PySide6 模块时，只需在 `collect_all` 循环中加对应模块名
-- `excludes` 列表只保留已知的全局环境大包，不影响功能
-- 打包命令：`pyinstaller VoiceType.spec`
-- 输出位置：`dist/VoiceType.exe`
-
+Notes:
+- When adding new PySide6 modules, add the module name to the collect_all loop.
+- excludes only blocks known heavy global-environment packages; does not affect functionality.
+- Build command: pyinstaller VoiceType.spec
+- Output: dist/VoiceType.exe
+- Output: `dist/VoiceType.exe`

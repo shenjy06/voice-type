@@ -1,7 +1,9 @@
 """History dialog for recent recognized text."""
 
+import logging
+
 import pyperclip
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -15,9 +17,11 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QIcon
 
-from src.history import HistoryEntry, HistoryStore
-from src.ui.icon_utils import make_circle_icon
-from src.i18n import t
+from voicetype.history import HistoryEntry, HistoryStore
+from voicetype.ui.icon_utils import make_circle_icon
+from voicetype.i18n import t
+
+logger = logging.getLogger(__name__)
 
 _HISTORY_ICON = None
 
@@ -33,6 +37,9 @@ def _get_history_icon() -> QIcon:
 class HistoryDialog(QDialog):
     paste_requested = Signal(str)
 
+    # After a copy, we briefly restore the original button text after this delay.
+    _COPY_FEEDBACK_MS = 1200
+
     def __init__(self, history_store: HistoryStore, parent=None):
         super().__init__(parent)
         self.history_store = history_store
@@ -41,6 +48,9 @@ class HistoryDialog(QDialog):
         self.setWindowIcon(_get_history_icon())
         self.setModal(True)
         self.setMinimumSize(640, 420)
+        self._copy_feedback_timer = QTimer(self)
+        self._copy_feedback_timer.setSingleShot(True)
+        self._copy_feedback_timer.timeout.connect(self._restore_copy_label)
         self._init_ui()
         self.reload()
 
@@ -62,6 +72,7 @@ class HistoryDialog(QDialog):
 
         actions = QHBoxLayout()
         self.copy_btn = QPushButton(t("history.copy"))
+        self.copy_btn.setToolTip(t("history.copy"))
         self.paste_btn = QPushButton(t("history.paste"))
         self.clear_btn = QPushButton(t("history.clear"))
         self.copy_btn.clicked.connect(self._copy_current)
@@ -124,7 +135,14 @@ class HistoryDialog(QDialog):
     def _copy_current(self):
         entry = self._current_entry()
         if entry:
-            pyperclip.copy(entry.text)
+            try:
+                pyperclip.copy(entry.text)
+            except Exception as e:
+                logger.warning("Failed to copy history entry to clipboard: %s", e)
+                return
+            # Briefly change the button text to confirm the copy to the user.
+            self.copy_btn.setText(t("history.copied"))
+            self._copy_feedback_timer.start(self._COPY_FEEDBACK_MS)
 
     def _paste_current(self):
         entry = self._current_entry()
@@ -134,6 +152,9 @@ class HistoryDialog(QDialog):
     def _clear_history(self):
         self.history_store.clear()
         self.reload()
+
+    def _restore_copy_label(self):
+        self.copy_btn.setText(t("history.copy"))
 
     def retranslate(self):
         self.setWindowTitle(t("history.title"))

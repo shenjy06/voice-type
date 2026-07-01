@@ -2,7 +2,7 @@
 
 import sqlite3
 
-from src.history import HistoryStore
+from voicetype.history import HistoryStore
 
 
 class TestHistoryStore:

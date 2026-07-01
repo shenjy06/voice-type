@@ -1,7 +1,7 @@
 """Tests for voice_type.ui.settings_dialog — SettingsDialog."""
 
 from PySide6.QtWidgets import QDialogButtonBox, QDialog
-from src.config import (
+from voicetype.config import (
     AppConfig,
     AsrConfig,
     PolishApiConfig,
@@ -10,7 +10,7 @@ from src.config import (
     OutputConfig,
     GlossaryEntry,
 )
-from src.ui.settings_dialog import SettingsDialog
+from voicetype.ui.settings_dialog import SettingsDialog
 
 
 class TestSettingsDialogCreation:
@@ -44,7 +44,7 @@ class TestSettingsDialogCreation:
         assert modes == ["auto", "ctrl_v", "ctrl_shift_v", "clipboard"]
 
     def test_microphone_controls_exist(self, qtbot, mocker):
-        mocker.patch("src.ui.settings_dialog.get_default_input_device_name", return_value="Mic")
+        mocker.patch("voicetype.ui.settings_dialog.get_default_input_device_name", return_value="Mic")
         dlg = SettingsDialog(AppConfig())
         qtbot.addWidget(dlg)
         assert dlg.mic_device_label.text() == "Mic"
@@ -107,7 +107,7 @@ class TestSettingsDialogHotkeyToggle:
         assert dlg.hotkey_toggle_check.isChecked() is False
 
     def test_hotkey_toggle_saves_to_config(self, qtbot, mocker):
-        mocker.patch("src.ui.settings_dialog.check_network_available", return_value=True)
+        mocker.patch("voicetype.ui.settings_dialog.check_network_available", return_value=True)
         cfg = AppConfig(asr=AsrConfig(api_key="sk-test"))
         dlg = SettingsDialog(cfg)
         qtbot.addWidget(dlg)
@@ -122,10 +122,10 @@ class TestSettingsDialogMicrophoneTest:
         monitor.start.return_value = True
         monitor.is_running = True
         mock_monitor_cls = mocker.patch(
-            "src.ui.settings_dialog.MicrophoneMonitor",
+            "voicetype.ui.settings_dialog.MicrophoneMonitor",
             return_value=monitor,
         )
-        mocker.patch("src.ui.settings_dialog.get_default_input_device_name", return_value="Mic")
+        mocker.patch("voicetype.ui.settings_dialog.get_default_input_device_name", return_value="Mic")
 
         dlg = SettingsDialog(AppConfig())
         qtbot.addWidget(dlg)
@@ -142,8 +142,8 @@ class TestSettingsDialogMicrophoneTest:
         monitor = mocker.MagicMock()
         monitor.start.return_value = False
         monitor.error = "permission denied"
-        mocker.patch("src.ui.settings_dialog.MicrophoneMonitor", return_value=monitor)
-        mocker.patch("src.ui.settings_dialog.get_default_input_device_name", return_value="Mic")
+        mocker.patch("voicetype.ui.settings_dialog.MicrophoneMonitor", return_value=monitor)
+        mocker.patch("voicetype.ui.settings_dialog.get_default_input_device_name", return_value="Mic")
 
         dlg = SettingsDialog(AppConfig())
         qtbot.addWidget(dlg)
@@ -158,7 +158,7 @@ class TestSettingsDialogMicrophoneTest:
         monitor = mocker.MagicMock()
         monitor.is_running = True
         monitor.input_level = 0.5
-        mocker.patch("src.ui.settings_dialog.get_default_input_device_name", return_value="Mic")
+        mocker.patch("voicetype.ui.settings_dialog.get_default_input_device_name", return_value="Mic")
 
         dlg = SettingsDialog(AppConfig())
         qtbot.addWidget(dlg)
@@ -172,7 +172,7 @@ class TestSettingsDialogMicrophoneTest:
         monitor = mocker.MagicMock()
         monitor.is_running = True
         monitor.input_level = 0.0
-        mocker.patch("src.ui.settings_dialog.get_default_input_device_name", return_value="Mic")
+        mocker.patch("voicetype.ui.settings_dialog.get_default_input_device_name", return_value="Mic")
 
         dlg = SettingsDialog(AppConfig())
         qtbot.addWidget(dlg)
@@ -185,7 +185,7 @@ class TestSettingsDialogMicrophoneTest:
     def test_reject_stops_microphone_monitor(self, qtbot, mocker):
         monitor = mocker.MagicMock()
         monitor.is_running = True
-        mocker.patch("src.ui.settings_dialog.get_default_input_device_name", return_value="Mic")
+        mocker.patch("voicetype.ui.settings_dialog.get_default_input_device_name", return_value="Mic")
 
         dlg = SettingsDialog(AppConfig())
         qtbot.addWidget(dlg)
@@ -198,8 +198,8 @@ class TestSettingsDialogMicrophoneTest:
 class TestSettingsDialogSave:
     def test_save_and_close_with_network_available(self, qtbot, mocker):
         """When network is available, config is saved and dialog accepted."""
-        mocker.patch("src.ui.settings_dialog.check_network_available", return_value=True)
-        mock_toast = mocker.patch("src.ui.settings_dialog.Toast")
+        mocker.patch("voicetype.ui.settings_dialog.check_network_available", return_value=True)
+        mock_toast = mocker.patch("voicetype.ui.settings_dialog.Toast")
 
         cfg = AppConfig(asr=AsrConfig(api_key="sk-test"))
         dlg = SettingsDialog(cfg)
@@ -212,12 +212,14 @@ class TestSettingsDialogSave:
 
     def test_save_and_close_with_network_unavailable(self, qtbot, mocker):
         """When network is unavailable, toast is shown and config is NOT saved."""
-        mocker.patch("src.ui.settings_dialog.check_network_available", return_value=False)
-        mock_toast = mocker.patch("src.ui.settings_dialog.Toast")
+        mocker.patch("voicetype.ui.settings_dialog.check_network_available", return_value=False)
+        mock_toast = mocker.patch("voicetype.ui.settings_dialog.Toast")
 
         cfg = AppConfig()
         dlg = SettingsDialog(cfg)
         qtbot.addWidget(dlg)
+        # Simulate the user typing a new API key, which marks the API state as changed.
+        dlg.stt_api_key_input.setText("sk-new-key")
 
         # Should NOT emit settings_saved
         emitted = []
@@ -232,7 +234,7 @@ class TestSettingsDialogSave:
 
     def test_save_and_close_empty_base_url_defaults(self, qtbot, mocker):
         """Empty base_url defaults to https://api.openai.com/v1."""
-        mocker.patch("src.ui.settings_dialog.check_network_available", return_value=True)
+        mocker.patch("voicetype.ui.settings_dialog.check_network_available", return_value=True)
 
         cfg = AppConfig(asr=AsrConfig(api_key="sk-test"))
         cfg.asr.base_url = "https://old.url"
@@ -251,7 +253,7 @@ class TestSettingsDialogSave:
 
     def test_save_strips_whitespace_from_api_key(self, qtbot, mocker):
         """API key inputs are stripped."""
-        mocker.patch("src.ui.settings_dialog.check_network_available", return_value=True)
+        mocker.patch("voicetype.ui.settings_dialog.check_network_available", return_value=True)
 
         cfg = AppConfig()
         dlg = SettingsDialog(cfg)
@@ -266,7 +268,7 @@ class TestSettingsDialogSave:
         assert cfg.polish.api_key == "sk-polish"
 
     def test_save_paste_mode(self, qtbot, mocker):
-        mocker.patch("src.ui.settings_dialog.check_network_available", return_value=True)
+        mocker.patch("voicetype.ui.settings_dialog.check_network_available", return_value=True)
 
         cfg = AppConfig(asr=AsrConfig(api_key="sk-test"))
         dlg = SettingsDialog(cfg)
@@ -278,7 +280,7 @@ class TestSettingsDialogSave:
         assert cfg.output.paste_mode == "clipboard"
 
     def test_save_polish_enabled(self, qtbot, mocker):
-        mocker.patch("src.ui.settings_dialog.check_network_available", return_value=True)
+        mocker.patch("voicetype.ui.settings_dialog.check_network_available", return_value=True)
 
         cfg = AppConfig(asr=AsrConfig(api_key="sk-test"))
         dlg = SettingsDialog(cfg)
@@ -290,7 +292,7 @@ class TestSettingsDialogSave:
         assert cfg.polish.enabled is False
 
     def test_save_glossary_entries(self, qtbot, mocker):
-        mocker.patch("src.ui.settings_dialog.check_network_available", return_value=True)
+        mocker.patch("voicetype.ui.settings_dialog.check_network_available", return_value=True)
 
         cfg = AppConfig(asr=AsrConfig(api_key="sk-test"))
         dlg = SettingsDialog(cfg)
@@ -304,7 +306,7 @@ class TestSettingsDialogSave:
 
     def test_save_and_close_accepts_dialog(self, qtbot, mocker):
         """_save_and_close calls accept() to close the dialog."""
-        mocker.patch("src.ui.settings_dialog.check_network_available", return_value=True)
+        mocker.patch("voicetype.ui.settings_dialog.check_network_available", return_value=True)
 
         cfg = AppConfig(asr=AsrConfig(api_key="sk-test"))
         dlg = SettingsDialog(cfg)

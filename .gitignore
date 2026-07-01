@@ -22,3 +22,4 @@ config.json
 
 # Local scripts
 start-claude.bat
+start_*.cmd

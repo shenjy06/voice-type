@@ -2,14 +2,14 @@
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QCloseEvent
-from src.ui.main_window import (
+from voicetype.ui.main_window import (
     AudioLevelWaveform,
     FloatingRecordingWindow,
     MicrophoneIcon,
     PulsingDot,
     Toast,
 )
-from src.state import RecorderState
+from voicetype.state import RecorderState
 
 
 class TestPulsingDot:

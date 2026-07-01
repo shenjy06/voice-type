@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.i18n import init_language, t
+from voicetype.i18n import init_language, t
 
 
 @pytest.fixture(autouse=True)

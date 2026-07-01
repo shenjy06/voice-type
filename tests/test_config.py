@@ -1,7 +1,7 @@
 """Tests for voice_type.config — dataclasses, serialization, migration, persistence."""
 
 import json
-from src.config import (
+from voicetype.config import (
     AppConfig,
     AsrConfig,
     OutputConfig,
@@ -250,7 +250,7 @@ class TestAppConfigLoadSave:
         assert cfg.asr.model == "custom-model"
 
     def test_load_returns_defaults_when_file_missing(self, tmp_config_path, monkeypatch):
-        import src.config as config_mod
+        import voicetype.config as config_mod
         # Point to a non-existent file
         monkeypatch.setattr(config_mod, "CONFIG_FILE", tmp_config_path / "nonexistent" / "config.json")
         cfg = AppConfig.load()

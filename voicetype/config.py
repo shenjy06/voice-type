@@ -1,4 +1,11 @@
-"""Configuration management — loads/saves user settings from JSON."""
+"""Configuration management — loads/saves user settings from JSON.
+
+The `voicetype.crypto` module is available for at-rest encryption of API keys
+but is intentionally NOT wired into to_dict/from_dict here because the
+raw ctypes DPAPI binding is unstable in some environments. To enable
+encryption, plug crypto.encrypt/decrypt into to_dict/from_dict and run
+integration tests in your target environment first.
+"""
 
 import json
 from dataclasses import dataclass, field, asdict
@@ -79,13 +86,21 @@ class AppConfig:
 
     @classmethod
     def from_dict(cls, data: dict) -> "AppConfig":
-        rec_data = data.get("recording", {})
+        # Safely extract section dicts, defaulting to empty dict if not a dict
+        def _safe_dict(value, default=None):
+            if value is None:
+                return default or {}
+            if isinstance(value, dict):
+                return value
+            return default or {}
+
+        rec_data = _safe_dict(data.get("recording"))
         # Migrate old hotkey fields: if start_hotkey_modifiers exists in recording,
         # the user had hotkeys configured — preserve them by enabling the toggle
         if "start_hotkey_modifiers" in rec_data or "hotkey_modifiers" in rec_data:
             hotkey_data = {"toggle_enabled": True}
         else:
-            hotkey_data = data.get("hotkey", {})
+            hotkey_data = _safe_dict(data.get("hotkey"))
         glossary_entries = []
         for item in data.get("glossary", []):
             if isinstance(item, dict):
@@ -95,14 +110,18 @@ class AppConfig:
                         replacement=str(item.get("replacement", "")),
                     )
                 )
+
+        # For polish, fall back to legacy "api" section if "polish" is missing
+        polish_data = _safe_dict(data.get("polish", data.get("api")))
+
         return cls(
             language=data.get("language", "auto"),
-            polish=PolishApiConfig(**data.get("polish", data.get("api", {}))),
-            asr=AsrConfig(**data.get("asr", {})),
+            polish=PolishApiConfig(**polish_data),
+            asr=AsrConfig(**_safe_dict(data.get("asr"))),
             recording=RecordingConfig(sample_rate=rec_data.get("sample_rate", 16000)),
-            output=OutputConfig(**data.get("output", {})),
+            output=OutputConfig(**_safe_dict(data.get("output"))),
             glossary=glossary_entries,
-            window=WindowConfig(**data.get("window", {})),
+            window=WindowConfig(**_safe_dict(data.get("window"))),
             hotkey=HotkeyConfig(**hotkey_data),
         )
 
@@ -120,5 +139,7 @@ class AppConfig:
 
     def save(self) -> None:
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        tmp_path = CONFIG_FILE.with_suffix(".tmp")
+        with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(self.to_dict(), f, indent=2, ensure_ascii=False)
+        tmp_path.replace(CONFIG_FILE)
