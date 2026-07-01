@@ -185,7 +185,13 @@ class TrayIcon(QObject):
 
 
 class HotkeyManager(QObject):
-    """Global hotkeys using Shift (left or right) as toggle and Shift+C as cancel."""
+    """Global hotkeys using Right Shift as toggle and Right Shift+C as cancel.
+
+    A quick tap of Right Shift toggles recording start/stop. Holding Right
+    Shift together with any other key (e.g. Right Shift+C) is treated as a
+    combo and does NOT toggle — Right Shift+C cancels an in-progress recording
+    instead. Left Shift is ignored entirely so it stays free for normal typing.
+    """
 
     toggle_recording = Signal()
     cancel_recording = Signal()
@@ -225,10 +231,13 @@ class HotkeyManager(QObject):
         is_shift_r = key == keyboard.Key.shift_r
         is_shift = key == keyboard.Key.shift
         if is_shift_r or is_shift:
-            if not self._toggle_key_pressed:
+            # Only Right Shift (shift_r) starts a toggle. A bare generic
+            # Key.shift press is treated as left-shift and ignored so
+            # left-shift keeps working as a normal modifier.
+            if is_shift_r and not self._toggle_key_pressed:
                 self._toggle_key_pressed = True
                 self._combo_used = False
-                self._last_toggle_key = "shift_r" if is_shift_r else "shift"
+                self._last_toggle_key = "shift_r"
             return
 
         try:
@@ -248,7 +257,7 @@ class HotkeyManager(QObject):
             self._combo_used = True
 
     def _on_release(self, key):
-        """Handle key release event and detect Shift tap vs combo."""
+        """Handle key release event and detect Right Shift tap vs combo."""
         is_shift_r = key == keyboard.Key.shift_r
         is_shift = key == keyboard.Key.shift
 

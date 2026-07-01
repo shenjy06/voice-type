@@ -223,23 +223,22 @@ class TestHotkeyManager:
         with qtbot.waitSignal(mgr.cancel_recording):
             mgr._on_press(KeyCode.from_char("C"))
 
-    def test_alt_c_no_longer_emits_cancel(self, qtbot):
-        """Alt+C is not a cancel shortcut."""
+    def test_left_shift_c_does_not_emit_cancel(self, qtbot):
+        """Left Shift+C is not a cancel shortcut."""
         from pynput.keyboard import KeyCode
         mgr = HotkeyManager()
         emitted = []
         mgr.cancel_recording.connect(lambda: emitted.append(True))
-        mgr._on_press(keyboard.Key.alt_l)
+        mgr._on_press(keyboard.Key.shift_l)
         mgr._on_press(KeyCode.from_char("c"))
         assert emitted == []
-
 
     def test_generic_shift_tap_does_not_toggle(self, qtbot):
         """A plain Key.shift tap is treated as left-shift and must NOT toggle.
 
-        Key.shift aliases Key.shift_l in pynput. A bare Key.shift press
-        must not start or stop recording so left shift behaves like any
-        other modifier.
+        Key.shift aliases Key.shift_l in pynput. A bare Key.shift press must
+        not start or stop recording so left shift behaves like any other
+        modifier.
         """
         mgr = HotkeyManager()
         emitted = []
