@@ -47,7 +47,9 @@ class TestSettingsDialogCreation:
         mocker.patch("voicetype.ui.settings_dialog.get_default_input_device_name", return_value="Mic")
         dlg = SettingsDialog(AppConfig())
         qtbot.addWidget(dlg)
-        assert dlg.mic_device_label.text() == "Mic"
+        # The device name is resolved on a background thread and applied via
+        # signal; wait for the label to update before asserting.
+        qtbot.waitUntil(lambda: dlg.mic_device_label.text() == "Mic", timeout=2000)
         assert dlg.mic_level_bar.value() == 0
         assert dlg.mic_test_btn.text() == "Test Microphone"
 
@@ -221,11 +223,14 @@ class TestSettingsDialogSave:
         # Simulate the user typing a new API key, which marks the API state as changed.
         dlg.stt_api_key_input.setText("sk-new-key")
 
-        # Should NOT emit settings_saved
+        # Should NOT emit settings_saved. The network check runs on a
+        # background thread and reports back via _network_check_done; wait for
+        # that signal so the toast assertion runs after the result lands.
         emitted = []
         dlg.settings_saved.connect(lambda: emitted.append(True))
 
-        dlg._save_and_close()
+        with qtbot.waitSignal(dlg._network_check_done, timeout=2000):
+            dlg._save_and_close()
 
         assert emitted == []
         mock_toast.assert_called_once()
@@ -242,11 +247,13 @@ class TestSettingsDialogSave:
         dlg = SettingsDialog(cfg)
         qtbot.addWidget(dlg)
 
-        # Clear the base url inputs
+        # Clear the base url inputs (this marks the API state as changed ->
+        # async network-check path).
         dlg.stt_base_url_input.clear()
         dlg.polish_base_url_input.clear()
 
-        dlg._save_and_close()
+        with qtbot.waitSignal(dlg.settings_saved, timeout=2000):
+            dlg._save_and_close()
 
         assert cfg.asr.base_url == ""
         assert cfg.polish.base_url == ""
@@ -262,7 +269,8 @@ class TestSettingsDialogSave:
         dlg.stt_api_key_input.setText("  sk-test  ")
         dlg.polish_api_key_input.setText("  sk-polish  ")
 
-        dlg._save_and_close()
+        with qtbot.waitSignal(dlg.settings_saved, timeout=2000):
+            dlg._save_and_close()
 
         assert cfg.asr.api_key == "sk-test"
         assert cfg.polish.api_key == "sk-polish"

@@ -205,7 +205,12 @@ class Application:
             if self.config.output.auto_paste:
                 self._paste_async(refined_text, self._recording_controller.saved_hwnd)
             else:
-                pyperclip.copy(refined_text)
+                # Copy on a background thread: clipboard contention (another
+                # app holding the clipboard open) can make pyperclip.copy block
+                # for hundreds of ms, which would freeze the UI thread.
+                threading.Thread(
+                    target=pyperclip.copy, args=(refined_text,), daemon=True
+                ).start()
 
     def _paste_async(self, text: str, hwnd: int) -> None:
         """Paste text on a background thread so the pre-paste delay and the
@@ -252,7 +257,10 @@ class Application:
         if self.config.output.auto_paste:
             self._paste_async(text, get_foreground_window())
         else:
-            pyperclip.copy(text)
+            # Background thread — see _on_processing_done for rationale.
+            threading.Thread(
+                target=pyperclip.copy, args=(text,), daemon=True
+            ).start()
 
     def _show_toast(self, message: str):
         toast = Toast(message, parent=self.window)
@@ -297,6 +305,7 @@ class Application:
         self._quitting = True
         self.hotkey_manager.stop()
         self._audio_level_timer.stop()
+        self._flush_config_save()
         self.audio_recorder.stop()
         self.audio_recorder.cleanup()
         self._processing_controller.shutdown()
@@ -317,9 +326,30 @@ class Application:
     # ---- quick settings ----------------------------------------------------
 
     def _save_quick_settings(self):
-        self.config.save()
+        # Update in-memory state and the live UI immediately (cheap), but
+        # debounce the disk write so rapid tray toggles coalesce into a
+        # single config.json write instead of one per click.
         self.tray.apply_config(self.config)
         self.typer.config = self.config
+        self._schedule_config_save()
+
+    def _schedule_config_save(self):
+        """Coalesce rapid config changes into a single delayed disk write."""
+        timer = getattr(self, "_config_save_timer", None)
+        if timer is None:
+            timer = QTimer()
+            timer.setSingleShot(True)
+            timer.setInterval(500)
+            timer.timeout.connect(self.config.save)
+            self._config_save_timer = timer
+        timer.start()
+
+    def _flush_config_save(self):
+        """Write config now if a debounced save is pending (call at quit)."""
+        timer = getattr(self, "_config_save_timer", None)
+        if timer is not None and timer.isActive():
+            timer.stop()
+            self.config.save()
 
     def _set_auto_paste(self, enabled: bool):
         self.config.output.auto_paste = enabled

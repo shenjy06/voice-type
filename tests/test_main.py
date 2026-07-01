@@ -395,6 +395,8 @@ class TestApplication:
         app._on_processing_done("Hello, world!")
 
         app.history_store.add.assert_called_once_with("Hello, world!")
+        # Copy runs on a background thread; wait for it before asserting.
+        qtbot.waitUntil(lambda: mock_copy.called, timeout=2000)
         mock_copy.assert_called_once_with("Hello, world!")
         app.audio_recorder.cleanup.assert_called_once()
 
@@ -497,6 +499,7 @@ class TestApplication:
 
         app._paste_history_text("from history")
 
+        qtbot.waitUntil(lambda: mock_copy.called, timeout=2000)
         mock_copy.assert_called_once_with("from history")
 
     def test_on_settings_saved_respects_toggle(self, qtbot, mocker):
@@ -584,6 +587,8 @@ class TestApplication:
         app.config.save = mocker.MagicMock()
 
         app._set_auto_paste(False)
+        # Config writes are debounced; flush the pending save before asserting.
+        app._flush_config_save()
 
         assert app.config.output.auto_paste is False
         app.config.save.assert_called_once()
@@ -594,6 +599,7 @@ class TestApplication:
         app.config.save = mocker.MagicMock()
 
         app._set_polish_enabled(False)
+        app._flush_config_save()
 
         assert app.config.polish.enabled is False
         app.config.save.assert_called_once()
@@ -603,6 +609,7 @@ class TestApplication:
         app.config.save = mocker.MagicMock()
 
         app._set_paste_mode("clipboard")
+        app._flush_config_save()
 
         assert app.config.output.paste_mode == "clipboard"
         app.config.save.assert_called_once()
@@ -612,6 +619,20 @@ class TestApplication:
         app.config.save = mocker.MagicMock()
 
         app._set_asr_language("en")
+        app._flush_config_save()
 
         assert app.config.asr.language == "en"
         app.config.save.assert_called_once()
+
+    def test_quick_settings_debounce_coalesces_writes(self, qtbot, mocker):
+        """Rapid toggles coalesce into a single debounced config write."""
+        app = self._make_application(qtbot, mocker)
+        app.config.save = mocker.MagicMock()
+
+        app._set_auto_paste(False)
+        app._set_auto_paste(True)
+        app._set_paste_mode("clipboard")
+        app._flush_config_save()
+
+        # Three toggles, but only one flushed write.
+        assert app.config.save.call_count == 1

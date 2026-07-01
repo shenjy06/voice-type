@@ -16,6 +16,7 @@ free of Qt widget leakage.
 """
 
 import ctypes
+import threading
 
 from voicetype.state import RecorderState
 from voicetype.window_manager import get_foreground_window
@@ -47,6 +48,7 @@ class RecordingController:
         self._context_provider = context_provider or (lambda: ("", ""))
         self._saved_hwnd = 0
         self._cursor_context: tuple[str, str] = ("", "")
+        self._context_thread: threading.Thread | None = None
         self._cancelled = False
 
     # ---- public state -------------------------------------------------------
@@ -57,7 +59,17 @@ class RecordingController:
 
     @property
     def cursor_context(self) -> tuple[str, str]:
-        """Return the (before, after) cursor context captured this cycle."""
+        """Return the (before, after) cursor context captured this cycle.
+
+        Joins the background context-capture thread (up to a short bound) so
+        the value is current by the time processing begins. Recordings are
+        typically far longer than the ~0.6s capture, so the thread has long
+        since finished; the join is a safety net for very short taps.
+        """
+        thread = self._context_thread
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=2.0)
+            self._context_thread = None
         return self._cursor_context
 
     @property
@@ -111,20 +123,32 @@ class RecordingController:
             self._tray.set_recording(False)
             self._ui.set_error(self._translate("error.no_audio"))
             return 0
-        # Capture cursor context AFTER the recorder is already capturing audio
-        # so the user's first words are not lost. The provider is responsible
-        # for gating on polish-enabled and restoring the original clipboard.
-        # Runs on the UI thread because it must target the foreground window
-        # while it is still focused; the floating window uses Qt.Tool and does
-        # not steal focus.
+        # Update the UI immediately so the recording indicator, level meter,
+        # and tray reflect "recording" without delay.
+        self._level_timer.start()
+        self._tray.set_recording(True)
+        self._bubble.show_status(self._translate("status.recording"))
+        # Capture cursor context on a BACKGROUND thread. The provider simulates
+        # keystrokes (Shift+Home/Ctrl+C/...) with ~0.6s of sleeps and clipboard
+        # I/O; running it on the UI thread froze the window for over half a
+        # second at recording start. keybd_event is thread-agnostic (the app
+        # already relies on this for paste), and the floating window uses
+        # Qt.Tool so it never stole focus anyway. The result is collected into
+        # ``_cursor_context`` and read via ``cursor_context`` at stop time,
+        # which joins this thread if it's still running.
+        self._cursor_context = ("", "")
+        self._context_thread = threading.Thread(
+            target=self._capture_context, daemon=True
+        )
+        self._context_thread.start()
+        return self._saved_hwnd
+
+    def _capture_context(self) -> None:
+        """Run the context provider on a background thread; swallow failures."""
         try:
             self._cursor_context = self._context_provider()
         except Exception:
             self._cursor_context = ("", "")
-        self._level_timer.start()
-        self._tray.set_recording(True)
-        self._bubble.show_status(self._translate("status.recording"))
-        return self._saved_hwnd
 
     def cancel(self) -> None:
         """Mark the current cycle as cancelled. If currently recording, stop it;

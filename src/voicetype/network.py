@@ -43,16 +43,27 @@ def _probe(url: str, timeout: float) -> bool:
 def check_network_available(timeout_ms: int = DEFAULT_TIMEOUT_MS) -> bool:
     """Return True if any HTTP probe succeeds within the timeout.
 
-    Probes run in parallel; returns as soon as one succeeds. Returns False
-    only when every probe has failed (or timed out), which takes at most
-    ``timeout_ms`` since the probes are concurrent.
+    Probes run in parallel and the function returns as soon as the FIRST one
+    succeeds — it does NOT wait for the others. This matters for users behind
+    region-level firewalls (e.g. China, where baidu responds in ~50ms but
+    google/cloudflare time out for the full window): a naive
+    ``ThreadPoolExecutor`` context manager would block on ``shutdown(wait=True)``
+    until every probe finished, defeating the early return.
+
+    Returns False only when every probe has failed (or timed out), which takes
+    at most ``timeout_ms`` since the probes are concurrent.
     """
     timeout = timeout_ms / 1000.0
-    with ThreadPoolExecutor(max_workers=len(PROBE_URLS)) as executor:
-        futures = [
-            executor.submit(_probe, url, timeout) for url in PROBE_URLS
-        ]
+    executor = ThreadPoolExecutor(max_workers=len(PROBE_URLS))
+    futures = [executor.submit(_probe, url, timeout) for url in PROBE_URLS]
+    try:
         for future in as_completed(futures):
             if future.result():
                 return True
-    return False
+        return False
+    finally:
+        # Cancel any probes still running (e.g. the slow/blocked ones after a
+        # fast success) and shut down WITHOUT waiting for them.
+        for future in futures:
+            future.cancel()
+        executor.shutdown(wait=False, cancel_futures=True)

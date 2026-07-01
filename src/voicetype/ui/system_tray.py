@@ -38,6 +38,9 @@ class TrayIcon(QObject):
     def _init_icon(self):
         """Create a simple microphone-style tray icon."""
         self._icon = make_circle_icon("T", (37, 99, 235))
+        # Pre-build the recording icon once and reuse it instead of
+        # reallocating/painting a QPixmap every recording start.
+        self._recording_icon = make_circle_icon("S", (220, 38, 38))
         self._tray = QSystemTrayIcon(self._icon)
         self._tray.setToolTip(t("tray.tooltip"))
         self._tray.activated.connect(self._on_activated)
@@ -147,7 +150,7 @@ class TrayIcon(QObject):
         self._is_recording = recording
         if recording:
             self.record_action.setText(t("tray.stop_recording"))
-            self._tray.setIcon(make_circle_icon("S", (220, 38, 38)))
+            self._tray.setIcon(self._recording_icon)
             self._tray.setToolTip(t("tray.tooltip_recording"))
         else:
             self.record_action.setText(t("tray.start_recording"))

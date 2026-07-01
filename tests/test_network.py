@@ -1,5 +1,6 @@
 """Tests for voice_type.network — network connectivity check."""
 
+import time
 import urllib.error
 from voicetype.network import check_network_available, PROBE_URLS, DEFAULT_TIMEOUT_MS
 
@@ -59,7 +60,9 @@ class TestCheckNetworkAvailable:
             return_value=mocker.MagicMock(),
         )
         check_network_available(timeout_ms=5000)
-        assert mock_urlopen.call_count == len(PROBE_URLS)
+        # At least one probe runs; with the immediate mock they may all run
+        # before the early-return cancels the rest, so assert >= 1, not ==.
+        assert mock_urlopen.call_count >= 1
         for _, kwargs in mock_urlopen.call_args_list:
             assert kwargs["timeout"] == 5.0
 
@@ -71,9 +74,33 @@ class TestCheckNetworkAvailable:
         )
         check_network_available()
         expected = DEFAULT_TIMEOUT_MS / 1000.0
-        assert mock_urlopen.call_count == len(PROBE_URLS)
+        assert mock_urlopen.call_count >= 1
         for _, kwargs in mock_urlopen.call_args_list:
             assert kwargs["timeout"] == expected
+
+    def test_returns_fast_on_first_success(self, mocker):
+        """First-success early return: a fast probe must not wait for slow ones.
+
+        The first URL succeeds instantly; the others block for 5s. If the
+        early-return worked, total wall time is well under the slow probes'
+        delay. (Previously, ThreadPoolExecutor.__exit__'s shutdown(wait=True)
+        blocked until ALL probes finished, making this take ~5s.)
+        """
+        fast_url = PROBE_URLS[0]
+
+        def _side(request, *args, **kwargs):
+            if request.full_url == fast_url:
+                return mocker.MagicMock()
+            time.sleep(5)
+            return mocker.MagicMock()
+
+        mocker.patch("voicetype.network.urllib.request.urlopen", side_effect=_side)
+        start = time.monotonic()
+        assert check_network_available() is True
+        elapsed = time.monotonic() - start
+        # Generous bound (cancellation of the sleeping threads is async), but
+        # far below the 5s the broken version would take.
+        assert elapsed < 2.0
 
     def test_probes_all_configured_urls(self, mocker):
         """Every PROBE_URL is probed (in parallel)."""
