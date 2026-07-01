@@ -74,7 +74,7 @@ Audio save (OGG/Vorbis encoding) + ASR + LLM processing all run in a `QThread` v
 - **Two separate API configs**: STT and Polish can use different providers/keys (e.g., SiliconFlow for STT, OpenAI for Polish)
 - **Config migration**: `AppConfig.from_dict()` handles migration from old single hotkey format to toggle/cancel hotkey format
 - **Temp audio lifecycle**: OGG file created by `AudioRecorder.save()` on the processing worker thread (not the UI thread), deleted after STT or on cancel
-- **Right Alt tap detection**: `HotkeyManager` uses pynput to distinguish Right Alt tap (toggle) from Right Alt+key combo (e.g., Right Alt+C for cancel). Tap = release without any other key pressed while Right Alt was held.
+- **Right Alt tap detection**: `HotkeyManager` uses pynput to distinguish Right Alt tap (toggle) from Right Alt+key combo (e.g., Right Alt+C for cancel). Tap = release without any other key pressed while Right Alt was held. Left Alt is ignored so it stays free for normal typing.
 - **Centralized state transitions**: `FloatingRecordingWindow._transition_to()` handles signal emission and button updates in one place.
 - **Shared icon creation**: `make_circle_icon()` in `icon_utils.py` eliminates duplicate QPixmap+QPainter code across UI modules.
 - **State enum**: `RecorderState` in `state.py` replaces scattered string constants (`STATE_IDLE`, etc.).

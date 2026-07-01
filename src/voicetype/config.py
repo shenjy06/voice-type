@@ -37,7 +37,7 @@ class AsrConfig:
 @dataclass
 class HotkeyConfig:
     toggle_enabled: bool = True
-    toggle_hotkey: str = "right_shift"
+    toggle_hotkey: str = "right_alt"
 
 
 @dataclass
