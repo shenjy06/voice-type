@@ -1,7 +1,7 @@
 """Tests for voice_type.polisher — TextPolisher."""
 
 from unittest.mock import MagicMock, patch
-from voicetype.polisher import TextPolisher, SYSTEM_PROMPT
+from voicetype.polisher import TextPolisher, _BASE_PROMPT, STYLE_OVERRIDES, _build_system_prompt
 from tests.conftest import make_config
 
 
@@ -28,7 +28,7 @@ class TestTextPolisher:
         assert result == "Hello, world!"
 
     def test_polish_uses_system_prompt(self, mocker):
-        """SYSTEM_PROMPT is included in the messages."""
+        """System prompt built from base + default style is included in the messages."""
         mock_resp = MagicMock()
         mock_resp.choices = [MagicMock()]
         mock_resp.choices[0].message.content = "ok"
@@ -41,8 +41,9 @@ class TestTextPolisher:
 
         call_kwargs = mock_client.chat.completions.create.call_args[1]
         messages = call_kwargs["messages"]
+        expected_prompt = _build_system_prompt("default", has_context=False)
         assert messages[0]["role"] == "system"
-        assert messages[0]["content"] == SYSTEM_PROMPT
+        assert messages[0]["content"] == expected_prompt
 
     def test_polish_uses_user_text(self, mocker):
         """User text is passed as the user message."""

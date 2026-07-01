@@ -6,23 +6,31 @@ echo  VoiceType - Windows x64 Build Script
 echo ========================================
 echo.
 
-:: Check Python
-where python >nul 2>&1
-if errorlevel 1 (
-    echo [ERROR] Python not found. Please install Python 3.10+ and add to PATH.
-    echo Download: https://www.python.org/downloads/
-    pause
-    exit /b 1
+:: Locate the virtual environment
+set "VENV=.venv"
+if not exist "%VENV%\Scripts\python.exe" (
+    echo [INFO] Virtual environment not found, creating now...
+    python -m venv %VENV%
+    if errorlevel 1 (
+        echo [ERROR] Failed to create virtual environment.
+        pause
+        exit /b 1
+    )
 )
 
-for /f "tokens=2" %%i in ('python --version 2^>^&1') do set PYVER=%%i
-echo [OK] Python version: %PYVER%
+set "PYTHON=%VENV%\Scripts\python.exe"
+set "PIP=%VENV%\Scripts\pip.exe"
+set "PYINSTALLER=%VENV%\Scripts\pyinstaller.exe"
+
+:: Check Python version
+for /f "tokens=2" %%i in ('"%PYTHON%" --version 2^>^&1') do set PYVER=%%i
+echo [OK] Python version: %PYVER% ^(from %VENV%^)
 
 :: Check PyInstaller
-python -c "import PyInstaller" >nul 2>&1
+"%PYTHON%" -c "import PyInstaller" >nul 2>&1
 if errorlevel 1 (
     echo [INFO] PyInstaller not installed, installing now...
-    pip install pyinstaller
+    "%PIP%" install pyinstaller
     if errorlevel 1 (
         echo [ERROR] Failed to install PyInstaller.
         pause
@@ -32,7 +40,7 @@ if errorlevel 1 (
 
 :: Install project dependencies
 echo [INFO] Installing project dependencies...
-pip install -r requirements.txt
+"%PIP%" install -r requirements.txt
 if errorlevel 1 (
     echo [ERROR] Failed to install dependencies.
     pause
@@ -41,7 +49,7 @@ if errorlevel 1 (
 
 :: Install the project itself so entry points / metadata are present
 echo [INFO] Installing project in editable mode...
-pip install -e .
+"%PIP%" install -e .
 if errorlevel 1 (
     echo [ERROR] Failed to install project.
     pause
@@ -52,7 +60,7 @@ echo.
 echo [INFO] Building VoiceType EXE...
 echo.
 
-pyinstaller --clean ^
+"%PYINSTALLER%" --clean ^
     --noconfirm ^
     VoiceType.spec
 

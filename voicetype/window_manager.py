@@ -1,13 +1,9 @@
 """Windows window management — foreground control via ctypes."""
 
-import logging
 import time
 import ctypes
 
-logger = logging.getLogger(__name__)
-
 # Windows constants
-SW_RESTORE = 9
 INPUT_KEYBOARD = 1
 KEYEVENTF_KEYUP = 0x0002
 
@@ -42,10 +38,7 @@ def _tap_alt() -> bool:
     inputs[1].dwFlags = KEYEVENTF_KEYUP
     result = user32.SendInput(2, inputs, ctypes.sizeof(KeyboardInput))
     if result == 0:
-        logger.warning("SendInput failed: no events injected")
         return False
-    if result != 2:
-        logger.debug("SendInput partially succeeded: expected 2, got %d", result)
     return True
 
 
@@ -59,7 +52,6 @@ def _attach_thread_input(target_hwnd: int) -> bool:
     if our_tid != target_tid:
         result = user32.AttachThreadInput(target_tid, our_tid, True)
         if not result:
-            logger.warning("AttachThreadInput failed")
             return False
         return True
     return False
@@ -83,7 +75,6 @@ def set_foreground_window(hwnd: int) -> bool:
     if not hwnd or hwnd == 0:
         return False
     if not user32.IsWindow(hwnd):
-        logger.warning("Saved window no longer exists (hwnd=%s)", hwnd)
         return False
 
     # Strategy 1: AttachThreadInput + SetForegroundWindow
@@ -94,8 +85,8 @@ def set_foreground_window(hwnd: int) -> bool:
         result = user32.SetForegroundWindow(hwnd)
         if result:
             return True
-    except Exception as e:
-        logger.debug("Strategy 1 failed: %s", e)
+    except Exception:
+        pass
     finally:
         if attached:
             _detach_thread_input(hwnd)
@@ -107,10 +98,16 @@ def set_foreground_window(hwnd: int) -> bool:
         if result:
             return True
 
-    # Strategy 3: ShowWindow(RESTORE) + Alt tap + SetForegroundWindow
-    restore_result = user32.ShowWindow(hwnd, SW_RESTORE)
-    if not restore_result:
-        logger.debug("ShowWindow returned %d", restore_result)
+    # Strategy 3: BringWindowToTop + Alt tap + SetForegroundWindow
+    # NOTE: Do NOT use ShowWindow(SW_RESTORE) here — it un-maximizes a
+    # maximized window, which the user sees as the target window shrinking
+    # from full-screen to windowed mode right as text is pasted.
+    # BringWindowToTop raises the window without changing its show state
+    # (minimized/maximized/restored).
+    try:
+        user32.BringWindowToTop(hwnd)
+    except Exception:
+        pass
     if _tap_alt():
         time.sleep(0.02)
         result = user32.SetForegroundWindow(hwnd)

@@ -1,10 +1,7 @@
 """Speech-to-text via OpenAI-compatible API."""
 
-import logging
 from voicetype.api_client import ApiClient
 from voicetype.config import AppConfig
-
-logger = logging.getLogger(__name__)
 
 # Prompt hint for auto-detect mode to improve Chinese-English mixed recognition.
 # Whisper uses the prompt parameter as context to bias language detection.
@@ -22,7 +19,6 @@ class Transcriber:
 
     def transcribe(self, audio_path: str) -> str:
         """Transcribe audio file to text."""
-        logger.info("Transcribing audio: %s", audio_path)
         kwargs = {
             "model": self.config.asr.model,
         }
@@ -34,5 +30,4 @@ class Transcriber:
         with open(audio_path, "rb") as f:
             response = self._client.audio.transcriptions.create(file=f, **kwargs)
         text = response.text.strip()
-        logger.info("Transcription complete: %d chars", len(text))
         return text

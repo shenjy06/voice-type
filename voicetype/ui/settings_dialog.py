@@ -372,14 +372,14 @@ class SettingsDialog(QDialog):
 
         # STT
         self.config.asr.api_key = api_key
-        self.config.asr.base_url = self.stt_base_url_input.text().strip() or DEFAULT_BASE_URL
+        self.config.asr.base_url = self.stt_base_url_input.text().strip()
         self.config.asr.model = self.stt_model_combo.currentText()
         self.config.asr.language = self.stt_lang_combo.currentData()
         self.config.recording.sample_rate = self.sample_rate_spin.value()
 
         # Polish
         self.config.polish.api_key = self.polish_api_key_input.text().strip()
-        self.config.polish.base_url = self.polish_base_url_input.text().strip() or DEFAULT_BASE_URL
+        self.config.polish.base_url = self.polish_base_url_input.text().strip()
         self.config.polish.model = self.polish_model_combo.currentText()
         self.config.polish.enabled = self.polish_enabled_check.isChecked()
         self.config.polish.style = self.polish_style_combo.currentData()

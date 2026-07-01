@@ -1,9 +1,6 @@
 """Simple dictionary-based internationalization (en/zh)."""
 
 import locale
-import logging
-
-logger = logging.getLogger(__name__)
 
 _TRANSLATIONS: dict[str, dict[str, str]] = {
     "en": {

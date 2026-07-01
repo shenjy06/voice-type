@@ -1,6 +1,5 @@
 """Floating recording window — compact widget with record button."""
 
-import logging
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QApplication, QLabel,
@@ -9,8 +8,6 @@ from PySide6.QtCore import Qt, QTimer, Signal, QPropertyAnimation, QEasingCurve,
 from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QCursor, QCloseEvent
 from voicetype.state import RecorderState
 from voicetype.i18n import t
-
-logger = logging.getLogger(__name__)
 
 # Shared color constants
 _COLOR_BG = QColor(31, 41, 55)
@@ -371,7 +368,6 @@ class FloatingRecordingWindow(QWidget):
 
     def set_error(self, msg: str = "Error"):
         # The error message is optional UI context; state machine is what matters.
-        logger.debug("Recording window error: %s", msg)
         self._transition_to(RecorderState.ERROR)
 
     def closeEvent(self, event: QCloseEvent):

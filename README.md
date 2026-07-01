@@ -34,11 +34,32 @@ Licensed under [GPL-3.0](LICENSE).
 
 ## Installation
 
+It is recommended to use a virtual environment to keep dependencies isolated from your global Python installation.
+
+### Using venv (recommended)
+
 ```bash
 # Clone the project
 cd voice-type
 
+# Create a virtual environment (requires Python 3.10+)
+python -m venv .venv
+
+# Activate the virtual environment
+# Windows (PowerShell):
+.venv\Scripts\Activate.ps1
+# Windows (Command Prompt):
+.venv\Scripts\activate.bat
+# Windows (Git Bash):
+source .venv/Scripts/activate
+
 # Install dependencies
+pip install -r requirements.txt
+```
+
+### Direct install (without venv)
+
+```bash
 pip install -r requirements.txt
 ```
 
@@ -245,6 +266,7 @@ voice-type/
 ## Running Tests
 
 ```bash
+# Install with test dependencies (run in the activated venv)
 pip install -e ".[dev]"
 pytest tests/ -v
 ```

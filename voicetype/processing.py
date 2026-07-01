@@ -1,6 +1,5 @@
 """Background processing worker — runs ASR + LLM polishing off the UI thread."""
 
-import logging
 import os
 
 from PySide6.QtCore import QObject, Signal
@@ -9,8 +8,6 @@ from voicetype.asr import Transcriber
 from voicetype.config import AppConfig
 from voicetype.glossary import apply_glossary
 from voicetype.polisher import TextPolisher
-
-logger = logging.getLogger(__name__)
 
 
 class ProcessingWorker(QObject):
@@ -39,9 +36,8 @@ class ProcessingWorker(QObject):
             # Delete audio file immediately after STT to limit sensitive data on disk.
             try:
                 os.remove(self.audio_path)
-                logger.info("Deleted temp audio: %s", self.audio_path)
-            except OSError as e:
-                logger.warning("Failed to delete audio: %s", e)
+            except OSError:
+                pass
             if not transcript:
                 self.finished.emit("")
                 return
@@ -52,6 +48,5 @@ class ProcessingWorker(QObject):
             polisher = TextPolisher(self.config)
             refined = polisher.polish(transcript)
             self.finished.emit(refined)
-        except Exception as e:
-            logger.exception("Processing failed")
+        except BaseException as e:
             self.error.emit(str(e))

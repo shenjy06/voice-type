@@ -14,11 +14,9 @@ free of Qt widget leakage.
 """
 
 import ctypes
-import logging
 
+from voicetype.state import RecorderState
 from voicetype.window_manager import get_foreground_window
-
-logger = logging.getLogger(__name__)
 
 # Show window without activating (keep focus on the user's target window).
 SW_SHOWNA = 4
@@ -63,11 +61,23 @@ class RecordingController:
     # ---- transitions --------------------------------------------------------
 
     def toggle(self) -> None:
-        """Toggle the recording state from the UI button."""
+        """Toggle the recording state from the UI button.
+
+        Ignores the toggle when the UI is in PROCESSING state so the user
+        cannot start a new recording while a previous cycle is still being
+        transcribed/polished.
+        """
         if self._ui.is_recording():
             self._ui.stop_recording()
+        elif self._is_processing():
+            pass
         else:
             self._ui.start_recording()
+
+    def _is_processing(self) -> bool:
+        """Return True when the UI window is currently in PROCESSING state."""
+        ui_state = getattr(self._ui, "_state", None)
+        return ui_state == RecorderState.PROCESSING
 
     def on_recording_started(self) -> int:
         """Called when the UI has transitioned to RECORDING.
@@ -78,7 +88,6 @@ class RecordingController:
         self._cancelled = False
         self._saved_hwnd = self._hwnd_provider()
         if not self._recorder.start():
-            logger.error("Failed to start recorder; aborting recording")
             self._saved_hwnd = 0
             self._ui.stop_recording()
             self._tray.set_recording(False)
@@ -86,7 +95,6 @@ class RecordingController:
             return 0
         self._level_timer.start()
         self._tray.set_recording(True)
-        logger.info("Recording started, saved hwnd=%s", self._saved_hwnd)
         self._bubble.show_status(self._translate("status.recording"))
         return self._saved_hwnd
 
@@ -101,7 +109,6 @@ class RecordingController:
             self._recorder.cleanup()
             self._tray.set_recording(False)
             self._ui.set_done()
-        logger.info("Recording cancelled by hotkey")
 
     def stop_recording_event(self, on_no_audio, on_save_error) -> "str | None":
         """Called when the UI fires recording_stopped. Drives audio save + the
@@ -121,7 +128,6 @@ class RecordingController:
             self._recorder.cleanup()
             self._bubble.dismiss()
             self._ui.set_done()
-            logger.info("Recording cancelled, skipping processing")
             return None
 
         self._ui.set_processing()
@@ -140,6 +146,7 @@ class RecordingController:
 
     def reset_after_processing(self) -> None:
         """Reset the recorder + UI to idle after a processing cycle."""
+        self._bubble.dismiss()
         self._recorder.cleanup()
         self._ui.set_done()
 

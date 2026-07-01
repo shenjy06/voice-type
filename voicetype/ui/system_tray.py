@@ -1,7 +1,5 @@
 """System tray icon with menu and global hotkeys."""
 
-import logging
-
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
@@ -10,8 +8,6 @@ from pynput import keyboard
 from voicetype.constants import PASTE_MODES, ASR_LANGUAGES, POLISH_STYLES
 from voicetype.i18n import t
 from voicetype.ui.icon_utils import make_circle_icon
-
-logger = logging.getLogger(__name__)
 
 
 class TrayIcon(QObject):
@@ -189,7 +185,7 @@ class TrayIcon(QObject):
 
 
 class HotkeyManager(QObject):
-    """Global hotkeys using Right Alt as toggle and Right Alt+C as cancel."""
+    """Global hotkeys using Shift (left or right) as toggle and Shift+C as cancel."""
 
     toggle_recording = Signal()
     cancel_recording = Signal()
@@ -200,6 +196,7 @@ class HotkeyManager(QObject):
         self._toggle_key_pressed = False
         self._combo_used = False
         self._running = False
+        self._last_toggle_key = None
 
     def start(self):
         """Start monitoring global hotkeys."""
@@ -212,7 +209,6 @@ class HotkeyManager(QObject):
             daemon=True,  # Allow process to exit even if listener is running
         )
         self._listener.start()
-        logger.info("Right Alt hotkey monitoring started")
 
     def stop(self):
         """Stop monitoring."""
@@ -222,15 +218,17 @@ class HotkeyManager(QObject):
             self._listener = None
         self._toggle_key_pressed = False
         self._combo_used = False
-        logger.info("Right Alt hotkey monitoring stopped")
-
-    _RIGHT_ALT_KEYS = {keyboard.Key.alt_r, keyboard.Key.alt_gr}
+        self._last_toggle_key = None
 
     def _on_press(self, key):
         """Handle key press event."""
-        if key in self._RIGHT_ALT_KEYS:
-            self._toggle_key_pressed = True
-            self._combo_used = False
+        is_shift_r = key == keyboard.Key.shift_r
+        is_shift = key == keyboard.Key.shift
+        if is_shift_r or is_shift:
+            if not self._toggle_key_pressed:
+                self._toggle_key_pressed = True
+                self._combo_used = False
+                self._last_toggle_key = "shift_r" if is_shift_r else "shift"
             return
 
         try:
@@ -241,7 +239,6 @@ class HotkeyManager(QObject):
                 and key.char.lower() == "c"
             ):
                 self._combo_used = True
-                logger.info("Right Alt+C cancel triggered")
                 self.cancel_recording.emit()
                 return
         except AttributeError:
@@ -251,18 +248,30 @@ class HotkeyManager(QObject):
             self._combo_used = True
 
     def _on_release(self, key):
-        """Handle key release event and detect Right Alt tap vs combo."""
-        if key not in self._RIGHT_ALT_KEYS:
-            if self._toggle_key_pressed:
-                self._combo_used = True
+        """Handle key release event and detect Shift tap vs combo."""
+        is_shift_r = key == keyboard.Key.shift_r
+        is_shift = key == keyboard.Key.shift
+
+        # On Windows pynput often delivers the Right-Shift release as
+        # generic Key.shift rather than Key.shift_r. Only accept the
+        # generic shift on release when the matching press was shift_r
+        # (otherwise true left-shift presses would also toggle).
+        matching_toggle = (
+            (is_shift_r and self._last_toggle_key == "shift_r")
+            or (is_shift and self._last_toggle_key == "shift_r")
+        )
+
+        if matching_toggle:
+            if not self._toggle_key_pressed:
+                return
+            self._toggle_key_pressed = False
+            self._last_toggle_key = None
+
+            if self._combo_used:
+                return
+
+            self.toggle_recording.emit()
             return
 
-        if not self._toggle_key_pressed:
-            return
-        self._toggle_key_pressed = False
-
-        if self._combo_used:
-            return
-
-        logger.info("Right Alt toggle triggered")
-        self.toggle_recording.emit()
+        if self._toggle_key_pressed:
+            self._combo_used = True

@@ -1,10 +1,7 @@
 """Network connectivity check with multiple probe endpoints."""
 
-import logging
 import urllib.request
 import urllib.error
-
-logger = logging.getLogger(__name__)
 
 # Probe endpoints ordered by preference. The checker tries each in sequence
 # and returns True on the first success. This provides resilience for users
@@ -28,6 +25,6 @@ def check_network_available(timeout_ms: int = 3000) -> bool:
             with urllib.request.urlopen(url, timeout=timeout):
                 pass
             return True
-        except (OSError, urllib.error.URLError) as e:
-            logger.debug("Probe failed: %s (%s)", url, e)
+        except (OSError, urllib.error.URLError):
+            pass
     return False

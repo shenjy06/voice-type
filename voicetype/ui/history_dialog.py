@@ -1,7 +1,5 @@
 """History dialog for recent recognized text."""
 
-import logging
-
 import pyperclip
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtWidgets import (
@@ -20,8 +18,6 @@ from PySide6.QtGui import QIcon
 from voicetype.history import HistoryEntry, HistoryStore
 from voicetype.ui.icon_utils import make_circle_icon
 from voicetype.i18n import t
-
-logger = logging.getLogger(__name__)
 
 _HISTORY_ICON = None
 
@@ -137,8 +133,7 @@ class HistoryDialog(QDialog):
         if entry:
             try:
                 pyperclip.copy(entry.text)
-            except Exception as e:
-                logger.warning("Failed to copy history entry to clipboard: %s", e)
+            except Exception:
                 return
             # Briefly change the button text to confirm the copy to the user.
             self.copy_btn.setText(t("history.copied"))

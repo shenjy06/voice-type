@@ -120,7 +120,7 @@ class TestSetForegroundWindow:
         mock_user32 = mocker.patch("voicetype.window_manager.user32")
         mock_user32.IsWindow.return_value = True
         mock_user32.SetForegroundWindow.return_value = False
-        mock_user32.ShowWindow.return_value = 1
+        mock_user32.BringWindowToTop.return_value = True
         mocker.patch("voicetype.window_manager.time.sleep")
 
         result = set_foreground_window(123)

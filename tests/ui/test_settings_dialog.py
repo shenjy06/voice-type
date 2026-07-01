@@ -32,7 +32,7 @@ class TestSettingsDialogCreation:
     def test_language_combo_populated(self, qtbot):
         dlg = SettingsDialog(AppConfig())
         qtbot.addWidget(dlg)
-        langs = [dlg.stt_lang_combo.itemText(i) for i in range(dlg.stt_lang_combo.count())]
+        langs = [dlg.stt_lang_combo.itemData(i) for i in range(dlg.stt_lang_combo.count())]
         assert "auto" in langs
         assert "zh" in langs
         assert "en" in langs
@@ -233,7 +233,7 @@ class TestSettingsDialogSave:
         assert "Network unavailable" in toast_call_args[0][0]
 
     def test_save_and_close_empty_base_url_defaults(self, qtbot, mocker):
-        """Empty base_url defaults to https://api.openai.com/v1."""
+        """Empty base_url is saved as empty string (openai client uses its own default)."""
         mocker.patch("voicetype.ui.settings_dialog.check_network_available", return_value=True)
 
         cfg = AppConfig(asr=AsrConfig(api_key="sk-test"))
@@ -248,8 +248,8 @@ class TestSettingsDialogSave:
 
         dlg._save_and_close()
 
-        assert cfg.asr.base_url == "https://api.openai.com/v1"
-        assert cfg.polish.base_url == "https://api.openai.com/v1"
+        assert cfg.asr.base_url == ""
+        assert cfg.polish.base_url == ""
 
     def test_save_strips_whitespace_from_api_key(self, qtbot, mocker):
         """API key inputs are stripped."""

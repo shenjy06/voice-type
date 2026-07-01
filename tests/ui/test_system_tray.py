@@ -232,3 +232,30 @@ class TestHotkeyManager:
         mgr._on_press(keyboard.Key.alt_l)
         mgr._on_press(KeyCode.from_char("c"))
         assert emitted == []
+
+
+    def test_generic_shift_tap_does_not_toggle(self, qtbot):
+        """A plain Key.shift tap is treated as left-shift and must NOT toggle.
+
+        Key.shift aliases Key.shift_l in pynput. A bare Key.shift press
+        must not start or stop recording so left shift behaves like any
+        other modifier.
+        """
+        mgr = HotkeyManager()
+        emitted = []
+        mgr.toggle_recording.connect(lambda: emitted.append(True))
+        mgr._on_press(keyboard.Key.shift)
+        mgr._on_release(keyboard.Key.shift)
+        assert emitted == []
+
+    def test_shift_r_press_shift_release_emits_toggle(self, qtbot):
+        """Press with shift_r and release with bare shift should still toggle.
+
+        On Windows pynput may emit Key.shift_r on press and Key.shift on
+        release for the same physical Right-Shift tap. The listener must
+        accept shift-as-a-superset in _on_release.
+        """
+        mgr = HotkeyManager()
+        mgr._on_press(keyboard.Key.shift_r)
+        with qtbot.waitSignal(mgr.toggle_recording):
+            mgr._on_release(keyboard.Key.shift)

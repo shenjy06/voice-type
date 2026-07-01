@@ -22,9 +22,6 @@ Public API:
 """
 
 import base64
-import logging
-
-logger = logging.getLogger(__name__)
 
 _VERSION_PREFIX = "v1:"
 _FALLBACK_PREFIX = "v0:"
@@ -60,12 +57,10 @@ def decrypt(ciphertext: str | None) -> str | None:
     if ciphertext.startswith(_FALLBACK_PREFIX):
         try:
             return base64.b64decode(ciphertext[len(_FALLBACK_PREFIX):]).decode("utf-8")
-        except Exception as e:
-            logger.debug("decrypt: invalid fallback ciphertext: %s", e)
+        except Exception:
             return None
     if ciphertext.startswith(_VERSION_PREFIX):
         # No real DPAPI round-trip is wired in this build. Returning None here
         # causes callers to treat the value as missing rather than mis-decoding.
-        logger.warning("decrypt: v1 ciphertext encountered but DPAPI is not wired in")
         return None
     return ciphertext

@@ -37,7 +37,7 @@ class AsrConfig:
 @dataclass
 class HotkeyConfig:
     toggle_enabled: bool = True
-    toggle_hotkey: str = "right_alt"
+    toggle_hotkey: str = "right_shift"
 
 
 @dataclass
@@ -138,8 +138,24 @@ class AppConfig:
         return bool(self.asr.api_key or self.polish.api_key)
 
     def save(self) -> None:
+        """Save config to disk, but only if content has changed.
+
+        This prevents accidental overwrites where a default AppConfig is
+        serialised on top of a user's custom configuration (e.g. when the
+        app starts with defaults and a code path triggers save() before
+        the real config is loaded).
+        """
+        new_json = json.dumps(self.to_dict(), indent=2, ensure_ascii=False)
+        if CONFIG_FILE.exists():
+            try:
+                with open(CONFIG_FILE, encoding="utf-8") as f:
+                    existing = f.read()
+                if existing == new_json:
+                    return  # no changes — skip write
+            except (OSError, json.JSONDecodeError):
+                pass  # file unreadable or corrupt — proceed with write
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         tmp_path = CONFIG_FILE.with_suffix(".tmp")
         with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(self.to_dict(), f, indent=2, ensure_ascii=False)
+            f.write(new_json)
         tmp_path.replace(CONFIG_FILE)

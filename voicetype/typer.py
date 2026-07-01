@@ -1,6 +1,5 @@
 """Text output — clipboard paste via Ctrl+V."""
 
-import logging
 import threading
 import time
 import ctypes
@@ -14,8 +13,6 @@ from voicetype.constants import (
     PASTE_MODE_CLIPBOARD,
 )
 from voicetype.window_manager import set_foreground_window
-
-logger = logging.getLogger(__name__)
 
 KEYEVENTF_KEYUP = 0x0002
 user32 = ctypes.windll.user32
@@ -58,16 +55,12 @@ class TextTyper:
         Returns True if text was successfully pasted, False otherwise.
         """
         if not text:
-            logger.warning("No text to output")
             return False
 
         # Try to restore the saved window
         window_restored = False
         if saved_hwnd and saved_hwnd != 0:
-            logger.info("Restoring window hwnd=%s", saved_hwnd)
             window_restored = set_foreground_window(saved_hwnd)
-            if not window_restored:
-                logger.warning("Failed to restore saved window, will paste in active window")
 
         # Small delay to ensure window focus is settled
         time.sleep(self.config.output.paste_delay_ms / 1000.0)
@@ -80,11 +73,8 @@ class TextTyper:
         except Exception:
             original_clipboard = None
 
-        logger.info("Text copied to clipboard (%d chars)", len(text))
-
         paste_mode = self.config.output.paste_mode
         if paste_mode == PASTE_MODE_CLIPBOARD:
-            logger.info("Paste mode is clipboard-only; skipping paste keystrokes")
             return True
 
         use_terminal_paste = self._use_terminal_paste(paste_mode, saved_hwnd)
@@ -93,7 +83,6 @@ class TextTyper:
         success = self._send_paste(use_terminal_paste=use_terminal_paste)
 
         if not success:
-            logger.error("Failed to paste text; text remains on clipboard")
             return False
 
         # Restore the original clipboard content if paste succeeded.
@@ -101,7 +90,6 @@ class TextTyper:
         if original_clipboard is not None and original_clipboard != text:
             self._schedule_clipboard_restore(original_clipboard)
 
-        logger.info("Text pasted successfully, window_restored=%s", window_restored)
         return True
 
     def _schedule_clipboard_restore(self, original: str) -> None:
@@ -111,8 +99,8 @@ class TextTyper:
             try:
                 with self._clipboard_lock:
                     pyperclip.copy(original)
-            except Exception as e:
-                logger.debug("Failed to restore clipboard: %s", e)
+            except Exception:
+                pass
 
         threading.Thread(target=_restore, daemon=True).start()
 
@@ -137,8 +125,7 @@ class TextTyper:
                 time.sleep(0.05)
             user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
             return True
-        except Exception as e:
-            logger.error("Failed to send paste keystrokes: %s", e)
+        except Exception:
             return False
 
     def _use_terminal_paste(self, paste_mode: str, hwnd: int) -> bool:
@@ -147,7 +134,7 @@ class TextTyper:
         if paste_mode == PASTE_MODE_CTRL_V:
             return False
         if paste_mode != PASTE_MODE_AUTO:
-            logger.warning("Unknown paste mode '%s', falling back to auto", paste_mode)
+            pass
         return self._is_terminal_window(hwnd)
 
     def _is_terminal_window(self, hwnd: int) -> bool:
@@ -166,8 +153,7 @@ class TextTyper:
         buffer = ctypes.create_unicode_buffer(256)
         try:
             length = user32.GetClassNameW(hwnd, buffer, len(buffer))
-        except Exception as e:
-            logger.debug("Failed to get window class for hwnd=%s: %s", hwnd, e)
+        except Exception:
             return ""
         if not length:
             return ""
@@ -176,8 +162,7 @@ class TextTyper:
     def _get_window_title(self, hwnd: int) -> str:
         try:
             length = user32.GetWindowTextLengthW(hwnd)
-        except Exception as e:
-            logger.debug("Failed to get window title length for hwnd=%s: %s", hwnd, e)
+        except Exception:
             return ""
         if not length:
             return ""
@@ -185,7 +170,6 @@ class TextTyper:
         buffer = ctypes.create_unicode_buffer(length + 1)
         try:
             user32.GetWindowTextW(hwnd, buffer, len(buffer))
-        except Exception as e:
-            logger.debug("Failed to get window title for hwnd=%s: %s", hwnd, e)
+        except Exception:
             return ""
         return buffer.value

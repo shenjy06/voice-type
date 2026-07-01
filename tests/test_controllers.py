@@ -50,6 +50,17 @@ class TestRecordingController:
         d.ui.stop_recording.assert_called_once()
         d.ui.start_recording.assert_not_called()
 
+    def test_toggle_ignored_when_processing(self):
+        """Toggle must not start a new recording while processing is in progress."""
+        from voicetype.state import RecorderState
+
+        rc, d, _ = _make_controller()
+        d.ui.is_recording.return_value = False
+        d.ui._state = RecorderState.PROCESSING
+        rc.toggle()
+        d.ui.start_recording.assert_not_called()
+        d.ui.stop_recording.assert_not_called()
+
     def test_on_recording_started_captures_hwnd_and_starts_recorder(self):
         rc, d, hwnd_provider = _make_controller()
         result = rc.on_recording_started()
@@ -119,6 +130,7 @@ class TestRecordingController:
     def test_reset_after_processing(self):
         rc, d, _ = _make_controller()
         rc.reset_after_processing()
+        d.bubble.dismiss.assert_called_once()
         d.recorder.cleanup.assert_called_once()
         d.ui.set_done.assert_called_once()
 
@@ -149,3 +161,22 @@ class TestProcessingController:
         # _thread is None — should not raise
         ctl.shutdown()
         assert ctl._thread is None
+
+    def test_is_running_safe_after_thread_deleted(self, qtbot):
+        """is_running() must not crash when the C++ QThread was deleted by deleteLater."""
+        cfg = MagicMock()
+        ctl = ProcessingController(config=cfg, on_done=MagicMock(), on_error=MagicMock())
+
+        # Simulate a thread that has finished and been deleted by Qt — the
+        # Python reference still exists but the C++ object is gone.
+        from PySide6.QtCore import QThread
+
+        thread = QThread()
+        ctl._thread = thread
+        thread.deleteLater()
+        # Process the deleteLater so the C++ object is actually destroyed.
+        qtbot.wait(50)
+
+        # This used to raise RuntimeError: Internal C++ object already deleted.
+        assert ctl.is_running() is False
+        assert ctl._thread is None  # cleared by the safety guard

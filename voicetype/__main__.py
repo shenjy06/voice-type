@@ -24,10 +24,10 @@ warnings.filterwarnings(
     category=UserWarning,
 )
 
-import logging
 import os
 import sys
 
+import ctypes
 import pyperclip
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QTimer
@@ -44,13 +44,6 @@ from voicetype.ui.settings_dialog import SettingsDialog
 from voicetype.ui.system_tray import HotkeyManager, TrayIcon
 from voicetype.window_manager import get_foreground_window
 from voicetype.i18n import init_language, t
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
-logger = logging.getLogger(__name__)
-
 
 class Application:
     """Top-level orchestrator. Delegates stateful work to controllers."""
@@ -85,7 +78,6 @@ class Application:
 
         # Check config on first launch — show settings if no API key is set
         if not self.config.is_configured():
-            logger.info("No API key configured, showing settings dialog")
             self._show_settings()
 
         self._init_hotkey()
@@ -136,6 +128,7 @@ class Application:
             config=self.config,
             on_done=self._on_processing_done,
             on_error=self._on_processing_error,
+            parent=self.app,
         )
 
     def _init_hotkey(self):
@@ -174,10 +167,6 @@ class Application:
     # ---- processing result handlers ---------------------------------------
 
     def _on_processing_done(self, refined_text: str):
-        logger.info(
-            "Processing done, refined text: %s",
-            refined_text[:50] if refined_text else "(empty)",
-        )
         self._recording_controller.reset_after_processing()
 
         if refined_text:
@@ -254,7 +243,6 @@ class Application:
         if self._quitting:
             return
         self._quitting = True
-        logger.info("Quitting application")
         self.hotkey_manager.stop()
         self._audio_level_timer.stop()
         self.audio_recorder.stop()
@@ -301,8 +289,69 @@ class Application:
         sys.exit(self.app.exec())
 
 
+def _ensure_single_instance() -> bool:
+    """Ensure only one VoiceType process is running.
+
+    Uses a Windows named mutex. Returns True if this is the first instance,
+    False if another instance is already running.
+
+    When a second instance is detected, it signals a named event so the first
+    instance can bring its window to the foreground.
+    """
+    mutex_name = "Global\\VoiceType_SingleInstance"
+    kernel32 = ctypes.windll.kernel32
+    # CreateMutex returns the handle on success, or NULL on failure.
+    # If the mutex already exists, GetLastError returns ERROR_ALREADY_EXISTS.
+    ERROR_ALREADY_EXISTS = 183
+    handle = kernel32.CreateMutexW(None, False, mutex_name)
+    if not handle:
+        return True  # allow the app to run anyway
+    last_error = kernel32.GetLastError()
+    if last_error == ERROR_ALREADY_EXISTS:
+        # Signal the named event so the first instance shows its window.
+        event_name = "Global\\VoiceType_ShowWindow"
+        event_handle = kernel32.OpenEventW(0x0002, False, event_name)  # EVENT_MODIFY_STATE
+        if event_handle:
+            kernel32.SetEvent(event_handle)
+            kernel32.CloseHandle(event_handle)
+        return False
+    return True
+
+
+def _start_show_window_watcher(callback) -> None:
+    """Watch for the show-window signal from a second instance.
+
+    Runs a background daemon thread that blocks on a named event. When a
+    second process signals the event, *callback* is invoked on the Qt main
+    thread via QTimer.singleShot.
+    """
+    import threading
+
+    event_name = "Global\\VoiceType_ShowWindow"
+    kernel32 = ctypes.windll.kernel32
+    # Create an event the second instance can signal.
+    event_handle = kernel32.CreateEventW(None, False, False, event_name)
+    if not event_handle:
+        return
+
+    INFINITE = 0xFFFFFFFF
+
+    def _watch():
+        while True:
+            result = kernel32.WaitForSingleObject(event_handle, INFINITE)
+            if result == 0:  # WAIT_OBJECT_0 — event signaled
+                QTimer.singleShot(0, callback)
+            else:
+                break
+
+    threading.Thread(target=_watch, daemon=True).start()
+
+
 def main():
+    if not _ensure_single_instance():
+        sys.exit(0)
     app = Application()
+    _start_show_window_watcher(app._show_window)
     app.run()
 
 

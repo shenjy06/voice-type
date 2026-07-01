@@ -34,11 +34,32 @@ Windows 语音转文字速记工具。录制语音 → 语音识别 → 文本�
 
 ## 安装
 
+建议使用虚拟环境运行本项目，将依赖与全局 Python 环境隔离。
+
+### 使用 venv（推荐）
+
 ```bash
 # 克隆项目
 cd voice-type
 
+# 创建虚拟环境（需要 Python 3.10+）
+python -m venv .venv
+
+# 激活虚拟环境
+# Windows (PowerShell):
+.venv\Scripts\Activate.ps1
+# Windows (命令提示符):
+.venv\Scripts\activate.bat
+# Windows (Git Bash):
+source .venv/Scripts/activate
+
 # 安装依赖
+pip install -r requirements.txt
+```
+
+### 直接安装（不使用 venv）
+
+```bash
 pip install -r requirements.txt
 ```
 
@@ -240,6 +261,7 @@ voice-type/
 ## 运行测试
 
 ```bash
+# 安装测试依赖（在已激活的 venv 中执行）
 pip install -e ".[dev]"
 pytest tests/ -v
 ```

@@ -139,8 +139,8 @@ class TestProcessingWorker:
 
         mock_remove.assert_called_once_with("/tmp/test_audio.wav")
 
-    def test_audio_deletion_failure_logs_warning(self, qtbot, mocker, caplog):
-        """Failed audio deletion logs a warning but continues."""
+    def test_audio_deletion_failure_continues(self, qtbot, mocker):
+        """Failed audio deletion does not interrupt processing."""
         from voicetype.processing import ProcessingWorker
 
         mock_transcriber = mocker.patch("voicetype.processing.Transcriber")
@@ -152,11 +152,12 @@ class TestProcessingWorker:
         cfg = mocker.MagicMock()
         worker = ProcessingWorker(cfg, "/tmp/audio.wav")
 
-        worker.finished.connect(lambda t: None)
+        results = []
+        worker.finished.connect(lambda t: results.append(t))
         worker.run()
 
         # Processing continues despite deletion failure
-        assert "Failed to delete audio" in caplog.text
+        assert results == ["refined"]
 
 
 class TestApplication:
