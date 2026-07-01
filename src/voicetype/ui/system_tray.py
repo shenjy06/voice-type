@@ -188,12 +188,12 @@ class TrayIcon(QObject):
 
 
 class HotkeyManager(QObject):
-    """Global hotkeys using Right Shift as toggle and Right Shift+C as cancel.
+    """Global hotkeys using Right Alt as toggle and Right Alt+C as cancel.
 
-    A quick tap of Right Shift toggles recording start/stop. Holding Right
-    Shift together with any other key (e.g. Right Shift+C) is treated as a
-    combo and does NOT toggle — Right Shift+C cancels an in-progress recording
-    instead. Left Shift is ignored entirely so it stays free for normal typing.
+    A quick tap of Right Alt toggles recording start/stop. Holding Right
+    Alt together with any other key (e.g. Right Alt+C) is treated as a
+    combo and does NOT toggle — Right Alt+C cancels an in-progress recording
+    instead. Left Alt is ignored entirely so it stays free for normal typing.
     """
 
     toggle_recording = Signal()
@@ -231,16 +231,16 @@ class HotkeyManager(QObject):
 
     def _on_press(self, key):
         """Handle key press event."""
-        is_shift_r = key == keyboard.Key.shift_r
-        is_shift = key == keyboard.Key.shift
-        if is_shift_r or is_shift:
-            # Only Right Shift (shift_r) starts a toggle. A bare generic
-            # Key.shift press is treated as left-shift and ignored so
-            # left-shift keeps working as a normal modifier.
-            if is_shift_r and not self._toggle_key_pressed:
+        is_alt_r = key == keyboard.Key.alt_r
+        is_alt = key == keyboard.Key.alt
+        if is_alt_r or is_alt:
+            # Only Right Alt (alt_r) starts a toggle. A bare generic
+            # Key.alt press is treated as left-alt and ignored so
+            # left-alt keeps working as a normal modifier.
+            if is_alt_r and not self._toggle_key_pressed:
                 self._toggle_key_pressed = True
                 self._combo_used = False
-                self._last_toggle_key = "shift_r"
+                self._last_toggle_key = "alt_r"
             return
 
         try:
@@ -260,17 +260,17 @@ class HotkeyManager(QObject):
             self._combo_used = True
 
     def _on_release(self, key):
-        """Handle key release event and detect Right Shift tap vs combo."""
-        is_shift_r = key == keyboard.Key.shift_r
-        is_shift = key == keyboard.Key.shift
+        """Handle key release event and detect Right Alt tap vs combo."""
+        is_alt_r = key == keyboard.Key.alt_r
+        is_alt = key == keyboard.Key.alt
 
-        # On Windows pynput often delivers the Right-Shift release as
-        # generic Key.shift rather than Key.shift_r. Only accept the
-        # generic shift on release when the matching press was shift_r
-        # (otherwise true left-shift presses would also toggle).
+        # On Windows pynput often delivers the Right-Alt release as
+        # generic Key.alt rather than Key.alt_r. Only accept the
+        # generic alt on release when the matching press was alt_r
+        # (otherwise true left-alt presses would also toggle).
         matching_toggle = (
-            (is_shift_r and self._last_toggle_key == "shift_r")
-            or (is_shift and self._last_toggle_key == "shift_r")
+            (is_alt_r and self._last_toggle_key == "alt_r")
+            or (is_alt and self._last_toggle_key == "alt_r")
         )
 
         if matching_toggle:

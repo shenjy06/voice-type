@@ -36,7 +36,7 @@ class TestDefaultConfigs:
     def test_hotkey_config_defaults(self):
         cfg = HotkeyConfig()
         assert cfg.toggle_enabled is True
-        assert cfg.toggle_hotkey == "right_shift"
+        assert cfg.toggle_hotkey == "right_alt"
 
     def test_output_config_defaults(self):
         cfg = OutputConfig()
