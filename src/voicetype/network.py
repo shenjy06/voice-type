@@ -6,9 +6,13 @@ only fetches response headers — `urlopen` returns once headers are received
 and the body is never read — keeping the check lightweight.
 """
 
+import logging
+import time
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+logger = logging.getLogger(__name__)
 
 # Probe endpoints ordered by preference. The checker issues all of them in
 # parallel and returns True on the first success. This provides resilience
@@ -23,6 +27,10 @@ PROBE_URLS = [
 # the overall worst-case wait when fully offline (previously 3 × 3s = 9s
 # when probed sequentially).
 DEFAULT_TIMEOUT_MS = 2000
+
+# Shared executor — threads are bounded to len(PROBE_URLS) and reused across
+# saves instead of being created + destroyed on every call.
+_executor = ThreadPoolExecutor(max_workers=len(PROBE_URLS))
 
 
 def _probe(url: str, timeout: float) -> bool:
@@ -54,12 +62,21 @@ def check_network_available(timeout_ms: int = DEFAULT_TIMEOUT_MS) -> bool:
     at most ``timeout_ms`` since the probes are concurrent.
     """
     timeout = timeout_ms / 1000.0
-    executor = ThreadPoolExecutor(max_workers=len(PROBE_URLS))
-    futures = [executor.submit(_probe, url, timeout) for url in PROBE_URLS]
+    start = time.monotonic()
+    futures = [_executor.submit(_probe, url, timeout) for url in PROBE_URLS]
     try:
         for future in as_completed(futures):
             if future.result():
+                logger.debug(
+                    "Network check passed in %.0f ms",
+                    (time.monotonic() - start) * 1000,
+                )
                 return True
+        logger.warning(
+            "Network check failed — all %d probes timed out (%.0f ms)",
+            len(PROBE_URLS),
+            (time.monotonic() - start) * 1000,
+        )
         return False
     finally:
         # Best-effort: cancel any probe that hasn't started yet. Note that
@@ -68,4 +85,3 @@ def check_network_available(timeout_ms: int = DEFAULT_TIMEOUT_MS) -> bool:
         # those threads are daemon-style and cleaned up at process exit.
         for future in futures:
             future.cancel()
-        executor.shutdown(wait=False, cancel_futures=True)

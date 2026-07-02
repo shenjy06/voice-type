@@ -1,5 +1,6 @@
 """Background processing worker — runs save + ASR + LLM polishing off the UI thread."""
 
+import logging
 import os
 
 from PySide6.QtCore import QObject, Signal
@@ -8,6 +9,8 @@ from voicetype.asr import Transcriber
 from voicetype.config import AppConfig
 from voicetype.glossary import apply_glossary
 from voicetype.polisher import TextPolisher
+
+logger = logging.getLogger(__name__)
 
 
 # --- Cached API clients --------------------------------------------------
@@ -106,6 +109,8 @@ class ProcessingWorker(QObject):
             # Encode the captured frames to a temp OGG file on this thread so
             # the (potentially slow) Vorbis encoding never blocks the UI.
             audio_path = str(self.recorder.save())
+            self.recorder = None  # release reference; buffer freed in save()
+            logger.debug("Processing pipeline started: %s", os.path.basename(audio_path))
             transcriber = get_transcriber(self.config)
             transcript = transcriber.transcribe(audio_path)
             # Delete audio file immediately after STT to limit sensitive data on disk.
@@ -114,10 +119,12 @@ class ProcessingWorker(QObject):
             except OSError:
                 pass
             if not transcript:
+                logger.info("Transcription returned empty — pipeline finished")
                 self.finished.emit("")
                 return
             transcript = apply_glossary(transcript, self.config.glossary)
             if not self.config.polish.enabled:
+                logger.info("Polishing disabled — emitting transcript directly")
                 self.finished.emit(transcript)
                 return
             polisher = get_polisher(self.config)
@@ -126,6 +133,8 @@ class ProcessingWorker(QObject):
                 context_before=self.context_before,
                 context_after=self.context_after,
             )
+            logger.info("Processing pipeline finished successfully")
             self.finished.emit(refined)
         except Exception as e:
+            logger.error("Processing pipeline failed: %s", e, exc_info=True)
             self.error.emit(str(e))

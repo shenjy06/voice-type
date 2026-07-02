@@ -5,16 +5,22 @@ the supplied callbacks, replacing the inline orchestration that previously
 lived in src/__main__.py.
 """
 
+import logging
+
 from PySide6.QtCore import QThread, QTimer, QObject, Signal
 
 from voicetype.config import AppConfig
 from voicetype.processing import ProcessingWorker
 
+logger = logging.getLogger(__name__)
+
 # Hard upper bound on a processing cycle. The ASR (30 s) and polish (60 s)
-# timeouts should fire first, but if the worker thread dies without emitting a
-# signal (e.g. a native crash) this guard ensures the UI is not stuck in
+# timeouts with retries (up to 3 attempts each) can total ~300 s in the worst
+# case, so the watchdog must exceed that to avoid killing a legitimately
+# retrying worker. If the worker thread dies without emitting a signal
+# (e.g. a native crash) this guard ensures the UI is not stuck in
 # "润色中…" forever.
-_PROCESSING_TIMEOUT_MS = 120_000
+_PROCESSING_TIMEOUT_MS = 300_000
 
 
 class ProcessingController(QObject):
@@ -112,6 +118,7 @@ class ProcessingController(QObject):
         self._worker = worker
         self._timeout_timer = timer
         thread.start()
+        logger.debug("Processing thread started")
 
     def _on_worker_done(self, refined_text: str) -> None:
         if self._completed:
@@ -143,6 +150,7 @@ class ProcessingController(QObject):
         if self._completed:
             return
         self._completed = True
+        logger.error("Processing timed out after %d ms — cleanup initiated", _PROCESSING_TIMEOUT_MS)
         self._cleanup_thread()
         self._on_error("Processing timed out")
 
