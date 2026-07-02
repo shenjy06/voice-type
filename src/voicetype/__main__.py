@@ -138,6 +138,10 @@ class Application:
         # Settings dialog (lazy)
         self._settings_dialog = None
         self._history_dialog = None
+        # Foreground window captured BEFORE the history dialog opens, so a
+        # paste from history targets the user's real edit window instead of
+        # the (modal) history dialog itself.
+        self._history_target_hwnd = 0
 
         # Status bubble (persistent Bubble during recording/processing)
         self._status_bubble = StatusBubble()
@@ -195,7 +199,7 @@ class Application:
             self.audio_recorder, context_before, context_after
         )
 
-    def _capture_cursor_context(self) -> tuple[str, str]:
+    def _capture_cursor_context(self, hwnd: int = 0) -> tuple[str, str]:
         """Capture text around the cursor for context-aware polishing.
 
         Returns empty strings when polishing is disabled (so the polisher
@@ -205,7 +209,7 @@ class Application:
         if not self.config.polish.enabled:
             return ("", "")
         try:
-            return get_cursor_context()
+            return get_cursor_context(hwnd)
         except Exception:
             return ("", "")
 
@@ -263,6 +267,10 @@ class Application:
         self._settings_dialog.exec()
 
     def _show_history(self):
+        # Capture the target window BEFORE the (modal) dialog takes the
+        # foreground, so a paste from history restores focus to where the
+        # user actually wants the text — not back to the history dialog.
+        self._history_target_hwnd = get_foreground_window()
         if self._history_dialog is None:
             self._history_dialog = HistoryDialog(self.history_store, self.window)
             self._history_dialog.paste_requested.connect(self._paste_history_text)
@@ -271,8 +279,14 @@ class Application:
         self._history_dialog.exec()
 
     def _paste_history_text(self, text: str):
+        # Close the history dialog first so set_foreground_window can bring
+        # the real target back to the front; otherwise the modal dialog would
+        # be the foreground window and the paste would land inside it.
+        if self._history_dialog is not None:
+            self._history_dialog.accept()
+        target_hwnd = self._history_target_hwnd or get_foreground_window()
         if self.config.output.auto_paste:
-            self._paste_async(text, get_foreground_window())
+            self._paste_async(text, target_hwnd)
         else:
             # Background thread — see _on_processing_done for rationale.
             threading.Thread(

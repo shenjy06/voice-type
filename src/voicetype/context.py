@@ -7,6 +7,8 @@ import uuid
 
 import pyperclip
 
+from voicetype.window_detect import is_terminal_window
+
 logger = logging.getLogger(__name__)
 
 user32 = ctypes.windll.user32
@@ -109,14 +111,25 @@ def _deselect_left():
     time.sleep(0.02)
 
 
-def get_cursor_context() -> tuple[str, str]:
+def get_cursor_context(hwnd: int = 0) -> tuple[str, str]:
     """
     Capture text before and after the cursor on the current line.
 
     Returns (before_text, after_text). Either may be empty.
     Uses Shift+Home/End + Ctrl+C to read text, then deselects and
     restores the original clipboard.
+
+    ``hwnd`` is the foreground window the user was typing into. If it is a
+    terminal/console/agent window, capture is skipped entirely: the
+    Shift+Home/End selection model does not apply there, and Ctrl+C is SIGINT
+    (not "copy"), so injecting it would interrupt CLI agents like kimi-code.
     """
+    if is_terminal_window(hwnd):
+        logger.info(
+            "Skipping cursor context capture in terminal window (hwnd=%s)", hwnd
+        )
+        return "", ""
+
     saved_clipboard = ""
     try:
         saved_clipboard = pyperclip.paste() or ""

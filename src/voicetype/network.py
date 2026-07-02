@@ -79,7 +79,9 @@ def check_network_available(timeout_ms: int = DEFAULT_TIMEOUT_MS) -> bool:
         )
         return False
     finally:
-        # Cancel any probes still running (e.g. the slow/blocked ones after a
-        # fast success) and shut down WITHOUT waiting for them.
+        # Best-effort: cancel any probe that hasn't started yet. Note that
+        # Future.cancel() only succeeds for PENDING futures — a probe already
+        # executing its blocking urlopen() will run to its timeout regardless;
+        # those threads are daemon-style and cleaned up at process exit.
         for future in futures:
             future.cancel()

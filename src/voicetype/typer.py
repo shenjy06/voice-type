@@ -13,31 +13,13 @@ from voicetype.constants import (
     PASTE_MODE_CTRL_SHIFT_V,
     PASTE_MODE_CLIPBOARD,
 )
+from voicetype.window_detect import is_terminal_window
 from voicetype.window_manager import set_foreground_window
 
 logger = logging.getLogger(__name__)
 
 KEYEVENTF_KEYUP = 0x0002
 user32 = ctypes.windll.user32
-
-TERMINAL_WINDOW_CLASSES = {
-    "CASCADIA_HOSTING_WINDOW_CLASS",  # Windows Terminal
-    "ConsoleWindowClass",  # conhost.exe, cmd.exe, PowerShell console host
-    "mintty",
-}
-TERMINAL_TITLE_MARKERS = (
-    "claude",
-    "codex",
-    "command prompt",
-    "powershell",
-    "windows powershell",
-)
-
-# Re-exported for backward compatibility with existing imports.
-PASTE_MODE_AUTO = PASTE_MODE_AUTO
-PASTE_MODE_CTRL_V = PASTE_MODE_CTRL_V
-PASTE_MODE_CTRL_SHIFT_V = PASTE_MODE_CTRL_SHIFT_V
-PASTE_MODE_CLIPBOARD = PASTE_MODE_CLIPBOARD
 
 
 class TextTyper:
@@ -178,38 +160,11 @@ class TextTyper:
         return self._is_terminal_window(hwnd)
 
     def _is_terminal_window(self, hwnd: int) -> bool:
-        """Detect terminal-like targets that prefer Ctrl+Shift+V."""
-        if not hwnd:
-            return False
+        """Detect terminal-like targets that prefer Ctrl+Shift+V.
 
-        class_name = self._get_window_class_name(hwnd)
-        if class_name in TERMINAL_WINDOW_CLASSES:
-            return True
-
-        title = self._get_window_title(hwnd).lower()
-        return any(marker in title for marker in TERMINAL_TITLE_MARKERS)
-
-    def _get_window_class_name(self, hwnd: int) -> str:
-        buffer = ctypes.create_unicode_buffer(256)
-        try:
-            length = user32.GetClassNameW(hwnd, buffer, len(buffer))
-        except Exception:
-            return ""
-        if not length:
-            return ""
-        return buffer.value
-
-    def _get_window_title(self, hwnd: int) -> str:
-        try:
-            length = user32.GetWindowTextLengthW(hwnd)
-        except Exception:
-            return ""
-        if not length:
-            return ""
-
-        buffer = ctypes.create_unicode_buffer(length + 1)
-        try:
-            user32.GetWindowTextW(hwnd, buffer, len(buffer))
-        except Exception:
-            return ""
-        return buffer.value
+        Delegates to :func:`voicetype.window_detect.is_terminal_window` so the
+        same detection is shared with cursor-context capture (which must SKIP
+        terminals, where Ctrl+C is SIGINT). Kept as an instance method so
+        callers/tests can patch it on the typer instance.
+        """
+        return is_terminal_window(hwnd)

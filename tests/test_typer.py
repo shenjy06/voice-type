@@ -323,22 +323,22 @@ class TestTextTyperTerminalDetection:
     def test_detects_windows_terminal_class(self, mocker):
         cfg = make_config()
         typer = TextTyper(cfg)
-        mocker.patch.object(typer, "_get_window_class_name", return_value="CASCADIA_HOSTING_WINDOW_CLASS")
+        mocker.patch("voicetype.window_detect.get_window_class_name", return_value="CASCADIA_HOSTING_WINDOW_CLASS")
 
         assert typer._is_terminal_window(123) is True
 
     def test_detects_codex_title(self, mocker):
         cfg = make_config()
         typer = TextTyper(cfg)
-        mocker.patch.object(typer, "_get_window_class_name", return_value="Chrome_WidgetWin_1")
-        mocker.patch.object(typer, "_get_window_title", return_value="Codex - Visual Studio Code")
+        mocker.patch("voicetype.window_detect.get_window_class_name", return_value="Chrome_WidgetWin_1")
+        mocker.patch("voicetype.window_detect.get_window_title", return_value="Codex - Visual Studio Code")
 
         assert typer._is_terminal_window(123) is True
 
     def test_non_terminal_window_returns_false(self, mocker):
         cfg = make_config()
         typer = TextTyper(cfg)
-        mocker.patch.object(typer, "_get_window_class_name", return_value="TXGuiFoundation")
-        mocker.patch.object(typer, "_get_window_title", return_value="QQ")
+        mocker.patch("voicetype.window_detect.get_window_class_name", return_value="TXGuiFoundation")
+        mocker.patch("voicetype.window_detect.get_window_title", return_value="QQ")
 
         assert typer._is_terminal_window(123) is False

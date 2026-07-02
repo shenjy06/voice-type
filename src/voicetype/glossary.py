@@ -37,9 +37,11 @@ def _build_glossary_cache(entries: list[GlossaryEntry]) -> tuple[re.Pattern, dic
     pattern = re.compile("|".join(re.escape(source) for source, _ in unique))
     replacement_map = {source: replacement for source, replacement in unique}
 
-    # Bound cache size — evict if it grows too large (unlikely in practice).
-    if len(_glossary_cache) > 16:
-        _glossary_cache.clear()
+    # Bound cache size — evict the single oldest entry rather than nuking the
+    # whole cache, so a 17th distinct glossary doesn't force a full rebuild of
+    # the other 15. (Unlikely in practice — glossary sets rarely vary this much.)
+    if len(_glossary_cache) >= 16:
+        _glossary_cache.pop(next(iter(_glossary_cache)))
 
     result = (pattern, replacement_map)
     _glossary_cache[key] = result

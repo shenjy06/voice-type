@@ -237,7 +237,8 @@ class AudioRecorder:
             logger.error("Failed to save audio: %s", e, exc_info=True)
             raise ValueError(f"Failed to save audio: {e}") from e
 
-        self._temp_file = temp_file
+        with self._lock:
+            self._temp_file = temp_file
         logger.info(
             "Audio saved: %s (%.1f s, %d frames)",
             temp_file.name,
