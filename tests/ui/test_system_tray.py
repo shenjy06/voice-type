@@ -6,6 +6,7 @@ import weakref
 import pytest
 from PySide6.QtWidgets import QSystemTrayIcon
 from pynput import keyboard
+from voicetype.hotkey_parser import HotkeyBinding
 from voicetype.ui.system_tray import TrayIcon, HotkeyManager
 
 
@@ -337,3 +338,65 @@ class TestHotkeyManager:
         mgr._on_press(keyboard.Key.alt_gr)
         with qtbot.waitSignal(mgr.toggle_recording):
             mgr._on_release(keyboard.Key.alt)
+
+    def test_default_binding_is_right_alt(self, qtbot):
+        """HotkeyManager defaults to Right Alt binding."""
+        mgr = HotkeyManager()
+        assert mgr.binding.kind == "right_alt"
+
+    def test_function_key_press_emits_toggle(self, qtbot):
+        """Pressing a bound function key emits toggle_recording."""
+        mgr = HotkeyManager(binding=HotkeyBinding.from_string("f9"))
+        with qtbot.waitSignal(mgr.toggle_recording):
+            mgr._on_press(keyboard.Key.f9)
+
+    def test_function_key_release_does_not_emit(self, qtbot):
+        """Releasing a bound function key does not emit toggle again."""
+        mgr = HotkeyManager(binding=HotkeyBinding.from_string("f9"))
+        emitted = []
+        mgr.toggle_recording.connect(lambda: emitted.append(True))
+        mgr._on_press(keyboard.Key.f9)
+        mgr._on_release(keyboard.Key.f9)
+        assert len(emitted) == 1
+
+    def test_unbound_function_key_does_not_emit(self, qtbot):
+        """A function key other than the bound one does not toggle."""
+        mgr = HotkeyManager(binding=HotkeyBinding.from_string("f9"))
+        emitted = []
+        mgr.toggle_recording.connect(lambda: emitted.append(True))
+        mgr._on_press(keyboard.Key.f8)
+        mgr._on_release(keyboard.Key.f8)
+        assert emitted == []
+
+    def test_set_binding_while_running_raises(self, qtbot):
+        """Changing binding while listener is running is not allowed."""
+        mgr = HotkeyManager()
+        mgr.start()
+        try:
+            with pytest.raises(RuntimeError):
+                mgr.set_binding(HotkeyBinding.from_string("f9"))
+        finally:
+            mgr.stop()
+
+    def test_character_key_press_emits_toggle(self, qtbot):
+        """Pressing a bound character key emits toggle_recording."""
+        from pynput.keyboard import KeyCode
+        mgr = HotkeyManager(binding=HotkeyBinding.from_string("a"))
+        with qtbot.waitSignal(mgr.toggle_recording):
+            mgr._on_press(KeyCode(char="a"))
+
+    def test_key_repeat_is_suppressed_until_release(self, qtbot):
+        """Holding a single-key hotkey only toggles once."""
+        from pynput.keyboard import KeyCode
+        mgr = HotkeyManager(binding=HotkeyBinding.from_string("a"))
+        emitted = []
+        mgr.toggle_recording.connect(lambda: emitted.append(True))
+
+        mgr._on_press(KeyCode(char="a"))
+        mgr._on_press(KeyCode(char="a"))
+        mgr._on_press(KeyCode(char="a"))
+        assert len(emitted) == 1
+
+        mgr._on_release(KeyCode(char="a"))
+        mgr._on_press(KeyCode(char="a"))
+        assert len(emitted) == 2

@@ -35,6 +35,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 from voicetype.audio import AudioRecorder, cleanup_stale_audio
 from voicetype.config import AppConfig
 from voicetype.context import get_cursor_context
+from voicetype.hotkey_parser import HotkeyBinding
 from voicetype.history import HistoryStore
 from voicetype.processing_controller import ProcessingController
 from voicetype.recording_controller import RecordingController
@@ -155,7 +156,8 @@ class Application:
         )
 
     def _init_hotkey(self):
-        self.hotkey_manager = HotkeyManager(self.window)
+        binding = HotkeyBinding.from_string(self.config.hotkey.toggle_hotkey)
+        self.hotkey_manager = HotkeyManager(self.window, binding=binding)
         self.hotkey_manager.toggle_recording.connect(self._toggle_recording)
         self.hotkey_manager.cancel_recording.connect(self._cancel_recording)
         self.window.set_hotkey_manager(self.hotkey_manager)
@@ -277,6 +279,8 @@ class Application:
         """Reload config and update hotkeys."""
         init_language(self.config.language)
         self.hotkey_manager.stop()
+        binding = HotkeyBinding.from_string(self.config.hotkey.toggle_hotkey)
+        self.hotkey_manager.set_binding(binding)
         if self.config.hotkey.toggle_enabled:
             self.hotkey_manager.start()
         self.audio_recorder.sample_rate = self.config.recording.sample_rate

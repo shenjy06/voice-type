@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 from pynput import keyboard
 
 from voicetype.constants import PASTE_MODES, ASR_LANGUAGES, POLISH_STYLES
+from voicetype.hotkey_parser import HotkeyBinding
 from voicetype.i18n import t
 from voicetype.ui.icon_utils import make_circle_icon
 
@@ -188,12 +189,16 @@ class TrayIcon(QObject):
 
 
 class HotkeyManager(QObject):
-    """Global hotkeys using Right Alt as toggle and Right Alt+C as cancel.
+    """Global hotkeys for toggling and cancelling recording.
 
-    A quick tap of Right Alt toggles recording start/stop. Holding Right
-    Alt together with any other key (e.g. Right Alt+C) is treated as a
-    combo and does NOT toggle — Right Alt+C cancels an in-progress recording
-    instead. Left Alt is ignored entirely so it stays free for normal typing.
+    The toggle shortcut is configurable via :class:`HotkeyBinding`:
+
+    * ``right_alt`` — a quick tap of Right Alt toggles recording start/stop.
+      Holding Right Alt with another key (e.g. Right Alt+C) is treated as a
+      combo and does NOT toggle. Right Alt+C cancels an in-progress recording.
+      Left Alt is ignored entirely so it stays free for normal typing.
+    * ``key`` (e.g. F9) — pressing the bound key toggles recording. Releasing
+      it does nothing, so holding the key does not repeat.
 
     Some keyboards/Windows layouts report the physical Right-Alt key as
     ``Key.alt_gr`` rather than ``Key.alt_r``. Both are accepted as the
@@ -203,15 +208,27 @@ class HotkeyManager(QObject):
     toggle_recording = Signal()
     cancel_recording = Signal()
 
-    _TOGGLE_KEYS = ("alt_r", "alt_gr")
+    _RIGHT_ALT_TOGGLE_KEYS = ("alt_r", "alt_gr")
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, binding: HotkeyBinding | None = None):
         super().__init__(parent)
+        self._binding = binding or HotkeyBinding.right_alt()
         self._listener = None
         self._toggle_key_pressed = False
         self._combo_used = False
         self._running = False
         self._last_toggle_key = None
+        self._single_key_pressed = False
+
+    @property
+    def binding(self) -> HotkeyBinding:
+        return self._binding
+
+    def set_binding(self, binding: HotkeyBinding):
+        """Change the binding while the manager is stopped."""
+        if self._running:
+            raise RuntimeError("Cannot change binding while listener is running")
+        self._binding = binding
 
     def start(self):
         """Start monitoring global hotkeys."""
@@ -234,9 +251,29 @@ class HotkeyManager(QObject):
         self._toggle_key_pressed = False
         self._combo_used = False
         self._last_toggle_key = None
+        self._single_key_pressed = False
 
     def _on_press(self, key):
         """Handle key press event."""
+        if self._binding.kind == "key":
+            if key == self._binding.key and not self._single_key_pressed:
+                self._single_key_pressed = True
+                self.toggle_recording.emit()
+            return
+
+        self._on_press_right_alt(key)
+
+    def _on_release(self, key):
+        """Handle key release event."""
+        if self._binding.kind == "key":
+            if key == self._binding.key:
+                self._single_key_pressed = False
+            return
+
+        self._on_release_right_alt(key)
+
+    def _on_press_right_alt(self, key):
+        """Handle Right-Alt-style press event."""
         is_alt_r = key == keyboard.Key.alt_r
         is_alt_gr = key == keyboard.Key.alt_gr
         is_alt = key == keyboard.Key.alt
@@ -269,8 +306,8 @@ class HotkeyManager(QObject):
         if self._toggle_key_pressed:
             self._combo_used = True
 
-    def _on_release(self, key):
-        """Handle key release event and detect Right Alt tap vs combo."""
+    def _on_release_right_alt(self, key):
+        """Handle Right-Alt-style release event and detect tap vs combo."""
         is_alt_r = key == keyboard.Key.alt_r
         is_alt_gr = key == keyboard.Key.alt_gr
         is_alt = key == keyboard.Key.alt
@@ -281,7 +318,7 @@ class HotkeyManager(QObject):
         # (otherwise true left-alt presses would also toggle).
         matching_toggle = (
             (is_alt_r or is_alt_gr or is_alt)
-            and self._last_toggle_key in self._TOGGLE_KEYS
+            and self._last_toggle_key in self._RIGHT_ALT_TOGGLE_KEYS
         )
 
         if matching_toggle:

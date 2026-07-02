@@ -14,6 +14,7 @@ from voicetype.audio import MicrophoneMonitor, get_default_input_device_name
 from voicetype.config import AppConfig, DEFAULT_BASE_URL, GlossaryEntry
 from voicetype.constants import PASTE_MODES, ASR_LANGUAGES
 from voicetype.network import check_network_available
+from voicetype.ui.hotkey_recorder import HotkeyRecorder
 from voicetype.ui.main_window import Toast
 from voicetype.ui.icon_utils import make_circle_icon
 from voicetype.i18n import t
@@ -273,6 +274,12 @@ class SettingsDialog(QDialog):
         self.hotkey_toggle_check.setChecked(True)
         hotkey_layout.addWidget(self.hotkey_toggle_check)
 
+        hotkey_form = QFormLayout()
+        self.hotkey_recorder = HotkeyRecorder()
+        self.hotkey_recorder.hotkey_captured.connect(self._on_hotkey_captured)
+        hotkey_form.addRow(t("settings.hotkey_toggle_key"), self.hotkey_recorder)
+        hotkey_layout.addLayout(hotkey_form)
+
         self._hint_label = QLabel(t("settings.hotkey_hint"))
         self._hint_label.setWordWrap(True)
         self._hint_label.setStyleSheet("color: #9ca3af; font-size: 12px;")
@@ -347,6 +354,7 @@ class SettingsDialog(QDialog):
 
         # Hotkeys
         self.hotkey_toggle_check.setChecked(self.config.hotkey.toggle_enabled)
+        self.hotkey_recorder.set_hotkey(self.config.hotkey.toggle_hotkey)
         self._update_microphone_device_label()
 
     def _snapshot_api_state(self) -> dict:
@@ -435,6 +443,7 @@ class SettingsDialog(QDialog):
 
         # Hotkeys
         self.config.hotkey.toggle_enabled = self.hotkey_toggle_check.isChecked()
+        self.config.hotkey.toggle_hotkey = self.hotkey_recorder.hotkey()
 
         self.config.save()
         self.settings_saved.emit()
@@ -465,6 +474,11 @@ class SettingsDialog(QDialog):
             if source and replacement:
                 entries.append(GlossaryEntry(source=source, replacement=replacement))
         return entries
+
+    def _on_hotkey_captured(self, hotkey: str):
+        """Update the recorder display when a key is captured."""
+        self.hotkey_recorder.set_hotkey(hotkey)
+        self.hotkey_recorder.stop_recording()
 
     def _update_microphone_device_label(self):
         # sd.query_devices(kind="input") enumerates PortAudio devices, which
@@ -520,12 +534,15 @@ class SettingsDialog(QDialog):
 
     def closeEvent(self, event):
         self._stop_microphone_monitor()
+        self.hotkey_recorder.stop_recording()
         super().closeEvent(event)
 
     def reject(self):
         self._stop_microphone_monitor()
+        self.hotkey_recorder.stop_recording()
         super().reject()
 
     def accept(self):
         self._stop_microphone_monitor()
+        self.hotkey_recorder.stop_recording()
         super().accept()

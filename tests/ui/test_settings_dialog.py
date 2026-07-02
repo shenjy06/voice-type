@@ -117,6 +117,26 @@ class TestSettingsDialogHotkeyToggle:
         dlg._save_and_close()
         assert cfg.hotkey.toggle_enabled is False
 
+    def test_hotkey_recorder_exists(self, qtbot):
+        dlg = SettingsDialog(AppConfig())
+        qtbot.addWidget(dlg)
+        assert dlg.hotkey_recorder is not None
+
+    def test_hotkey_loads_from_config(self, qtbot):
+        cfg = AppConfig(hotkey=HotkeyConfig(toggle_hotkey="f9"))
+        dlg = SettingsDialog(cfg)
+        qtbot.addWidget(dlg)
+        assert dlg.hotkey_recorder.hotkey() == "f9"
+
+    def test_hotkey_saves_to_config(self, qtbot, mocker):
+        mocker.patch("voicetype.ui.settings_dialog.check_network_available", return_value=True)
+        cfg = AppConfig(asr=AsrConfig(api_key="sk-test"))
+        dlg = SettingsDialog(cfg)
+        qtbot.addWidget(dlg)
+        dlg.hotkey_recorder.set_hotkey("f5")
+        dlg._save_and_close()
+        assert cfg.hotkey.toggle_hotkey == "f5"
+
 
 class TestSettingsDialogMicrophoneTest:
     def test_start_microphone_monitor(self, qtbot, mocker):
