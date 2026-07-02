@@ -24,6 +24,8 @@ warnings.filterwarnings(
     category=UserWarning,
 )
 
+import logging
+import os
 import sys
 import threading
 
@@ -32,6 +34,7 @@ import pyperclip
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QObject, QTimer, Signal
 
+from voicetype._logging import setup_logging
 from voicetype.audio import AudioRecorder, cleanup_stale_audio
 from voicetype.config import AppConfig
 from voicetype.context import get_cursor_context
@@ -46,6 +49,8 @@ from voicetype.ui.settings_dialog import SettingsDialog
 from voicetype.ui.system_tray import HotkeyManager, TrayIcon
 from voicetype.window_manager import get_foreground_window
 from voicetype.i18n import init_language, t
+
+logger = logging.getLogger(__name__)
 
 
 class _PasteBridge(QObject):
@@ -80,6 +85,7 @@ class Application:
         self.typer = TextTyper(self.config)
         self.history_store = HistoryStore()
         self._quitting = False
+        logger.info("Application initialized (configured=%s)", self.config.is_configured())
 
         # Audio-level sync timer — owned at Application level so it can be
         # stopped at quit even if the controller has been torn down.
@@ -177,12 +183,18 @@ class Application:
         self._recording_controller.cancel()
 
     def _on_recording_started(self):
+        logger.debug("Recording started event received")
         self._recording_controller.on_recording_started()
 
     def _on_recording_stopped(self):
         if not self._recording_controller.stop_recording_event():
             return  # cancelled; UI already reset to idle
         context_before, context_after = self._recording_controller.cursor_context
+        logger.debug(
+            "Recording stopped — context: before=%d chars, after=%d chars",
+            len(context_before),
+            len(context_after),
+        )
         self._processing_controller.start(
             self.audio_recorder, context_before, context_after
         )
@@ -207,10 +219,12 @@ class Application:
         self._recording_controller.reset_after_processing()
 
         if refined_text:
+            logger.info("Processing done: %d chars", len(refined_text))
             self.history_store.add(refined_text)
             if self.config.output.auto_paste:
                 self._paste_async(refined_text, self._recording_controller.saved_hwnd)
             else:
+                logger.debug("Auto-paste disabled — copying to clipboard only")
                 # Copy on a background thread: clipboard contention (another
                 # app holding the clipboard open) can make pyperclip.copy block
                 # for hundreds of ms, which would freeze the UI thread.
@@ -240,6 +254,7 @@ class Application:
         self._show_toast(t("msg.paste_failed_copied"))
 
     def _on_processing_error(self, error_msg: str):
+        logger.error("Processing error: %s", error_msg)
         self._recording_controller.cancel_during_processing(error_msg)
         self.tray.show_message(t("app.name"), t("msg.error_format").format(msg=error_msg))
 
@@ -291,6 +306,7 @@ class Application:
 
     def _on_settings_saved(self):
         """Reload config and update hotkeys."""
+        logger.info("Settings saved — reloading config and caches")
         init_language(self.config.language)
         self.hotkey_manager.stop()
         binding = HotkeyBinding.from_string(self.config.hotkey.toggle_hotkey)
@@ -307,6 +323,9 @@ class Application:
         # clients so the next cycle rebuilds them with fresh settings.
         from voicetype.processing import invalidate_clients
         invalidate_clients()
+        # Glossary may have changed — drop cached compiled regex.
+        from voicetype.glossary import invalidate_glossary_cache
+        invalidate_glossary_cache()
         self._settings_dialog = None
         self._show_toast(t("msg.settings_saved"))
 
@@ -321,6 +340,7 @@ class Application:
         if self._quitting:
             return
         self._quitting = True
+        logger.info("Application quitting")
         self.hotkey_manager.stop()
         self._audio_level_timer.stop()
         self._flush_config_save()
@@ -339,7 +359,7 @@ class Application:
 
     def _sync_audio_level(self):
         """Copy recorder level into the UI on the Qt thread."""
-        self.window.set_audio_level(self.audio_recorder.input_level)
+        self.window.refresh_recording_indicators(self.audio_recorder.input_level)
 
     # ---- quick settings ----------------------------------------------------
 
@@ -462,7 +482,10 @@ def _start_show_window_watcher(callback) -> None:
 
 
 def main():
+    setup_logging()
+    logger.info("Voice Type starting (pid=%s)", os.getpid())
     if not _ensure_single_instance():
+        logger.info("Another instance is already running — exiting")
         sys.exit(0)
     app = Application()
     _start_show_window_watcher(app._show_window)

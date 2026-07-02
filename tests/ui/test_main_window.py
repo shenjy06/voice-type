@@ -75,7 +75,6 @@ class TestFloatingRecordingWindow:
             win.start_recording()
         assert win.is_recording() is True
         assert win._state == RecorderState.RECORDING
-        assert win._level_timer.isActive()
         assert win.duration_label.text() == "00:00"
 
     def test_start_recording_when_already_recording_noop(self, qtbot):
@@ -96,7 +95,6 @@ class TestFloatingRecordingWindow:
             win.stop_recording()
         assert win.is_recording() is False
         assert win._state == RecorderState.IDLE
-        assert not win._level_timer.isActive()
         assert win.duration_label.text() == "00:00"
 
     def test_stop_recording_when_not_recording_noop(self, qtbot):
@@ -129,7 +127,6 @@ class TestFloatingRecordingWindow:
         win.set_processing()
         assert win._state == RecorderState.PROCESSING
         assert win.is_recording() is False
-        assert not win._level_timer.isActive()
 
     def test_set_done(self, qtbot):
         win = FloatingRecordingWindow()

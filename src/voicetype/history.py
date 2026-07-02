@@ -1,5 +1,6 @@
 """SQLite-backed local history storage for recognized text."""
 
+import logging
 import sqlite3
 import threading
 from dataclasses import dataclass
@@ -7,6 +8,8 @@ from datetime import datetime
 from pathlib import Path
 
 from voicetype.config import CONFIG_DIR
+
+logger = logging.getLogger(__name__)
 
 HISTORY_DB_FILE = CONFIG_DIR / "history.sqlite3"
 DEFAULT_HISTORY_LIMIT = 20
@@ -37,6 +40,10 @@ class HistoryStore:
         # serializes all access regardless.
         self._conn = sqlite3.connect(self.path, check_same_thread=False)
         self._init_db(self._conn)
+        # In-memory cache + dirty flag — avoids re-querying SQLite when
+        # nothing has changed since the last load.
+        self._dirty = True
+        self._cached_entries: list[HistoryEntry] = []
 
     def add(self, text: str) -> HistoryEntry | None:
         clean_text = text.strip()
@@ -52,7 +59,12 @@ class HistoryStore:
                 "INSERT INTO history (created_at, text) VALUES (?, ?)",
                 (entry.created_at, entry.text),
             )
-            self._trim(self._conn)
+            # Only trim when table exceeds limit significantly, to avoid
+            # a full scan + sort on every insert.
+            count = self._conn.execute("SELECT COUNT(*) FROM history").fetchone()[0]
+            if count > self.limit * 2:
+                self._trim(self._conn)
+        self._dirty = True
         return entry
 
     def load(self) -> list[HistoryEntry]:
@@ -60,15 +72,23 @@ class HistoryStore:
             return []
 
         with self._lock:
+            if not self._dirty:
+                logger.debug("Loading history from cache (%d entries)", len(self._cached_entries))
+                return self._cached_entries
             rows = self._conn.execute(
                 "SELECT created_at, text FROM history ORDER BY rowid DESC LIMIT ?",
                 (self.limit,),
             ).fetchall()
-        return [HistoryEntry(created_at=row[0], text=row[1]) for row in rows]
+            self._cached_entries = [HistoryEntry(created_at=row[0], text=row[1]) for row in rows]
+            self._dirty = False
+            logger.debug("History loaded from DB: %d entries", len(self._cached_entries))
+            return self._cached_entries
 
     def clear(self) -> None:
         with self._lock, self._conn:
             self._conn.execute("DELETE FROM history")
+        self._dirty = True
+        logger.info("History cleared")
 
     def _init_db(self, conn: sqlite3.Connection) -> None:
         conn.execute(

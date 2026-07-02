@@ -1,6 +1,7 @@
 """Floating recording window — compact widget with record button."""
 
 import collections
+import logging
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
@@ -22,6 +23,8 @@ _COLOR_WAVE_IDLE = QColor(75, 85, 99)
 
 # Default font family — fall back to a platform-appropriate list if unavailable
 _DEFAULT_FONT_FAMILIES = ("Segoe UI", "Microsoft YaHei", "Helvetica", "Arial")
+
+logger = logging.getLogger(__name__)
 
 
 def _default_font(size: int) -> QFont:
@@ -154,6 +157,11 @@ class AudioLevelWaveform(QWidget):
 
     def add_level(self, level: float):
         level = max(0.0, min(1.0, float(level)))
+        # Skip repaint when level is unchanged — avoids unconditional
+        # QPainter redraw of all 18 bars on every 100ms tick.
+        if level == self._levels[-1]:
+            self._levels.append(level)
+            return
         self._levels.append(level)
         self.update()
 
@@ -192,9 +200,6 @@ class FloatingRecordingWindow(QWidget):
         self._state = RecorderState.IDLE
         self._hotkey_manager = None
         self._elapsed = QElapsedTimer()
-        self._level_timer = QTimer(self)
-        self._level_timer.setInterval(100)
-        self._level_timer.timeout.connect(self._refresh_recording_indicators)
         self._pending_audio_level = 0.0
         self._init_ui()
 
@@ -297,11 +302,12 @@ class FloatingRecordingWindow(QWidget):
     def _transition_to(self, new_state: RecorderState):
         """Centralized state transition — updates button, indicators, and emits signals."""
         old_state = self._state
+        if old_state != new_state:
+            logger.debug("State transition: %s -> %s", old_state.name, new_state.name)
         self._set_state(new_state)
 
         if old_state == RecorderState.RECORDING and new_state == RecorderState.IDLE:
             self.dot.stop()
-            self._level_timer.stop()
             self.duration_label.setText("00:00")
             self.waveform.reset()
             self.recording_stopped.emit()
@@ -311,19 +317,23 @@ class FloatingRecordingWindow(QWidget):
             self._pending_audio_level = 0.0
             self.waveform.reset()
             self.duration_label.setText("00:00")
-            self._level_timer.start()
             self.recording_started.emit()
         else:
             # Any other transition (PROCESSING/DONE/ERROR) stops background indicators
             self.dot.stop()
-            self._level_timer.stop()
             if new_state in (RecorderState.DONE, RecorderState.ERROR):
                 self.duration_label.setText("00:00")
                 self.waveform.reset()
 
-    def _refresh_recording_indicators(self):
+    def refresh_recording_indicators(self, level: float):
+        """Update duration + waveform from the latest mic level.
+        
+        Called by Application's single audio-level sync timer — do not
+        call directly from UI code.
+        """
         if self._state != RecorderState.RECORDING:
             return
+        self._pending_audio_level = max(0.0, min(1.0, float(level)))
         elapsed_seconds = max(0, self._elapsed.elapsed() // 1000)
         minutes = elapsed_seconds // 60
         seconds = elapsed_seconds % 60
@@ -390,7 +400,12 @@ class FloatingRecordingWindow(QWidget):
         self._update_record_button()
 
     def set_audio_level(self, level: float):
-        """Receive latest microphone level from the recorder."""
+        """Receive latest microphone level from the recorder (no-op).
+        
+        Kept for backwards compatibility; the actual UI updates happen in
+        ``refresh_recording_indicators`` which is driven by the Application
+        timer and reads the level directly.
+        """
         self._pending_audio_level = max(0.0, min(1.0, float(level)))
 
 
@@ -468,6 +483,8 @@ class Toast(QWidget):
         self._text = text
         self._duration_ms = duration_ms
         self._font = _default_font(self._FONT_SIZE)
+        self._fade_in = None  # keep reference to avoid premature GC
+        self._fade_out = None
         self._init_ui()
 
     def _init_ui(self):

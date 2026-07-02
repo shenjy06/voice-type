@@ -52,6 +52,7 @@ def invalidate_glossary_cache() -> None:
     """Drop the compiled glossary cache (call after settings change)."""
     _glossary_cache.clear()
 
+
 def apply_glossary(text: str, entries: list[GlossaryEntry]) -> str:
     """Apply user-defined term replacements to recognized text."""
     if not text or not entries:
