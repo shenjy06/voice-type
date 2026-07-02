@@ -45,7 +45,7 @@ class RecordingController:
         self._bubble = bubble
         self._level_timer = level_timer
         self._hwnd_provider = hwnd_provider or get_foreground_window
-        self._context_provider = context_provider or (lambda: ("", ""))
+        self._context_provider = context_provider or (lambda hwnd: ("", ""))
         self._saved_hwnd = 0
         self._cursor_context: tuple[str, str] = ("", "")
         self._context_thread: threading.Thread | None = None
@@ -146,7 +146,7 @@ class RecordingController:
     def _capture_context(self) -> None:
         """Run the context provider on a background thread; swallow failures."""
         try:
-            self._cursor_context = self._context_provider()
+            self._cursor_context = self._context_provider(self._saved_hwnd)
         except Exception:
             self._cursor_context = ("", "")
 
