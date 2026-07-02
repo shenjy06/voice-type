@@ -194,10 +194,16 @@ class HotkeyManager(QObject):
     Alt together with any other key (e.g. Right Alt+C) is treated as a
     combo and does NOT toggle — Right Alt+C cancels an in-progress recording
     instead. Left Alt is ignored entirely so it stays free for normal typing.
+
+    Some keyboards/Windows layouts report the physical Right-Alt key as
+    ``Key.alt_gr`` rather than ``Key.alt_r``. Both are accepted as the
+    toggle key so the shortcut works regardless of how pynput labels it.
     """
 
     toggle_recording = Signal()
     cancel_recording = Signal()
+
+    _TOGGLE_KEYS = ("alt_r", "alt_gr")
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -232,15 +238,19 @@ class HotkeyManager(QObject):
     def _on_press(self, key):
         """Handle key press event."""
         is_alt_r = key == keyboard.Key.alt_r
+        is_alt_gr = key == keyboard.Key.alt_gr
         is_alt = key == keyboard.Key.alt
-        if is_alt_r or is_alt:
-            # Only Right Alt (alt_r) starts a toggle. A bare generic
+        if is_alt_r or is_alt_gr or is_alt:
+            # Only Right Alt (alt_r / alt_gr) starts a toggle. A bare generic
             # Key.alt press is treated as left-alt and ignored so
-            # left-alt keeps working as a normal modifier.
-            if is_alt_r and not self._toggle_key_pressed:
+            # left-alt keeps working as a normal modifier. Clear any stale
+            # toggle state so a later left-alt release does not toggle.
+            if (is_alt_r or is_alt_gr) and not self._toggle_key_pressed:
                 self._toggle_key_pressed = True
                 self._combo_used = False
-                self._last_toggle_key = "alt_r"
+                self._last_toggle_key = "alt_r" if is_alt_r else "alt_gr"
+            elif is_alt:
+                self._last_toggle_key = None
             return
 
         try:
@@ -262,15 +272,16 @@ class HotkeyManager(QObject):
     def _on_release(self, key):
         """Handle key release event and detect Right Alt tap vs combo."""
         is_alt_r = key == keyboard.Key.alt_r
+        is_alt_gr = key == keyboard.Key.alt_gr
         is_alt = key == keyboard.Key.alt
 
         # On Windows pynput often delivers the Right-Alt release as
-        # generic Key.alt rather than Key.alt_r. Only accept the
-        # generic alt on release when the matching press was alt_r
+        # generic Key.alt rather than Key.alt_r. Accept any alt release
+        # when the matching press was one of the Right-Alt variants
         # (otherwise true left-alt presses would also toggle).
         matching_toggle = (
-            (is_alt_r and self._last_toggle_key == "alt_r")
-            or (is_alt and self._last_toggle_key == "alt_r")
+            (is_alt_r or is_alt_gr or is_alt)
+            and self._last_toggle_key in self._TOGGLE_KEYS
         )
 
         if matching_toggle:

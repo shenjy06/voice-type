@@ -1,8 +1,39 @@
 """Tests for voice_type.ui.system_tray — TrayIcon and HotkeyManager."""
 
+import gc
+import weakref
+
+import pytest
 from PySide6.QtWidgets import QSystemTrayIcon
 from pynput import keyboard
 from voicetype.ui.system_tray import TrayIcon, HotkeyManager
+
+
+@pytest.fixture(autouse=True)
+def _cleanup_tray_icons(qapp):
+    """Destroy QSystemTrayIcon instances created during TrayIcon tests.
+
+    Leaked tray icons can cause the test process to exit with code 2816 on
+    Windows, so we explicitly hide and schedule deletion after each test.
+    """
+    refs = []
+    original_init = TrayIcon.__init__
+
+    def _tracking_init(self, parent=None):
+        original_init(self, parent)
+        refs.append(weakref.ref(self))
+
+    TrayIcon.__init__ = _tracking_init
+    yield
+    TrayIcon.__init__ = original_init
+
+    for ref in refs:
+        tray_icon = ref()
+        if tray_icon is not None and tray_icon._tray is not None:
+            tray_icon._tray.hide()
+            tray_icon._tray.deleteLater()
+    qapp.processEvents()
+    gc.collect()
 
 
 class TestTrayIcon:
@@ -247,6 +278,20 @@ class TestHotkeyManager:
         mgr._on_release(keyboard.Key.alt)
         assert emitted == []
 
+    def test_generic_alt_press_clears_stale_toggle_state(self, qtbot):
+        """A generic Key.alt press must clear any stale right-alt state.
+
+        If a previous right-alt release event was somehow missed, a
+        subsequent left-alt tap should still not toggle.
+        """
+        mgr = HotkeyManager()
+        emitted = []
+        mgr.toggle_recording.connect(lambda: emitted.append(True))
+        mgr._last_toggle_key = "alt_r"  # simulate stale state
+        mgr._on_press(keyboard.Key.alt)
+        mgr._on_release(keyboard.Key.alt)
+        assert emitted == []
+
     def test_alt_r_press_alt_release_emits_toggle(self, qtbot):
         """Press with alt_r and release with bare alt should still toggle.
 
@@ -256,5 +301,39 @@ class TestHotkeyManager:
         """
         mgr = HotkeyManager()
         mgr._on_press(keyboard.Key.alt_r)
+        with qtbot.waitSignal(mgr.toggle_recording):
+            mgr._on_release(keyboard.Key.alt)
+
+    def test_alt_gr_tap_emits_toggle(self, qtbot):
+        """Tapping AltGr alone emits toggle_recording."""
+        mgr = HotkeyManager()
+        mgr._on_press(keyboard.Key.alt_gr)
+        with qtbot.waitSignal(mgr.toggle_recording):
+            mgr._on_release(keyboard.Key.alt_gr)
+
+    def test_alt_gr_combo_does_not_emit(self, qtbot):
+        """AltGr + another key does NOT emit toggle."""
+        mgr = HotkeyManager()
+        emitted = []
+        mgr.toggle_recording.connect(lambda: emitted.append(True))
+        from pynput.keyboard import KeyCode
+        mgr._on_press(keyboard.Key.alt_gr)
+        mgr._on_press(KeyCode.from_char("s"))
+        mgr._on_release(KeyCode.from_char("s"))
+        mgr._on_release(keyboard.Key.alt_gr)
+        assert emitted == []
+
+    def test_alt_gr_c_emits_cancel(self, qtbot):
+        """AltGr+C emits cancel_recording signal."""
+        from pynput.keyboard import KeyCode
+        mgr = HotkeyManager()
+        mgr._on_press(keyboard.Key.alt_gr)
+        with qtbot.waitSignal(mgr.cancel_recording):
+            mgr._on_press(KeyCode.from_char("c"))
+
+    def test_alt_gr_press_alt_release_emits_toggle(self, qtbot):
+        """Press with alt_gr and release with bare alt should still toggle."""
+        mgr = HotkeyManager()
+        mgr._on_press(keyboard.Key.alt_gr)
         with qtbot.waitSignal(mgr.toggle_recording):
             mgr._on_release(keyboard.Key.alt)
