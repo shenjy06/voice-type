@@ -228,7 +228,14 @@ class AudioRecorder:
         except Exception as e:
             raise ValueError(f"Failed to save audio: {e}") from e
 
-        self._temp_file = temp_file
+        with self._lock:
+            self._temp_file = temp_file
+        logger.info(
+            "Audio saved: %s (%.1f s, %d frames)",
+            temp_file.name,
+            duration_ms / 1000,
+            len(frames),
+        )
         return self._temp_file
 
     def _callback(self, indata, frames, time_info, status):
