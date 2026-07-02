@@ -1,5 +1,6 @@
 """Audio recording — start/stop/save OGG via sounddevice."""
 
+import logging
 import sys
 import tempfile
 import threading
@@ -10,6 +11,8 @@ from pathlib import Path
 import numpy as np
 import sounddevice as sd
 import soundfile as sf
+
+logger = logging.getLogger(__name__)
 
 # Use a leading dot prefix on POSIX and the Windows hidden attribute on Windows
 # to discourage other users on a shared box from browsing recordings.
@@ -182,7 +185,8 @@ class AudioRecorder:
                 callback=self._callback,
             )
             stream.start()
-        except Exception:
+        except Exception as e:
+            logger.error("Failed to start recording: %s", e, exc_info=True)
             if stream is not None:
                 try:
                     stream.close()
@@ -195,6 +199,7 @@ class AudioRecorder:
         with self._lock:
             self._stream = stream
             self._recording = True
+        logger.info("Recording started (sample_rate=%d)", self.sample_rate)
         return True
 
     def stop(self) -> None:
@@ -208,12 +213,14 @@ class AudioRecorder:
             try:
                 stream.stop()
                 stream.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Error stopping audio stream: %s", e)
+        logger.info("Recording stopped")
 
     def save(self) -> Path:
         with self._lock:
-            frames = list(self._frames)
+            frames = self._frames
+            self._frames = []  # release buffer immediately after handing off
         if not frames:
             raise ValueError("No audio data recorded")
 
@@ -222,13 +229,21 @@ class AudioRecorder:
         except ValueError as e:
             raise ValueError("Invalid audio data") from e
 
+        duration_ms = len(data) / self.sample_rate * 1000
         temp_file = self._temp_dir / f"recording_{uuid.uuid4().hex}.ogg"
         try:
             sf.write(str(temp_file), data, self.sample_rate, format="OGG", subtype="VORBIS")
         except Exception as e:
+            logger.error("Failed to save audio: %s", e, exc_info=True)
             raise ValueError(f"Failed to save audio: {e}") from e
 
         self._temp_file = temp_file
+        logger.info(
+            "Audio saved: %s (%.1f s, %d frames)",
+            temp_file.name,
+            duration_ms / 1000,
+            len(frames),
+        )
         return self._temp_file
 
     def _callback(self, indata, frames, time_info, status):
@@ -250,8 +265,9 @@ class AudioRecorder:
         if temp_file and temp_file.exists():
             try:
                 temp_file.unlink()
-            except OSError:
-                pass
+                logger.debug("Cleaned up audio file: %s", temp_file.name)
+            except OSError as e:
+                logger.warning("Failed to clean up audio file %s: %s", temp_file.name, e)
 
     def cancel(self) -> None:
         """Stop recording and delete audio file without processing."""
@@ -262,5 +278,6 @@ class AudioRecorder:
         if temp_file and temp_file.exists():
             try:
                 temp_file.unlink()
-            except OSError:
-                pass
+                logger.info("Recording cancelled, deleted: %s", temp_file.name)
+            except OSError as e:
+                logger.warning("Failed to delete cancelled audio %s: %s", temp_file.name, e)

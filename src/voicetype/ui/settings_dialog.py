@@ -1,5 +1,6 @@
 """Settings dialog — configure API, models, hotkey, etc."""
 
+import logging
 import threading
 
 from PySide6.QtWidgets import (
@@ -16,6 +17,8 @@ from voicetype.constants import PASTE_MODES, ASR_LANGUAGES
 from voicetype.network import check_network_available
 from voicetype.ui.hotkey_recorder import HotkeyRecorder
 from voicetype.ui.main_window import Toast
+
+logger = logging.getLogger(__name__)
 from voicetype.ui.icon_utils import make_circle_icon
 from voicetype.i18n import t
 
@@ -376,18 +379,21 @@ class SettingsDialog(QDialog):
         api_key = self.stt_api_key_input.text().strip()
         polish_key = self.polish_api_key_input.text().strip()
         if not api_key and not polish_key:
+            logger.warning("Save rejected: no API key provided")
             self._toast = Toast(t("settings.api_key_required"), parent=self)
             self._toast.show()
             return
 
         # Only require network access if an API-related field actually changed.
         if not self._api_state_changed():
+            logger.debug("API state unchanged — saving without network check")
             self._apply_save()
             return
 
         # Run the (blocking, up to ~2s offline) network check on a background
         # thread so the dialog stays responsive. Disable the save button and
         # show a checking state until the result lands back on the UI thread.
+        logger.info("API state changed — checking network availability")
         self._set_checking_network(True)
 
         def _check():
@@ -399,6 +405,7 @@ class SettingsDialog(QDialog):
     def _on_network_check_done(self, ok: bool):
         self._set_checking_network(False)
         if not ok:
+            logger.warning("Save rejected: network unavailable")
             self._toast = Toast(t("settings.network_error"), parent=self)
             self._toast.show()
             return

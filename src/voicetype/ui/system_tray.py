@@ -1,5 +1,7 @@
 """System tray icon with menu and global hotkeys."""
 
+import logging
+
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
@@ -9,6 +11,8 @@ from voicetype.constants import PASTE_MODES, ASR_LANGUAGES, POLISH_STYLES
 from voicetype.hotkey_parser import HotkeyBinding
 from voicetype.i18n import t
 from voicetype.ui.icon_utils import make_circle_icon
+
+logger = logging.getLogger(__name__)
 
 
 class TrayIcon(QObject):
@@ -241,6 +245,7 @@ class HotkeyManager(QObject):
             daemon=True,  # Allow process to exit even if listener is running
         )
         self._listener.start()
+        logger.info("Hotkey listener started (binding=%s)", self._binding)
 
     def stop(self):
         """Stop monitoring."""
@@ -248,6 +253,7 @@ class HotkeyManager(QObject):
         if self._listener:
             self._listener.stop()
             self._listener = None
+        logger.info("Hotkey listener stopped")
         self._toggle_key_pressed = False
         self._combo_used = False
         self._last_toggle_key = None

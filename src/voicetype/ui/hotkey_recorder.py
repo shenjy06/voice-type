@@ -1,5 +1,6 @@
 """Widget for capturing a single global hotkey via pynput."""
 
+import logging
 import threading
 
 from PySide6.QtCore import Signal, Qt
@@ -7,6 +8,8 @@ from PySide6.QtWidgets import QWidget, QHBoxLayout, QLineEdit, QPushButton
 from pynput import keyboard
 
 from voicetype.hotkey_parser import key_to_string, HotkeyBinding
+
+logger = logging.getLogger(__name__)
 
 
 class HotkeyRecorder(QWidget):
@@ -71,6 +74,11 @@ class HotkeyRecorder(QWidget):
             self._start_recording()
 
     def _start_recording(self):
+        # Stop any existing listener before starting a new one — rapid clicks
+        # on "Change" would otherwise stack listeners until GC cleans them up.
+        if self._listener is not None:
+            self._listener.stop()
+            self._listener = None
         self._recording = True
         self._update_ui()
         self._listener = keyboard.Listener(on_press=self._on_capture_press)
@@ -86,6 +94,7 @@ class HotkeyRecorder(QWidget):
 
     def _apply_captured_hotkey(self, hotkey: str):
         """Apply a captured hotkey on the Qt UI thread."""
+        logger.info("Hotkey captured: %s", hotkey)
         self.set_hotkey(hotkey)
         self.stop_recording()
 

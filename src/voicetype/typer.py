@@ -1,5 +1,6 @@
 """Text output — clipboard paste via Ctrl+V."""
 
+import logging
 import threading
 import time
 import ctypes
@@ -13,6 +14,8 @@ from voicetype.constants import (
     PASTE_MODE_CLIPBOARD,
 )
 from voicetype.window_manager import set_foreground_window
+
+logger = logging.getLogger(__name__)
 
 KEYEVENTF_KEYUP = 0x0002
 user32 = ctypes.windll.user32
@@ -61,6 +64,10 @@ class TextTyper:
         window_restored = False
         if saved_hwnd and saved_hwnd != 0:
             window_restored = set_foreground_window(saved_hwnd)
+            if not window_restored:
+                logger.warning("Failed to restore foreground window (hwnd=%s)", saved_hwnd)
+            else:
+                logger.debug("Foreground window restored (hwnd=%s)", saved_hwnd)
 
         # Small delay to ensure window focus is settled
         time.sleep(self.config.output.paste_delay_ms / 1000.0)
@@ -70,19 +77,27 @@ class TextTyper:
             with self._clipboard_lock:
                 original_clipboard = pyperclip.paste()
                 pyperclip.copy(text)
-        except Exception:
+        except Exception as e:
+            logger.warning("Clipboard operation failed: %s", e, exc_info=True)
             original_clipboard = None
 
         paste_mode = self.config.output.paste_mode
         if paste_mode == PASTE_MODE_CLIPBOARD:
+            logger.debug("Clipboard-only mode — skipping paste shortcut")
             return True
 
         use_terminal_paste = self._use_terminal_paste(paste_mode, saved_hwnd)
+        logger.debug(
+            "Sending paste: mode=%s, terminal=%s",
+            paste_mode,
+            use_terminal_paste,
+        )
 
         # Send paste shortcut via ctypes
         success = self._send_paste(use_terminal_paste=use_terminal_paste)
 
         if not success:
+            logger.error("Paste shortcut injection failed (mode=%s)", paste_mode)
             return False
 
         # Restore the original clipboard content if paste succeeded.
@@ -90,6 +105,7 @@ class TextTyper:
         if original_clipboard is not None and original_clipboard != text:
             self._schedule_clipboard_restore(original_clipboard)
 
+        logger.info("Paste successful (%d chars)", len(text))
         return True
 
     def _schedule_clipboard_restore(self, original: str) -> None:
@@ -99,8 +115,8 @@ class TextTyper:
             try:
                 with self._clipboard_lock:
                     pyperclip.copy(original)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Failed to restore clipboard: %s", e)
 
         threading.Thread(target=_restore, daemon=True).start()
 
@@ -123,26 +139,33 @@ class TextTyper:
                 return bool(user32.keybd_event(vk, 0, flags, 0))
 
             if not _send(VK_CONTROL, 0):
+                logger.debug("keybd_event: Ctrl down failed")
                 return False
             time.sleep(0.05)
             if use_terminal_paste:
                 if not _send(VK_SHIFT, 0):
+                    logger.debug("keybd_event: Shift down failed")
                     return False
                 time.sleep(0.05)
             if not _send(VK_V, 0):
+                logger.debug("keybd_event: V down failed")
                 return False
             time.sleep(0.05)
             if not _send(VK_V, KEYEVENTF_KEYUP):
+                logger.debug("keybd_event: V up failed")
                 return False
             time.sleep(0.05)
             if use_terminal_paste:
                 if not _send(VK_SHIFT, KEYEVENTF_KEYUP):
+                    logger.debug("keybd_event: Shift up failed")
                     return False
                 time.sleep(0.05)
             if not _send(VK_CONTROL, KEYEVENTF_KEYUP):
+                logger.debug("keybd_event: Ctrl up failed")
                 return False
             return True
-        except Exception:
+        except Exception as e:
+            logger.warning("Paste key injection raised: %s", e, exc_info=True)
             return False
 
     def _use_terminal_paste(self, paste_mode: str, hwnd: int) -> bool:

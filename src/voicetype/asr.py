@@ -1,8 +1,13 @@
 """Speech-to-text via OpenAI-compatible API."""
 
+import logging
+import time
+
 from voicetype.api_client import ApiClient
 from voicetype.config import AppConfig
 from voicetype.retry import retry_call
+
+logger = logging.getLogger(__name__)
 
 # Prompt hint for auto-detect mode to improve Chinese-English mixed recognition.
 # Whisper uses the prompt parameter as context to bias language detection.
@@ -29,6 +34,8 @@ class Transcriber:
         else:
             kwargs["prompt"] = _AUTO_DETECT_PROMPT
 
+        logger.debug("Starting transcription: model=%s, lang=%s", kwargs["model"], lang)
+
         def _call():
             # Re-open the file per attempt: a failed request may have read
             # part of the stream, leaving the file pointer mid-file.
@@ -37,6 +44,20 @@ class Transcriber:
 
         # Retry on transient failures (connection drops, 429, 5xx) so a
         # single hiccup doesn't discard the user's recorded audio.
-        response = retry_call(_call)
+        start = time.monotonic()
+        try:
+            response = retry_call(_call)
+        except Exception as e:
+            logger.error(
+                "Transcription failed after retries: %s (%.1fs)",
+                e,
+                time.monotonic() - start,
+                exc_info=True,
+            )
+            raise
         text = response.text.strip()
+        elapsed = time.monotonic() - start
+        logger.info("Transcription done in %.1fs: %d chars", elapsed, len(text))
+        if not text:
+            logger.warning("Transcription returned empty text")
         return text

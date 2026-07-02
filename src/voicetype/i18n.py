@@ -204,10 +204,6 @@ def _detect_chinese_locale() -> str:
     return "en"
 
 
-# Backward-compatible alias — older versions of the codebase used this name.
-_detect_system_language = _detect_chinese_locale
-
-
 def init_language(lang: str = "auto") -> None:
     """Set the active language. 'auto' defers to system locale detection."""
     global _current_lang

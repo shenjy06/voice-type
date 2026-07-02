@@ -8,8 +8,12 @@ integration tests in your target environment first.
 """
 
 import json
+import logging
+import time
 from dataclasses import dataclass, field, asdict, fields
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 CONFIG_DIR = Path.home() / ".voice-type"
 CONFIG_FILE = CONFIG_DIR / "config.json"
@@ -140,7 +144,10 @@ class AppConfig:
         if CONFIG_FILE.exists():
             with open(CONFIG_FILE, encoding="utf-8") as f:
                 data = json.load(f)
-            return cls.from_dict(data)
+            config = cls.from_dict(data)
+            logger.info("Config loaded from %s", CONFIG_FILE)
+            return config
+        logger.info("No config file found — using defaults")
         return cls()
 
     def is_configured(self) -> bool:
@@ -155,17 +162,28 @@ class AppConfig:
         app starts with defaults and a code path triggers save() before
         the real config is loaded).
         """
-        new_json = json.dumps(self.to_dict(), indent=2, ensure_ascii=False)
+        new_dict = self.to_dict()
+        # Skip serialization entirely if dict content unchanged.
+        if getattr(AppConfig, "_last_saved_dict", None) == new_dict:
+            logger.debug("Config unchanged — skipping save")
+            return
+        start = time.monotonic()
+        new_json = json.dumps(new_dict, indent=2, ensure_ascii=False)
         if CONFIG_FILE.exists():
             try:
                 with open(CONFIG_FILE, encoding="utf-8") as f:
                     existing = f.read()
                 if existing == new_json:
+                    AppConfig._last_saved_dict = new_dict
+                    logger.debug("Config on disk matches — skipping write")
                     return  # no changes — skip write
-            except (OSError, json.JSONDecodeError):
-                pass  # file unreadable or corrupt — proceed with write
+            except (OSError, json.JSONDecodeError) as e:
+                logger.warning("Could not read existing config: %s", e)
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         tmp_path = CONFIG_FILE.with_suffix(".tmp")
         with open(tmp_path, "w", encoding="utf-8") as f:
             f.write(new_json)
         tmp_path.replace(CONFIG_FILE)
+        AppConfig._last_saved_dict = new_dict
+        elapsed = (time.monotonic() - start) * 1000
+        logger.debug("Config saved in %.1f ms", elapsed)
