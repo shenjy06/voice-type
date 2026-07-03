@@ -104,6 +104,7 @@ class ProcessingWorker(QObject):
         self.context_after = context_after
 
     def run(self):
+        audio_path = None
         try:
             self.started.emit()
             # Encode the captured frames to a temp OGG file on this thread so
@@ -113,11 +114,6 @@ class ProcessingWorker(QObject):
             logger.debug("Processing pipeline started: %s", os.path.basename(audio_path))
             transcriber = get_transcriber(self.config)
             transcript = transcriber.transcribe(audio_path)
-            # Delete audio file immediately after STT to limit sensitive data on disk.
-            try:
-                os.remove(audio_path)
-            except OSError:
-                pass
             if not transcript:
                 logger.info("Transcription returned empty — pipeline finished")
                 self.finished.emit("")
@@ -138,3 +134,11 @@ class ProcessingWorker(QObject):
         except Exception as e:
             logger.error("Processing pipeline failed: %s", e, exc_info=True)
             self.error.emit(str(e))
+        finally:
+            # Delete the temporary audio file regardless of success or failure
+            # so failed runs never leak OGG files in the temp directory.
+            if audio_path is not None:
+                try:
+                    os.remove(audio_path)
+                except OSError:
+                    pass
