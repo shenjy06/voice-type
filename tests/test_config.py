@@ -42,7 +42,7 @@ class TestDefaultConfigs:
 
     def test_output_config_defaults(self):
         cfg = OutputConfig()
-        assert cfg.paste_delay_ms == 300
+        assert cfg.paste_delay_ms == 120
         assert cfg.auto_paste is True
         assert cfg.paste_mode == "auto"
 

@@ -117,6 +117,32 @@ class Application:
             self._show_settings()
 
         self._init_hotkey()
+        self._warmup_api_connections()
+
+    def _warmup_api_connections(self) -> None:
+        """Pre-establish TLS connections to ASR/Polish APIs on a background thread.
+
+        The first API call in a session pays a TLS handshake cost (~200-500ms).
+        Calling ``warmup()`` at startup makes a lightweight ``models.list()``
+        request so the SDK's httpx connection pool is ready before the first
+        recording. Best-effort: failures are swallowed silently — see
+        Transcriber.warmup / TextPolisher.warmup.
+        """
+        from voicetype.processing import get_transcriber, get_polisher
+
+        def _warmup():
+            if self.config.asr.api_key:
+                try:
+                    get_transcriber(self.config).warmup()
+                except Exception:
+                    pass
+            if self.config.polish.api_key:
+                try:
+                    get_polisher(self.config).warmup()
+                except Exception:
+                    pass
+
+        threading.Thread(target=_warmup, daemon=True).start()
 
     # ---- init --------------------------------------------------------------
 

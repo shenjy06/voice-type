@@ -10,7 +10,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView,
 )
 from PySide6.QtCore import Qt, Signal, QTimer
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QIcon, QCursor
+from voicetype.api_client import fetch_models
 from voicetype.audio import MicrophoneMonitor, get_default_input_device_name
 from voicetype.config import AppConfig, DEFAULT_BASE_URL, GlossaryEntry
 from voicetype.constants import PASTE_MODES, ASR_LANGUAGES, DENOISE_STRENGTHS
@@ -41,6 +42,12 @@ class SettingsDialog(QDialog):
     _network_check_done = Signal(bool)
     # Emitted (on the UI thread) with the resolved default input device name.
     _device_name_ready = Signal(str)
+    # Emitted (on the UI thread) with (section, model_ids) when a background
+    # model-list fetch succeeds. section is "asr" or "polish".
+    _models_fetched = Signal(str, list)
+    # Emitted (on the UI thread) with (section, error_message) when a
+    # background model-list fetch fails.
+    _models_error = Signal(str, str)
 
     POLISH_MODELS = [
         "gpt-4o", "gpt-4o-mini", "gpt-4-turbo",
@@ -72,18 +79,57 @@ class SettingsDialog(QDialog):
         self._mic_timer = QTimer(self)
         self._mic_timer.setInterval(100)
         self._mic_timer.timeout.connect(self._refresh_microphone_level)
+        self._wrap_adjust_pending = False
+        # Refresh buttons by section ("asr"/"polish") — populated in _init_ui.
+        # Must exist before _init_ui() runs because _make_model_row writes to it.
+        self._refresh_buttons: dict[str, QPushButton] = {}
+        self._model_before_fetch: dict[str, str] = {}
+        self._model_items_before_fetch: dict[str, list] = {}
         self._init_ui()
         self._load_config()
+        # Word-wrapped labels placed as QFormLayout fields — their height must
+        # be enforced because QFormLayout sizes field rows by sizeHint, not by
+        # heightForWidth, so wrapped text gets clipped (see _adjust_wrap_heights).
+        self._wrap_labels = [
+            self.mic_device_label,
+            self.mic_status_label,
+            self.denoise_hint_label,
+        ]
+        self._tabs.currentChanged.connect(lambda _: self._schedule_adjust_wrap_heights())
         # Snapshot original API-related fields to detect changes on save
         self._initial_api_state = self._snapshot_api_state()
         # Route the background network-check result back to the UI thread.
         self._network_check_done.connect(self._on_network_check_done)
         # Route the background device-name query back to the UI thread.
         self._device_name_ready.connect(self._set_microphone_device_label)
+        # Route background model-list fetch results back to the UI thread.
+        self._models_fetched.connect(self._on_models_fetched)
+        self._models_error.connect(self._on_models_error)
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
+
+        def _make_model_row(combo: QComboBox, section: str) -> QWidget:
+            """Wrap a model combo with a 'fetch models' refresh button.
+
+            The combo stays editable so the user can still type a model name
+            that the provider doesn't list (some providers hide certain
+            models from the /models endpoint).
+            """
+            container = QWidget()
+            row = QHBoxLayout(container)
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(6)
+            row.addWidget(combo, 1)
+            btn = QPushButton("🔄")
+            btn.setFixedWidth(32)
+            btn.setToolTip(t("settings.refresh_models"))
+            btn.setCursor(QCursor(Qt.PointingHandCursor))
+            btn.clicked.connect(lambda checked=False, s=section: self._fetch_models(s))
+            row.addWidget(btn)
+            self._refresh_buttons[section] = btn
+            return container
 
         self._tabs = QTabWidget()
 
@@ -130,7 +176,7 @@ class SettingsDialog(QDialog):
         self.stt_model_combo.setEditable(True)
         for m in self.ASR_MODELS:
             self.stt_model_combo.addItem(m)
-        stt_api_layout.addRow(t("settings.model"), self.stt_model_combo)
+        stt_api_layout.addRow(t("settings.model"), _make_model_row(self.stt_model_combo, "asr"))
 
         self.stt_lang_combo = QComboBox()
         for code in ASR_LANGUAGES:
@@ -213,7 +259,7 @@ class SettingsDialog(QDialog):
         self.polish_model_combo.setEditable(True)
         for m in self.POLISH_MODELS:
             self.polish_model_combo.addItem(m)
-        polish_api_layout.addRow(t("settings.model"), self.polish_model_combo)
+        polish_api_layout.addRow(t("settings.model"), _make_model_row(self.polish_model_combo, "polish"))
 
         self.polish_enabled_check = QCheckBox(t("settings.polish_enabled"))
         polish_api_layout.addRow("", self.polish_enabled_check)
@@ -439,6 +485,121 @@ class SettingsDialog(QDialog):
             t("settings.network_checking") if checking else t("settings.save")
         )
 
+    # ---- model list fetching -----------------------------------------------
+
+    def _fetch_models(self, section: str) -> None:
+        """Fetch available models from the provider on a background thread.
+
+        ``section`` is "asr" or "polish". Reads the current api_key /
+        base_url from the inputs so the user can fill them in and fetch
+        without saving first.
+        """
+        if section == "asr":
+            api_key = self.stt_api_key_input.text().strip()
+            base_url = self.stt_base_url_input.text().strip() or DEFAULT_BASE_URL
+            combo = self.stt_model_combo
+        else:
+            api_key = self.polish_api_key_input.text().strip()
+            base_url = self.polish_base_url_input.text().strip() or DEFAULT_BASE_URL
+            combo = self.polish_model_combo
+
+        if not api_key:
+            self._on_models_error(section, t("settings.api_key_required"))
+            return
+
+        # Snapshot the current selection so it survives repopulating the combo,
+        # and save the current items so they can be restored on error.
+        self._model_before_fetch[section] = combo.currentText().strip()
+        self._model_items_before_fetch[section] = [
+            combo.itemText(i) for i in range(combo.count())
+        ]
+        combo.clear()
+        combo.addItem(t("settings.loading_models"))
+        combo.setEnabled(False)
+        self._set_refreshing(section, True)
+
+        def _work():
+            try:
+                models = fetch_models(api_key, base_url)
+                self._models_fetched.emit(section, models)
+            except Exception as e:
+                self._models_error.emit(section, str(e))
+
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _set_refreshing(self, section: str, refreshing: bool) -> None:
+        """Toggle a section's refresh button into/out of the loading state."""
+        btn = self._refresh_buttons.get(section)
+        if btn is None:
+            return
+        btn.setEnabled(not refreshing)
+        btn.setText("⏳" if refreshing else "🔄")
+
+    def _restore_combo_on_fetch_failure(self, section: str) -> None:
+        """Put back every item the combo held before the fetch started."""
+        combo = self.stt_model_combo if section == "asr" else self.polish_model_combo
+        saved = self._model_items_before_fetch.pop(section, None)
+        previous = self._model_before_fetch.get(section, "")
+        combo.setEnabled(True)
+        if saved is None:
+            # The combo was never cleared (e.g. API-key check failed early);
+            # just re-enable it and leave the existing items intact.
+            return
+        combo.clear()
+        combo.addItems(saved)
+        if previous:
+            idx = combo.findText(previous)
+            if idx >= 0:
+                combo.setCurrentIndex(idx)
+
+    def _on_models_fetched(self, section: str, model_ids: list) -> None:
+        """Apply a fetched model list to the section's combo (UI thread)."""
+        combo = self.stt_model_combo if section == "asr" else self.polish_model_combo
+        previous = self._model_before_fetch.pop(section, "")
+        self._set_refreshing(section, False)
+        combo.setEnabled(True)
+
+        if not model_ids:
+            self._restore_combo_on_fetch_failure(section)
+            self._toast = Toast(
+                t("settings.models_fetch_failed").format(error=t("settings.models_loaded").format(count=0)),
+                parent=self,
+            )
+            self._toast.show()
+            logger.info("Fetched 0 models for section %s", section)
+            return
+
+        # Clean up saved snapshot — we're replacing the combo contents.
+        self._model_items_before_fetch.pop(section, None)
+
+        # Rebuild the combo from the provider's list. Keep the user's prior
+        # selection (even if the provider no longer lists it) so a refresh
+        # never silently changes the configured model.
+        combo.clear()
+        if previous and previous not in model_ids:
+            combo.addItem(previous)
+        combo.addItems(model_ids)
+        if previous:
+            idx = combo.findText(previous)
+            if idx >= 0:
+                combo.setCurrentIndex(idx)
+        self._toast = Toast(
+            t("settings.models_loaded").format(count=len(model_ids)), parent=self
+        )
+        self._toast.show()
+        logger.info("Fetched %d models for section %s", len(model_ids), section)
+
+    def _on_models_error(self, section: str, error: str) -> None:
+        """Surface a fetch failure as a non-blocking toast (UI thread)."""
+        self._model_before_fetch.pop(section, None)
+        self._restore_combo_on_fetch_failure(section)
+        self._set_refreshing(section, False)
+        self._toast = Toast(
+            t("settings.models_fetch_failed").format(error=error), parent=self
+        )
+        self._toast.show()
+        logger.warning("Model fetch failed for section %s: %s", section, error)
+
     def _apply_save(self):
         """Write all fields into config, persist, and close the dialog."""
         api_key = self.stt_api_key_input.text().strip()
@@ -528,6 +689,12 @@ class SettingsDialog(QDialog):
 
     def _set_microphone_device_label(self, device_name: str):
         self.mic_device_label.setText(device_name or t("settings.mic_device_none"))
+        self._schedule_adjust_wrap_heights()
+
+    def _set_mic_status(self, text: str):
+        """Update the mic status label and re-check its wrapped height."""
+        self.mic_status_label.setText(text)
+        self._schedule_adjust_wrap_heights()
 
     def _toggle_microphone_monitor(self):
         if self._mic_monitor and self._mic_monitor.is_running:
@@ -542,10 +709,10 @@ class SettingsDialog(QDialog):
         if not self._mic_monitor.start():
             self.mic_level_bar.setValue(0)
             detail = self._mic_monitor.error or t("settings.mic_status_error")
-            self.mic_status_label.setText(f"{t('settings.mic_status_error')}: {detail}")
+            self._set_mic_status(f"{t('settings.mic_status_error')}: {detail}")
             self.mic_test_btn.setText(t("settings.mic_test_start"))
             return
-        self.mic_status_label.setText(t("settings.mic_status_listening"))
+        self._set_mic_status(t("settings.mic_status_listening"))
         self.mic_test_btn.setText(t("settings.mic_test_stop"))
         self._mic_timer.start()
 
@@ -554,7 +721,7 @@ class SettingsDialog(QDialog):
         if self._mic_monitor:
             self._mic_monitor.stop()
         self.mic_level_bar.setValue(0)
-        self.mic_status_label.setText(t("settings.mic_status_idle"))
+        self._set_mic_status(t("settings.mic_status_idle"))
         self.mic_test_btn.setText(t("settings.mic_test_start"))
 
     def _refresh_microphone_level(self):
@@ -563,9 +730,48 @@ class SettingsDialog(QDialog):
         level = self._mic_monitor.input_level
         self.mic_level_bar.setValue(int(level * 100))
         if level < 0.02:
-            self.mic_status_label.setText(t("settings.mic_status_silent"))
+            self._set_mic_status(t("settings.mic_status_silent"))
         else:
-            self.mic_status_label.setText(t("settings.mic_status_ok"))
+            self._set_mic_status(t("settings.mic_status_ok"))
+
+    def _schedule_adjust_wrap_heights(self):
+        """Coalesce multiple wrap-height adjustments into one deferred call."""
+        if self._wrap_adjust_pending:
+            return
+        self._wrap_adjust_pending = True
+        QTimer.singleShot(0, self._adjust_wrap_heights)
+
+    def _adjust_wrap_heights(self):
+        """Force word-wrapped form-field labels to fit their wrapped text.
+
+        QFormLayout determines field-row heights from each widget's sizeHint,
+        not from heightForWidth, so a word-wrapped QLabel placed as a form
+        field is compressed to a single line whenever its text wraps. In
+        English the form labels are longer, the field column narrows, and the
+        hint text wraps — producing two clipped lines. Setting each label's
+        minimum height to its heightForWidth value forces the layout to
+        allocate the full wrapped height.
+        """
+        self._wrap_adjust_pending = False
+        for lbl in self._wrap_labels:
+            if lbl.width() <= 0:
+                continue
+            # Reset first so the label can shrink back down when the dialog
+            # widens and the text no longer wraps.
+            lbl.setMinimumHeight(0)
+            hfw = lbl.heightForWidth(lbl.width())
+            if hfw > 0:
+                lbl.setMinimumHeight(hfw)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # The layout hasn't resolved field widths until after the first show,
+        # so defer the height adjustment to the next event-loop iteration.
+        self._schedule_adjust_wrap_heights()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._schedule_adjust_wrap_heights()
 
     def closeEvent(self, event):
         self._stop_microphone_monitor()
