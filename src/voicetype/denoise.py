@@ -26,6 +26,7 @@ recording pipeline is never broken by denoising.
 
 from __future__ import annotations
 
+import functools
 import logging
 
 import numpy as np
@@ -49,12 +50,17 @@ _N_FFT = 512
 _HOP_LENGTH = 128
 
 
+@functools.lru_cache(maxsize=4)
 def _periodic_hann(n_fft: int) -> np.ndarray:
     """Return the periodic Hann window of length ``n_fft``.
 
     Unlike the symmetric ``np.hanning(n_fft)`` (which is zero at both
     ends), the periodic variant is zero only at index 0 — the form used
     by librosa/scipy.signal for STFT analysis frames.
+
+    Cached via ``lru_cache`` because every denoise call runs _stft and
+    _istft back-to-back, each creating the same window — and for the
+    default _N_FFT=512 it is always identical across calls.
     """
     return np.hanning(n_fft + 1)[:-1]
 
@@ -75,6 +81,10 @@ def _stft(x: np.ndarray, n_fft: int, hop_length: int) -> np.ndarray:
     n_frames = 1 + (len(x) - n_fft) // hop_length
 
     window = _periodic_hann(n_fft)
+    # TODO: vectorise with np.lib.stride_tricks.as_strided — the Python
+    # loop here dominates denoise latency for recordings longer than a
+    # few minutes (e.g. 10 min → ~75 000 frames → ~0.5 s). For the
+    # typical 15-60 s dictation the loop is negligible (~0.01-0.08 s).
     frames = np.empty((n_frames, n_fft), dtype=np.float64)
     for i in range(n_frames):
         start = i * hop_length
@@ -103,7 +113,6 @@ def _istft(spec: np.ndarray, n_fft: int, hop_length: int, length: int) -> np.nda
 
 def _spectral_gate(
     audio: np.ndarray,
-    sample_rate: int,
     *,
     threshold: float,
     attenuation: float,
@@ -169,7 +178,6 @@ def denoise(audio: np.ndarray, sample_rate: int, strength: str = "medium") -> np
 
         result = _spectral_gate(
             audio,
-            sample_rate,
             threshold=float(preset["threshold"]),
             attenuation=float(preset["attenuation"]),
             noise_frames=int(preset["noise_frames"]),

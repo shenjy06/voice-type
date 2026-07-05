@@ -37,6 +37,9 @@ hiddenimports = [
     "pynput.keyboard",
     "pynput.keyboard._win32",
 ]
+# Append soundfile's transitive hidden imports (collected above) so the
+# linker sees every module that soundfile may load at runtime.
+hiddenimports += _sf_hiddenimports
 
 # Explicit deny list. PyInstaller treats `excludes` as a tree: excluding
 # `pandas` also drops `pandas.core`, `pandas.io`, etc. Keep names here

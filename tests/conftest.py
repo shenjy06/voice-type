@@ -1,5 +1,5 @@
-import pytest
 import os
+
 import pytest
 
 # Force offscreen qt platform when running tests on a headless display (CI,
