@@ -1,5 +1,7 @@
 # Voice Type
 
+[English](README.md) | 中文
+
 Windows 语音转文字速记工具。录制语音 → 语音识别 → 文本润色 → 自动粘贴到光标位置。
 
 采用 [GPL-3.0](LICENSE) 许可证开源。

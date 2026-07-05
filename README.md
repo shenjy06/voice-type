@@ -1,5 +1,7 @@
 # Voice Type
 
+[中文](README-zh.md) | English
+
 Windows voice-to-text dictation tool. Record voice → Speech recognition → Text refinement → Auto-paste to cursor position.
 
 Licensed under [GPL-3.0](LICENSE).
