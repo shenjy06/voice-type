@@ -81,10 +81,17 @@ class Application:
 
         self.config = AppConfig.load()
         init_language(self.config.language)
-        self.audio_recorder = AudioRecorder(self.config.recording.sample_rate)
+        self.audio_recorder = AudioRecorder(
+            self.config.recording.sample_rate,
+            denoise_enabled=self.config.recording.denoise_enabled,
+            denoise_strength=self.config.recording.denoise_strength,
+        )
         self.typer = TextTyper(self.config)
         self.history_store = HistoryStore()
         self._quitting = False
+        # Track paste threads so we can join them at quit, preventing
+        # ctypes calls from daemon threads after Qt objects are destroyed.
+        self._paste_threads: list[threading.Thread] = []
         logger.info("Application initialized (configured=%s)", self.config.is_configured())
 
         # Audio-level sync timer — owned at Application level so it can be
@@ -241,13 +248,22 @@ class Application:
         restriction is handled via ``AttachThreadInput`` inside
         ``set_foreground_window``. A paste failure is surfaced as a toast,
         marshaled back to the UI thread via the ``_paste_bridge`` signal.
+
+        Threads are tracked in ``_paste_threads`` so ``_quit`` can join them
+        before Qt objects are destroyed, preventing a daemon-thread ctypes
+        call from running against a torn-down window.
         """
+        # Prune finished threads so the list doesn't grow unbounded.
+        self._paste_threads = [t for t in self._paste_threads if t.is_alive()]
+
         def _work():
             pasted = self.typer.output_text(text, hwnd)
             if not pasted:
                 self._paste_bridge.paste_failed.emit()
 
-        threading.Thread(target=_work, daemon=True).start()
+        t = threading.Thread(target=_work, daemon=True)
+        self._paste_threads.append(t)
+        t.start()
 
     def _on_paste_failed(self):
         """Show the paste-failed toast (invoked on the UI thread via signal)."""
@@ -314,6 +330,8 @@ class Application:
         if self.config.hotkey.toggle_enabled:
             self.hotkey_manager.start()
         self.audio_recorder.sample_rate = self.config.recording.sample_rate
+        self.audio_recorder.denoise_enabled = self.config.recording.denoise_enabled
+        self.audio_recorder.denoise_strength = self.config.recording.denoise_strength
         self.window.retranslate()
         self.tray.retranslate()
         self.tray.apply_config(self.config)
@@ -343,6 +361,12 @@ class Application:
         logger.info("Application quitting")
         self.hotkey_manager.stop()
         self._audio_level_timer.stop()
+        # Wait for any in-flight paste thread to finish before we tear down
+        # Qt objects. Each paste has a bounded timeout (window_manager retries
+        # cap at ~2.5 s), so a short join is sufficient; pasted is True after
+        # TextTyper sets clipboard (early exit before window focus retries).
+        for t in self._paste_threads:
+            t.join(timeout=3.0)
         self._flush_config_save()
         self.audio_recorder.stop()
         self.audio_recorder.cleanup()

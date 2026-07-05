@@ -127,7 +127,7 @@ class TextPolisher:
     # already handled by the dedicated quote-strip step). The user explicitly
     # does not want any punctuation auto-added at the end; since LLMs don't
     # always obey the prompt, this is a deterministic safety net.
-    _TRAILING_PUNCTUATION = "。．.！!?？;；,，、：…—）】》」』"
+    _TRAILING_PUNCTUATION = "。．.！!?？;；,，、：…—）】》」』\"'＂＇"
 
     @classmethod
     def _strip_trailing_punctuation(cls, text: str) -> str:

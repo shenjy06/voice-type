@@ -6,6 +6,7 @@ only fetches response headers — `urlopen` returns once headers are received
 and the body is never read — keeping the check lightweight.
 """
 
+import atexit
 import logging
 import time
 import urllib.error
@@ -31,6 +32,9 @@ DEFAULT_TIMEOUT_MS = 2000
 # Shared executor — threads are bounded to len(PROBE_URLS) and reused across
 # saves instead of being created + destroyed on every call.
 _executor = ThreadPoolExecutor(max_workers=len(PROBE_URLS))
+# Clean shutdown so worker threads don't throw ModuleNotFoundError during
+# Python's atexit teardown (modules can be GC'd before threads exit).
+atexit.register(_executor.shutdown, wait=False)
 
 
 def _probe(url: str, timeout: float) -> bool:

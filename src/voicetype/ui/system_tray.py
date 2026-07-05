@@ -251,7 +251,20 @@ class HotkeyManager(QObject):
         """Stop monitoring."""
         self._running = False
         if self._listener:
+            # pynput Listener.stop() signals the background thread to exit
+            # but does NOT wait for it. Join the thread so the Win32 hook
+            # is fully cleaned up before we continue — without this, the
+            # daemon thread may still be unwinding when the process exits,
+            # causing a non-deterministic access violation.
             self._listener.stop()
+            try:
+                self._listener.join(timeout=1.0)
+            except RuntimeError:
+                # join() raises RuntimeError if called from the listener's
+                # own thread (e.g. hotkey triggers quit from within the
+                # callback). In that case the thread will exit naturally
+                # when the callback returns; skip the join.
+                pass
             self._listener = None
         logger.info("Hotkey listener stopped")
         self._toggle_key_pressed = False
