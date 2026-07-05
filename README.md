@@ -20,6 +20,7 @@ Licensed under [GPL-3.0](LICENSE).
 - **Network Detection**: Automatically checks network availability on settings save to prevent invalid configurations
 - **Startup Check**: Automatically detects API configuration on first launch and shows setup wizard if unconfigured
 - **Bilingual UI**: Supports Chinese and English interface, switchable in settings (requires restart)
+- **Model Discovery**: Click the 🔄 button in settings to fetch all available models from your API provider — no need to copy model IDs manually
 
 ## Tech Stack
 
@@ -111,7 +112,7 @@ Click the gear icon in the upper-right corner of the floating window, or access 
 |-------|-------------|---------|
 | API Key | Authentication key for STT service | `sk-...` |
 | Base URL | API address of STT service | `https://api.siliconflow.cn/v1` |
-| Model | Speech recognition model | `FunAudioLLM/SenseVoiceSmall` |
+| Model | Speech recognition model (click 🔄 to fetch provider's full model list) | `FunAudioLLM/SenseVoiceSmall` |
 | Language | Recognition language | `zh` / `en` / `auto` |
 | Sample Rate | Recording sample rate | `16000` Hz |
 | Noise Reduction | Enable spectral-gate denoising before recognition | `Off` / `On` |
@@ -123,7 +124,7 @@ Click the gear icon in the upper-right corner of the floating window, or access 
 |-------|-------------|---------|
 | API Key | Authentication key for LLM service | `sk-...` |
 | Base URL | API address of LLM service | `https://api.siliconflow.cn/v1` |
-| Model | Text refinement model | `gpt-4o` / `deepseek-chat` / `qwen-plus` |
+| Model | Text refinement model (click 🔄 to fetch provider's full model list) | `gpt-4o` / `deepseek-chat` / `qwen-plus` |
 
 ### Glossary Configuration
 
@@ -150,7 +151,7 @@ The Right Alt hotkey distinguishes between a tap (start/stop toggle) and modifie
 
 | Field | Description | Default |
 |-------|-------------|---------|
-| Paste Delay | Delay before pasting (milliseconds) | `300 ms` |
+| Paste Delay | Delay before pasting (milliseconds) | `120 ms` |
 | Paste Mode | Auto-detect target window, force `Ctrl+V`, force `Ctrl+Shift+V`, or copy only | Auto |
 | Auto-paste | Whether to auto-paste to cursor position | Enabled |
 
@@ -162,7 +163,7 @@ Voice Type uses OpenAI-compatible APIs and supports multiple providers. Below ar
 
 ### SiliconFlow
 
-Register: https://cloud.siliconflow.cn
+Register: https://cloud.siliconflow.cn/i/BLu934tI
 
 ```json
 {
