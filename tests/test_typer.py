@@ -285,8 +285,9 @@ class TestTextTyperSendPaste:
         typer = TextTyper(cfg)
         assert typer._send_paste() is True
 
-        # Should have called keybd_event 4 times: Ctrl down, V down, V up, Ctrl up
-        assert mock_user32.keybd_event.call_count == 4
+        # 9 calls: 3 modifier release (Alt/Ctrl/Shift up) + Esc down/up +
+        # Ctrl down + V down + V up + Ctrl up.
+        assert mock_user32.keybd_event.call_count == 9
 
     def test_send_paste_exception_returns_false(self, mocker):
         """_send_paste() returns False on exception."""
@@ -306,7 +307,9 @@ class TestTextTyperSendPaste:
         typer = TextTyper(cfg)
         assert typer._send_paste(use_terminal_paste=True) is True
 
-        assert mock_user32.keybd_event.call_count == 6
+        # 11 calls: 3 modifier release + Esc down/up + Ctrl down + Shift down
+        # + V down + V up + Shift up + Ctrl up.
+        assert mock_user32.keybd_event.call_count == 11
 
     def test_send_paste_reports_injection_failure(self, mocker):
         """A zero return from keybd_event (injection failed) surfaces as False."""

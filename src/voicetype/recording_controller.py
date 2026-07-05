@@ -167,7 +167,7 @@ class RecordingController:
         prepares the UI for processing.
 
         Returns True if processing should proceed, or False if the cycle was
-        cancelled. Audio saving (OGG encoding) is deliberately NOT done here —
+        cancelled. Audio saving (WAV encoding) is deliberately NOT done here —
         it runs on the processing worker's background thread so the UI never
         blocks on encoding. A save failure surfaces as a processing error.
         """

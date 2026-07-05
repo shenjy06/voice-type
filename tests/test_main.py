@@ -51,7 +51,7 @@ class TestProcessingWorker:
 
         cfg = mocker.MagicMock()
         cfg.polish.enabled = False
-        recorder = _make_recorder("/tmp/saved.ogg")
+        recorder = _make_recorder("/tmp/saved.wav")
         worker = ProcessingWorker(cfg, recorder)
 
         worker.finished.connect(lambda t: None)
@@ -59,7 +59,7 @@ class TestProcessingWorker:
 
         recorder.save.assert_called_once()
         mock_transcriber.return_value.transcribe.assert_called_once_with(
-            "/tmp/saved.ogg"
+            "/tmp/saved.wav"
         )
 
     def test_save_failure_emits_error(self, qtbot, mocker):
@@ -334,7 +334,7 @@ class TestApplication:
 
     def test_on_recording_stopped_starts_processing_with_recorder(self, qtbot, mocker):
         """A non-cancelled stop hands the recorder (not a pre-saved path) to the
-        processing controller, so OGG encoding runs on the worker thread."""
+        processing controller, so WAV encoding runs on the worker thread."""
         app = self._make_application(qtbot, mocker)
         app.audio_recorder.stop = mocker.MagicMock()
         app.tray.set_recording = mocker.MagicMock()

@@ -30,3 +30,15 @@ POLISH_STYLES = (
     ("settings.polish_style_casual", POLISH_STYLE_CASUAL),
     ("settings.polish_style_concise", POLISH_STYLE_CONCISE),
 )
+
+# Denoise strength identifiers
+DENOISE_STRENGTH_LOW = "low"
+DENOISE_STRENGTH_MEDIUM = "medium"
+DENOISE_STRENGTH_HIGH = "high"
+
+# (translation_key, strength_value) pairs for UI listing
+DENOISE_STRENGTHS = (
+    ("settings.denoise_strength_low", DENOISE_STRENGTH_LOW),
+    ("settings.denoise_strength_medium", DENOISE_STRENGTH_MEDIUM),
+    ("settings.denoise_strength_high", DENOISE_STRENGTH_HIGH),
+)

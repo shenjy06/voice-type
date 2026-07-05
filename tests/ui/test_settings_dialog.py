@@ -217,6 +217,47 @@ class TestSettingsDialogMicrophoneTest:
         monitor.stop.assert_called_once()
 
 
+class TestSettingsDialogDenoise:
+    def test_denoise_controls_exist(self, qtbot):
+        dlg = SettingsDialog(AppConfig())
+        qtbot.addWidget(dlg)
+        assert dlg.denoise_check.isChecked() is False  # off by default
+        assert dlg.denoise_strength_combo.count() == 3  # low/medium/high
+        assert dlg.denoise_strength_combo.currentData() == "medium"
+
+    def test_strength_combo_disabled_when_denoise_off(self, qtbot):
+        dlg = SettingsDialog(AppConfig())
+        qtbot.addWidget(dlg)
+        assert dlg.denoise_check.isChecked() is False
+        assert dlg.denoise_strength_combo.isEnabled() is False
+
+    def test_strength_combo_enabled_when_denoise_on(self, qtbot):
+        dlg = SettingsDialog(AppConfig())
+        qtbot.addWidget(dlg)
+        dlg.denoise_check.setChecked(True)
+        assert dlg.denoise_strength_combo.isEnabled() is True
+
+    def test_denoise_loads_from_config(self, qtbot):
+        cfg = AppConfig(recording=RecordingConfig(denoise_enabled=True, denoise_strength="high"))
+        dlg = SettingsDialog(cfg)
+        qtbot.addWidget(dlg)
+        assert dlg.denoise_check.isChecked() is True
+        assert dlg.denoise_strength_combo.currentData() == "high"
+        assert dlg.denoise_strength_combo.isEnabled() is True
+
+    def test_denoise_saves_to_config(self, qtbot, mocker):
+        mocker.patch("voicetype.ui.settings_dialog.check_network_available", return_value=True)
+        cfg = AppConfig(asr=AsrConfig(api_key="sk-test"))
+        dlg = SettingsDialog(cfg)
+        qtbot.addWidget(dlg)
+        dlg.denoise_check.setChecked(True)
+        idx = dlg.denoise_strength_combo.findData("low")
+        dlg.denoise_strength_combo.setCurrentIndex(idx)
+        dlg._save_and_close()
+        assert cfg.recording.denoise_enabled is True
+        assert cfg.recording.denoise_strength == "low"
+
+
 class TestSettingsDialogSave:
     def test_save_and_close_with_network_available(self, qtbot, mocker):
         """When network is available, config is saved and dialog accepted."""

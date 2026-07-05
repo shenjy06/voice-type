@@ -7,6 +7,7 @@ Licensed under [GPL-3.0](LICENSE).
 ## Features
 
 - **Voice Recording**: One-key record/stop/cancel via global hotkeys without stealing focus from the target application
+- **Noise Reduction**: Optional spectral-gate denoising removes steady background noise (fans, AC, hum) before recognition — pure numpy, no extra dependencies. Targets stationary noise; transient sounds (keyboard clicks) are not well suppressed.
 - **Speech Recognition (STT)**: Transcribe recorded audio to text (OpenAI-compatible protocol)
 - **Smart Refinement**: LLM automatically removes filler words, fixes grammar, and improves clarity
 - **Glossary Corrections**: Replace frequently misrecognized names, project terms, and technical terms before refinement
@@ -113,6 +114,8 @@ Click the gear icon in the upper-right corner of the floating window, or access 
 | Model | Speech recognition model | `FunAudioLLM/SenseVoiceSmall` |
 | Language | Recognition language | `zh` / `en` / `auto` |
 | Sample Rate | Recording sample rate | `16000` Hz |
+| Noise Reduction | Enable spectral-gate denoising before recognition | `Off` / `On` |
+| NR Strength | Denoising aggressiveness (higher suppresses more noise but may affect speech) | `Low` / `Medium` / `High` |
 
 ### Polish (Text Refinement) Configuration
 
@@ -229,6 +232,7 @@ voice-type/
 │       ├── config.py                # Config management: dataclass + JSON persistence
 │       ├── history.py               # SQLite local recognized text history storage
 │       ├── audio.py                 # Audio recording: sounddevice + soundfile OGG encoding
+│       ├── denoise.py               # Spectral-gate noise reduction (numpy-only)
 │       ├── asr.py                   # Speech recognition: OpenAI-compatible transcriptions API
 │       ├── glossary.py              # User glossary term replacement after ASR
 │       ├── polisher.py              # Text refinement: LLM chat completions API
@@ -243,11 +247,12 @@ voice-type/
 │           ├── settings_dialog.py   # Settings dialog (STT/Polish/Glossary/Output/Hotkeys)
 │           ├── system_tray.py       # System tray icon + pynput hotkey manager
 │           └── icon_utils.py        # Shared icon creation (circle + centered text)
-├── tests/                       # Unit tests (243, covering all modules)
+├── tests/                       # Unit tests (375, covering all modules)
 │   ├── conftest.py
 │   ├── test_audio.py
 │   ├── test_asr.py
 │   ├── test_config.py
+│   ├── test_denoise.py
 │   ├── test_main.py
 │   ├── test_network.py
 │   ├── test_glossary.py

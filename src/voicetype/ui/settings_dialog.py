@@ -13,7 +13,7 @@ from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QIcon
 from voicetype.audio import MicrophoneMonitor, get_default_input_device_name
 from voicetype.config import AppConfig, DEFAULT_BASE_URL, GlossaryEntry
-from voicetype.constants import PASTE_MODES, ASR_LANGUAGES
+from voicetype.constants import PASTE_MODES, ASR_LANGUAGES, DENOISE_STRENGTHS
 from voicetype.network import check_network_available
 from voicetype.ui.hotkey_recorder import HotkeyRecorder
 from voicetype.ui.main_window import Toast
@@ -173,6 +173,20 @@ class SettingsDialog(QDialog):
         self.mic_test_btn.clicked.connect(self._toggle_microphone_monitor)
         stt_misc_layout.addRow("", self.mic_test_btn)
 
+        self.denoise_check = QCheckBox(t("settings.denoise_enabled"))
+        self.denoise_check.toggled.connect(self._on_denoise_toggled)
+        stt_misc_layout.addRow("", self.denoise_check)
+
+        self.denoise_strength_combo = QComboBox()
+        for label_key, value in DENOISE_STRENGTHS:
+            self.denoise_strength_combo.addItem(t(label_key), value)
+        stt_misc_layout.addRow(t("settings.denoise_strength"), self.denoise_strength_combo)
+
+        self.denoise_hint_label = QLabel(t("settings.denoise_hint"))
+        self.denoise_hint_label.setWordWrap(True)
+        self.denoise_hint_label.setStyleSheet("color: #9ca3af; font-size: 12px;")
+        stt_misc_layout.addRow("", self.denoise_hint_label)
+
         stt_misc_group.setLayout(stt_misc_layout)
         stt_layout.addWidget(stt_misc_group)
         stt_layout.addStretch()
@@ -328,6 +342,13 @@ class SettingsDialog(QDialog):
         self.stt_lang_combo.setCurrentIndex(idx)
         self.sample_rate_spin.setValue(self.config.recording.sample_rate)
 
+        self.denoise_check.setChecked(self.config.recording.denoise_enabled)
+        idx = self.denoise_strength_combo.findData(self.config.recording.denoise_strength)
+        if idx < 0:
+            idx = self.denoise_strength_combo.findData("medium")
+        self.denoise_strength_combo.setCurrentIndex(idx)
+        self._on_denoise_toggled(self.denoise_check.isChecked())
+
         # Polish tab
         self.polish_api_key_input.setText(self.config.polish.api_key)
         self.polish_base_url_input.setText(self.config.polish.base_url)
@@ -432,6 +453,8 @@ class SettingsDialog(QDialog):
         self.config.asr.model = self.stt_model_combo.currentText()
         self.config.asr.language = self.stt_lang_combo.currentData()
         self.config.recording.sample_rate = self.sample_rate_spin.value()
+        self.config.recording.denoise_enabled = self.denoise_check.isChecked()
+        self.config.recording.denoise_strength = self.denoise_strength_combo.currentData()
 
         # Polish
         self.config.polish.api_key = self.polish_api_key_input.text().strip()
@@ -486,6 +509,11 @@ class SettingsDialog(QDialog):
         """Update the recorder display when a key is captured."""
         self.hotkey_recorder.set_hotkey(hotkey)
         self.hotkey_recorder.stop_recording()
+
+    def _on_denoise_toggled(self, enabled: bool):
+        """Enable/disable the strength selector to match the checkbox."""
+        self.denoise_strength_combo.setEnabled(enabled)
+        self.denoise_hint_label.setEnabled(enabled)
 
     def _update_microphone_device_label(self):
         # sd.query_devices(kind="input") enumerates PortAudio devices, which

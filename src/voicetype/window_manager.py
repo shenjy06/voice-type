@@ -71,7 +71,17 @@ def get_foreground_window() -> int:
 
 
 def set_foreground_window(hwnd: int) -> bool:
-    """Attempt to bring the window with given handle to the foreground."""
+    """Attempt to bring the window with given handle to the foreground.
+
+    Uses a cascade of strategies to work around Windows foreground-stealing
+    restrictions. These are known to work on Windows 10 and Windows 11 up to
+    23H2. On Windows 11 24H2, Microsoft tightened foreground rules further
+    (``AllowSetForegroundWindow`` now requires the caller to be in a visible
+    interactive window station AND have been the foreground process within
+    the last few seconds). If users report paste failures on 24H2, the
+    fallback is to try ``AllowSetForegroundWindow(ASFW_ANY)`` before the
+    strategies below, though this API is undocumented and may change.
+    """
     if not hwnd or hwnd == 0:
         return False
     if not user32.IsWindow(hwnd):
