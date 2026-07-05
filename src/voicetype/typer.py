@@ -109,16 +109,36 @@ class TextTyper:
         returns nonzero on success, zero on failure — e.g. UIPI blocking), so
         a silently-dropped paste surfaces to the user as a "copied instead"
         toast instead of looking like success.
+
+        Before sending Ctrl+V, all modifier keys are force-released and an
+        Esc is tapped. The Alt-tap used by ``set_foreground_window`` to
+        bypass Windows foreground restrictions leaves the target app's menu
+        bar activated (visible in apps like Notepad++, where the menu bar
+        highlights after Alt). If we send V while the menu bar is active,
+        the V is interpreted as a menu mnemonic (e.g. "View" → Alt+V)
+        instead of pasting. Releasing modifiers + Esc dismisses the menu
+        so Ctrl+V lands in the editor as intended.
         """
         try:
             VK_CONTROL = 0x11
             VK_SHIFT = 0x10
             VK_V = 0x56
+            VK_MENU = 0x12      # Alt
+            VK_ESCAPE = 0x1B
 
             def _send(vk: int, flags: int) -> bool:
                 # keybd_event returns nonzero on success; ctypes default
                 # restype is c_int, so a falsy return means injection failed.
                 return bool(user32.keybd_event(vk, 0, flags, 0))
+
+            # Clear any stuck modifier state (Alt from the foreground-restore
+            # tap, or Ctrl/Shift from a previous paste) and dismiss a menu
+            # bar that Alt may have activated.
+            for vk in (VK_MENU, VK_SHIFT, VK_CONTROL):
+                _send(vk, KEYEVENTF_KEYUP)
+            _send(VK_ESCAPE, 0)
+            _send(VK_ESCAPE, KEYEVENTF_KEYUP)
+            time.sleep(0.03)
 
             if not _send(VK_CONTROL, 0):
                 logger.debug("keybd_event: Ctrl down failed")
