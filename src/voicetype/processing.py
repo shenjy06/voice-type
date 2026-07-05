@@ -70,7 +70,7 @@ def invalidate_clients() -> None:
 class ProcessingWorker(QObject):
     """Runs save -> transcribe -> glossary -> polish and emits signals.
 
-    The audio ``recorder`` is saved (OGG/Vorbis encoding) on this background
+    The audio ``recorder`` is saved (WAV/PCM encoding) on this background
     thread so the encoding cost never blocks the UI thread. The recorder holds
     the captured frames between ``stop()`` and this save; recording cannot
     restart during PROCESSING, so the frames are safe to read here.
@@ -107,7 +107,7 @@ class ProcessingWorker(QObject):
         audio_path = None
         try:
             self.started.emit()
-            # Encode the captured frames to a temp OGG file on this thread so
+            # Encode the captured frames to a temp WAV file on this thread so
             # the (potentially slow) Vorbis encoding never blocks the UI.
             audio_path = str(self.recorder.save())
             self.recorder = None  # release reference; buffer freed in save()
@@ -136,7 +136,7 @@ class ProcessingWorker(QObject):
             self.error.emit(str(e))
         finally:
             # Delete the temporary audio file regardless of success or failure
-            # so failed runs never leak OGG files in the temp directory.
+            # so failed runs never leak WAV files in the temp directory.
             if audio_path is not None:
                 try:
                     os.remove(audio_path)

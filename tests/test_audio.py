@@ -15,6 +15,16 @@ class TestAudioRecorderDefaults:
         recorder = AudioRecorder(sample_rate=44100)
         assert recorder.sample_rate == 44100
 
+    def test_denoise_disabled_by_default(self):
+        recorder = AudioRecorder()
+        assert recorder.denoise_enabled is False
+        assert recorder.denoise_strength == "medium"
+
+    def test_denoise_params_accepted(self):
+        recorder = AudioRecorder(denoise_enabled=True, denoise_strength="high")
+        assert recorder.denoise_enabled is True
+        assert recorder.denoise_strength == "high"
+
     def test_initially_not_recording(self):
         recorder = AudioRecorder()
         assert recorder.is_recording is False
@@ -79,7 +89,7 @@ class TestAudioRecorderStartStop:
 
 class TestAudioRecorderSave:
     def test_save_with_frames_writes_ogg(self, mocker):
-        """save() with audio frames writes an OGG file via soundfile."""
+        """save() with audio frames writes a WAV file via soundfile."""
         mock_sf = mocker.patch("voicetype.audio.sf")
         mocker.patch("voicetype.audio.tempfile.gettempdir", return_value="/tmp")
         mocker.patch("voicetype.audio.uuid.uuid4", return_value=mocker.MagicMock(hex="abc123"))
@@ -91,11 +101,11 @@ class TestAudioRecorderSave:
 
         mock_sf.write.assert_called_once()
         args, kwargs = mock_sf.write.call_args
-        assert Path(str(args[0])).as_posix() == "/tmp/.voice_type/recording_abc123.ogg"
+        assert Path(str(args[0])).as_posix() == "/tmp/.voice_type/recording_abc123.wav"
         mock_mkdir.assert_called_once_with(parents=True, exist_ok=True)
         assert args[2] == recorder.sample_rate
-        assert kwargs["format"] == "OGG"
-        assert kwargs["subtype"] == "VORBIS"
+        assert kwargs["format"] == "WAV"
+        assert kwargs["subtype"] == "PCM_16"
 
     def test_save_without_frames_raises(self):
         """save() with no frames raises ValueError."""
@@ -121,7 +131,7 @@ class TestAudioRecorderSave:
         assert data_arg[2] == 1.0
 
     def test_save_returns_path(self, mocker):
-        """save() returns the Path to the saved OGG file."""
+        """save() returns the Path to the saved WAV file."""
         mocker.patch("voicetype.audio.sf")
         mocker.patch("voicetype.audio.tempfile.gettempdir", return_value="/tmp")
         mocker.patch("voicetype.audio.uuid.uuid4", return_value=mocker.MagicMock(hex="def456"))
@@ -132,8 +142,48 @@ class TestAudioRecorderSave:
         result = recorder.save()
 
         assert isinstance(result, Path)
-        assert Path(str(result)).as_posix() == "/tmp/.voice_type/recording_def456.ogg"
+        assert Path(str(result)).as_posix() == "/tmp/.voice_type/recording_def456.wav"
         assert recorder.audio_path is not None
+
+    def test_save_skips_denoise_when_disabled(self, mocker):
+        """Denoise is not called when denoise_enabled is False."""
+        mock_sf = mocker.patch("voicetype.audio.sf")
+        mocker.patch("voicetype.audio.tempfile.gettempdir", return_value="/tmp")
+        mocker.patch("voicetype.audio.uuid.uuid4", return_value=mocker.MagicMock(hex="abc"))
+        mocker.patch("voicetype.audio.Path.mkdir")
+        mock_denoise = mocker.patch("voicetype.audio.denoise")
+
+        recorder = AudioRecorder(denoise_enabled=False)
+        recorder._frames = [np.array([0.1, 0.2], dtype=np.float32)]
+        recorder.save()
+
+        mock_denoise.assert_not_called()
+        # Original data is written as-is.
+        data_arg = mock_sf.write.call_args[0][1]
+        np.testing.assert_array_equal(data_arg, np.array([0.1, 0.2], dtype=np.float32))
+
+    def test_save_applies_denoise_when_enabled(self, mocker):
+        """Denoise is called and its output is written when enabled."""
+        mock_sf = mocker.patch("voicetype.audio.sf")
+        mocker.patch("voicetype.audio.tempfile.gettempdir", return_value="/tmp")
+        mocker.patch("voicetype.audio.uuid.uuid4", return_value=mocker.MagicMock(hex="abc"))
+        mocker.patch("voicetype.audio.Path.mkdir")
+        mock_denoise = mocker.patch("voicetype.audio.denoise")
+
+        denoised = np.array([0.9, 0.8, 0.7], dtype=np.float32)
+        mock_denoise.return_value = denoised
+
+        recorder = AudioRecorder(denoise_enabled=True, denoise_strength="high")
+        recorder._frames = [np.array([0.1, 0.2, 0.3], dtype=np.float32)]
+        recorder.save()
+
+        mock_denoise.assert_called_once()
+        args, kwargs = mock_denoise.call_args
+        # Second positional arg is sample_rate; strength passed as kwarg.
+        assert kwargs.get("strength") == "high"
+        # Denoised data is what gets written to WAV.
+        data_arg = mock_sf.write.call_args[0][1]
+        np.testing.assert_array_equal(data_arg, denoised)
 
 
 class TestAudioRecorderCallback:

@@ -1,4 +1,4 @@
-"""Audio recording — start/stop/save OGG via sounddevice."""
+"""Audio recording — start/stop/save WAV via sounddevice."""
 
 import logging
 import sys
@@ -11,6 +11,8 @@ from pathlib import Path
 import numpy as np
 import sounddevice as sd
 import soundfile as sf
+
+from voicetype.denoise import denoise
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +64,7 @@ def cleanup_stale_audio() -> None:
     _tighten_dir_permissions(tmpdir)
     now = time.time()
     deleted = 0
-    for f in tmpdir.glob("recording_*.ogg"):
+    for f in tmpdir.glob("recording_*.wav"):
         try:
             age = now - f.stat().st_mtime
             if age > STALE_AUDIO_MAX_AGE_SECONDS:
@@ -140,8 +142,15 @@ class MicrophoneMonitor:
 
 
 class AudioRecorder:
-    def __init__(self, sample_rate: int = 16000):
+    def __init__(
+        self,
+        sample_rate: int = 16000,
+        denoise_enabled: bool = False,
+        denoise_strength: str = "medium",
+    ):
         self.sample_rate = sample_rate
+        self.denoise_enabled = denoise_enabled
+        self.denoise_strength = denoise_strength
         self._recording = False
         self._frames: list[np.ndarray] = []
         self._stream: sd.InputStream | None = None
@@ -229,10 +238,23 @@ class AudioRecorder:
         except ValueError as e:
             raise ValueError("Invalid audio data") from e
 
+        # Optional noise suppression — runs on the processing worker
+        # thread, so the ~tens-of-ms spectral-gate cost never blocks the
+        # UI. ``denoise`` is best-effort and returns the original audio
+        # on any failure, so it can never break the save pipeline.
+        if self.denoise_enabled:
+            data = denoise(data, self.sample_rate, strength=self.denoise_strength)
+
         duration_ms = len(data) / self.sample_rate * 1000
-        temp_file = self._temp_dir / f"recording_{uuid.uuid4().hex}.ogg"
+        # WAV/PCM_16 instead of OGG/Vorbis: libsndfile 1.2.2's Vorbis
+        # encoder crashes natively once the clip exceeds ~32 s (bundled)
+        # / ~60 s (dev). WAV skips the encoder entirely — PCM is just a
+        # raw byte copy, so it cannot crash regardless of duration. The
+        # larger file (~1 MB per 33 s vs ~185 KB for OGG) is well within
+        # ASR providers' upload limits.
+        temp_file = self._temp_dir / f"recording_{uuid.uuid4().hex}.wav"
         try:
-            sf.write(str(temp_file), data, self.sample_rate, format="OGG", subtype="VORBIS")
+            sf.write(str(temp_file), data, self.sample_rate, format="WAV", subtype="PCM_16")
         except Exception as e:
             logger.error("Failed to save audio: %s", e, exc_info=True)
             raise ValueError(f"Failed to save audio: {e}") from e
@@ -240,10 +262,11 @@ class AudioRecorder:
         with self._lock:
             self._temp_file = temp_file
         logger.info(
-            "Audio saved: %s (%.1f s, %d frames)",
+            "Audio saved: %s (%.1f s, %d frames, denoise=%s)",
             temp_file.name,
             duration_ms / 1000,
             len(frames),
+            self.denoise_strength if self.denoise_enabled else "off",
         )
         return self._temp_file
 
