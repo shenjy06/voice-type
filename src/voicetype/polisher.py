@@ -4,7 +4,7 @@ import logging
 import time
 from functools import lru_cache
 
-from voicetype.api_client import ApiClient
+from voicetype.api_client import ApiClient, warmup_connection
 from voicetype.config import AppConfig
 from voicetype.retry import retry_call
 
@@ -86,6 +86,14 @@ class TextPolisher:
             base_url=config.polish.base_url,
             timeout=60,
         ).client
+
+    def warmup(self) -> None:
+        """Pre-establish the TLS connection so the first real polish call
+        doesn't pay the handshake cost (~200-500ms).
+
+        Best-effort: any failure is swallowed — see warmup_connection.
+        """
+        warmup_connection(self._client, label="Polish")
 
     @staticmethod
     def _build_user_message(text: str) -> str:
