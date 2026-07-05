@@ -81,7 +81,11 @@ class Application:
 
         self.config = AppConfig.load()
         init_language(self.config.language)
-        self.audio_recorder = AudioRecorder(self.config.recording.sample_rate)
+        self.audio_recorder = AudioRecorder(
+            self.config.recording.sample_rate,
+            denoise_enabled=self.config.recording.denoise_enabled,
+            denoise_strength=self.config.recording.denoise_strength,
+        )
         self.typer = TextTyper(self.config)
         self.history_store = HistoryStore()
         self._quitting = False
@@ -326,6 +330,8 @@ class Application:
         if self.config.hotkey.toggle_enabled:
             self.hotkey_manager.start()
         self.audio_recorder.sample_rate = self.config.recording.sample_rate
+        self.audio_recorder.denoise_enabled = self.config.recording.denoise_enabled
+        self.audio_recorder.denoise_strength = self.config.recording.denoise_strength
         self.window.retranslate()
         self.tray.retranslate()
         self.tray.apply_config(self.config)
