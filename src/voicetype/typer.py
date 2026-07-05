@@ -133,7 +133,9 @@ class TextTyper:
 
             # Clear any stuck modifier state (Alt from the foreground-restore
             # tap, or Ctrl/Shift from a previous paste) and dismiss a menu
-            # bar that Alt may have activated.
+            # bar that Alt may have activated. These are best-effort: we
+            # intentionally ignore their return values because a cleanup
+            # failure should never block the actual Ctrl+V paste.
             for vk in (VK_MENU, VK_SHIFT, VK_CONTROL):
                 _send(vk, KEYEVENTF_KEYUP)
             _send(VK_ESCAPE, 0)
