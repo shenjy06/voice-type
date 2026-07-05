@@ -171,7 +171,7 @@ class TestErrorHandling:
     def test_length_mismatch_returns_original(self, monkeypatch):
         """If the gate returns the wrong length, the original is returned."""
 
-        def _wrong_length(audio, sample_rate, **kwargs):
+        def _wrong_length(audio, **kwargs):
             return np.zeros(10, dtype=np.float32)
 
         monkeypatch.setattr("voicetype.denoise._spectral_gate", _wrong_length)
@@ -184,7 +184,6 @@ class TestSpectralGateDirect:
     def test_empty_audio(self):
         result = _spectral_gate(
             np.array([], dtype=np.float32),
-            SAMPLE_RATE,
             threshold=1.5,
             attenuation=0.1,
             noise_frames=6,
@@ -195,7 +194,6 @@ class TestSpectralGateDirect:
         audio = np.zeros(100, dtype=np.float32)
         result = _spectral_gate(
             audio,
-            SAMPLE_RATE,
             threshold=1.5,
             attenuation=0.1,
             noise_frames=6,

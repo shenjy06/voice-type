@@ -114,6 +114,18 @@ class ProcessingWorker(QObject):
             logger.debug("Processing pipeline started: %s", os.path.basename(audio_path))
             transcriber = get_transcriber(self.config)
             transcript = transcriber.transcribe(audio_path)
+
+            # Transcription is done — the temp WAV file is no longer
+            # needed. Delete it now so our recording doesn't sit on
+            # disk during the (potentially slow) polish phase. The
+            # ``finally`` block below is a safety net for error paths
+            # that never reach this point.
+            try:
+                os.remove(audio_path)
+                audio_path = None
+            except OSError:
+                pass
+
             if not transcript:
                 logger.info("Transcription returned empty — pipeline finished")
                 self.finished.emit("")
