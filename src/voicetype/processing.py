@@ -2,6 +2,7 @@
 
 import logging
 import os
+import time
 
 from PySide6.QtCore import QObject, Signal
 
@@ -105,13 +106,16 @@ class ProcessingWorker(QObject):
 
     def run(self):
         audio_path = None
+        pipeline_start = time.monotonic()
         try:
             self.started.emit()
             # Encode the captured frames to a temp WAV file on this thread so
             # the (potentially slow) Vorbis encoding never blocks the UI.
+            save_start = time.monotonic()
             audio_path = str(self.recorder.save())
             self.recorder = None  # release reference; buffer freed in save()
             logger.debug("Processing pipeline started: %s", os.path.basename(audio_path))
+            logger.info("Audio saved in %.0fms", (time.monotonic() - save_start) * 1000)
             transcriber = get_transcriber(self.config)
             transcript = transcriber.transcribe(audio_path)
 
@@ -127,12 +131,14 @@ class ProcessingWorker(QObject):
                 pass
 
             if not transcript:
-                logger.info("Transcription returned empty — pipeline finished")
+                logger.info("Transcription returned empty — pipeline finished in %.1fs",
+                            time.monotonic() - pipeline_start)
                 self.finished.emit("")
                 return
             transcript = apply_glossary(transcript, self.config.glossary)
             if not self.config.polish.enabled:
-                logger.info("Polishing disabled — emitting transcript directly")
+                logger.info("Polishing disabled — emitting transcript directly (pipeline %.1fs)",
+                            time.monotonic() - pipeline_start)
                 self.finished.emit(transcript)
                 return
             polisher = get_polisher(self.config)
@@ -141,7 +147,7 @@ class ProcessingWorker(QObject):
                 context_before=self.context_before,
                 context_after=self.context_after,
             )
-            logger.info("Processing pipeline finished successfully")
+            logger.info("Processing pipeline finished in %.1fs", time.monotonic() - pipeline_start)
             self.finished.emit(refined)
         except Exception as e:
             logger.error("Processing pipeline failed: %s", e, exc_info=True)

@@ -20,6 +20,7 @@ Windows 语音转文字速记工具。录制语音 → 语音识别 → 文本�
 - **网络检测**: 保存设置时自动检测网络可用性，避免无效配置
 - **启动检查**: 首次启动时自动检测 API 配置，未配置时弹出设置引导
 - **中英文界面**: 支持中文/英文双语 UI，可在设置中切换语言，重启生效
+- **模型自动发现**: 设置中点击 🔄 按钮可自动获取提供商的全部可用模型，无需手动复制模型名
 
 ## 技术栈
 
@@ -109,7 +110,7 @@ pyinstaller --clean --noconfirm VoiceType.spec
 |------|------|------|
 | API Key | STT 服务的认证密钥 | `sk-...` |
 | Base URL | STT 服务的 API 地址 | `https://api.siliconflow.cn/v1` |
-| Model | 语音识别模型 | `FunAudioLLM/SenseVoiceSmall` |
+| Model | 语音识别模型（点击 🔄 可获取提供商全部模型列表） | `FunAudioLLM/SenseVoiceSmall` |
 | Language | 识别语言 | `zh` / `en` / `auto` |
 | Sample Rate | 录制采样率 | `16000` Hz |
 | Noise Reduction | 识别前是否启用谱门降噪 | `Off` / `On` |
@@ -121,7 +122,7 @@ pyinstaller --clean --noconfirm VoiceType.spec
 |------|------|------|
 | API Key | LLM 服务的认证密钥 | `sk-...` |
 | Base URL | LLM 服务的 API 地址 | `https://api.siliconflow.cn/v1` |
-| Model | 文本润色模型 | `gpt-4o` / `deepseek-chat` / `qwen-plus` |
+| Model | 文本润色模型（点击 🔄 可获取提供商全部模型列表） | `gpt-4o` / `deepseek-chat` / `qwen-plus` |
 
 ### Glossary（词库）配置
 
@@ -145,7 +146,7 @@ Right Alt 热键区分单击（切换录制）和组合键（按住它加其他�
 
 | 字段 | 说明 | 默认值 |
 |------|------|--------|
-| Paste Delay | 粘贴前延迟（毫秒） | `300 ms` |
+| Paste Delay | 粘贴前延迟（毫秒） | `120 ms` |
 | Paste Mode | 自动检测目标窗口、强制 `Ctrl+V`、强制 `Ctrl+Shift+V` 或仅复制 | 自动 |
 | Auto-paste | 是否自动粘贴到光标位置 | 开启 |
 
@@ -157,7 +158,7 @@ Voice Type 使用 OpenAI 兼容协议的 API，支持多种服务商。以下是
 
 ### SiliconFlow（硅基流动）
 
-注册地址: https://cloud.siliconflow.cn
+注册地址: https://cloud.siliconflow.cn/i/BLu934tI
 
 ```json
 {

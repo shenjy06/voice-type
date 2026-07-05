@@ -42,6 +42,8 @@ class TextTyper:
         if not text:
             return False
 
+        paste_start = time.monotonic()
+
         # Try to restore the saved window
         window_restored = False
         if saved_hwnd and saved_hwnd != 0:
@@ -87,7 +89,7 @@ class TextTyper:
         if original_clipboard is not None and original_clipboard != text:
             self._schedule_clipboard_restore(original_clipboard)
 
-        logger.info("Paste successful (%d chars)", len(text))
+        logger.info("Paste successful (%d chars) in %.1fms", len(text), (time.monotonic() - paste_start) * 1000)
         return True
 
     def _schedule_clipboard_restore(self, original: str) -> None:
@@ -140,30 +142,30 @@ class TextTyper:
                 _send(vk, KEYEVENTF_KEYUP)
             _send(VK_ESCAPE, 0)
             _send(VK_ESCAPE, KEYEVENTF_KEYUP)
-            time.sleep(0.03)
+            time.sleep(0.02)
 
             if not _send(VK_CONTROL, 0):
                 logger.debug("keybd_event: Ctrl down failed")
                 return False
-            time.sleep(0.05)
+            time.sleep(0.02)
             if use_terminal_paste:
                 if not _send(VK_SHIFT, 0):
                     logger.debug("keybd_event: Shift down failed")
                     return False
-                time.sleep(0.05)
+                time.sleep(0.02)
             if not _send(VK_V, 0):
                 logger.debug("keybd_event: V down failed")
                 return False
-            time.sleep(0.05)
+            time.sleep(0.02)
             if not _send(VK_V, KEYEVENTF_KEYUP):
                 logger.debug("keybd_event: V up failed")
                 return False
-            time.sleep(0.05)
+            time.sleep(0.02)
             if use_terminal_paste:
                 if not _send(VK_SHIFT, KEYEVENTF_KEYUP):
                     logger.debug("keybd_event: Shift up failed")
                     return False
-                time.sleep(0.05)
+                time.sleep(0.02)
             if not _send(VK_CONTROL, KEYEVENTF_KEYUP):
                 logger.debug("keybd_event: Ctrl up failed")
                 return False
