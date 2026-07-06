@@ -40,6 +40,7 @@ The app follows a pipeline architecture with a central `Application` orchestrato
 | `src/voicetype/api_client.py` | `ApiClient` — wraps OpenAI client creation with common defaults |
 | `src/voicetype/config.py` | Dataclass-based config with JSON persistence (`AppConfig`, `AsrConfig`, `PolishApiConfig`, `RecordingConfig`, `OutputConfig`, `GlossaryEntry`, `WindowConfig`) |
 | `src/voicetype/audio.py` | `AudioRecorder` — sounddevice-based async recording, saves to temp OGG via soundfile |
+| `src/voicetype/denoise.py` | `denoise()` — numpy-only spectral-gate noise reduction applied before ASR (no scipy dependency) |
 | `src/voicetype/asr.py` | `Transcriber` — OpenAI SDK `audio.transcriptions.create()` for STT |
 | `src/voicetype/glossary.py` | `apply_glossary()` — user-defined term replacements applied after STT and before polishing |
 | `src/voicetype/polisher.py` | `TextPolisher` — OpenAI SDK `chat.completions.create()` with system prompt for text refinement, supports context-aware polishing |

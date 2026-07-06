@@ -217,6 +217,47 @@ class TestSettingsDialogMicrophoneTest:
         monitor.stop.assert_called_once()
 
 
+class TestSettingsDialogDenoise:
+    def test_denoise_controls_exist(self, qtbot):
+        dlg = SettingsDialog(AppConfig())
+        qtbot.addWidget(dlg)
+        assert dlg.denoise_check.isChecked() is False  # off by default
+        assert dlg.denoise_strength_combo.count() == 3  # low/medium/high
+        assert dlg.denoise_strength_combo.currentData() == "medium"
+
+    def test_strength_combo_disabled_when_denoise_off(self, qtbot):
+        dlg = SettingsDialog(AppConfig())
+        qtbot.addWidget(dlg)
+        assert dlg.denoise_check.isChecked() is False
+        assert dlg.denoise_strength_combo.isEnabled() is False
+
+    def test_strength_combo_enabled_when_denoise_on(self, qtbot):
+        dlg = SettingsDialog(AppConfig())
+        qtbot.addWidget(dlg)
+        dlg.denoise_check.setChecked(True)
+        assert dlg.denoise_strength_combo.isEnabled() is True
+
+    def test_denoise_loads_from_config(self, qtbot):
+        cfg = AppConfig(recording=RecordingConfig(denoise_enabled=True, denoise_strength="high"))
+        dlg = SettingsDialog(cfg)
+        qtbot.addWidget(dlg)
+        assert dlg.denoise_check.isChecked() is True
+        assert dlg.denoise_strength_combo.currentData() == "high"
+        assert dlg.denoise_strength_combo.isEnabled() is True
+
+    def test_denoise_saves_to_config(self, qtbot, mocker):
+        mocker.patch("voicetype.ui.settings_dialog.check_network_available", return_value=True)
+        cfg = AppConfig(asr=AsrConfig(api_key="sk-test"))
+        dlg = SettingsDialog(cfg)
+        qtbot.addWidget(dlg)
+        dlg.denoise_check.setChecked(True)
+        idx = dlg.denoise_strength_combo.findData("low")
+        dlg.denoise_strength_combo.setCurrentIndex(idx)
+        dlg._save_and_close()
+        assert cfg.recording.denoise_enabled is True
+        assert cfg.recording.denoise_strength == "low"
+
+
 class TestSettingsDialogSave:
     def test_save_and_close_with_network_available(self, qtbot, mocker):
         """When network is available, config is saved and dialog accepted."""
@@ -351,3 +392,210 @@ class TestSettingsDialogCancel:
         qtbot.addWidget(dlg)
         dlg.reject()
         assert dlg.result() == QDialog.Rejected
+
+
+class TestSettingsDialogWrapHeights:
+    """Word-wrapped form-field labels must not clip their wrapped text.
+
+    Regression: QFormLayout sizes field rows by sizeHint, not by
+    heightForWidth, so word-wrapped QLabels placed as form fields
+    (denoise_hint_label, mic_status_label, mic_device_label) were
+    compressed to one line in English — where the field column narrows
+    because the form labels are longer — clipping both lines of wrapped
+    text. SettingsDialog._adjust_wrap_heights forces each label's
+    minimum height to its heightForWidth so the layout allocates the
+    full wrapped height.
+    """
+
+    def test_wrap_labels_get_full_wrapped_height_in_english(self, qtbot):
+        from voicetype import i18n
+        saved_lang = i18n._current_lang
+        try:
+            i18n.init_language("en")
+            dlg = SettingsDialog(AppConfig())
+            qtbot.addWidget(dlg)
+            dlg.show()
+            dlg._tabs.setCurrentIndex(1)  # STT tab
+            # _adjust_wrap_heights is deferred via QTimer.singleShot(0, ...);
+            # the mic device name is fetched on a background thread and
+            # delivered via a queued signal. Wait for both to settle.
+            qtbot.wait(200)
+            for lbl in dlg._wrap_labels:
+                if lbl.width() <= 0 or not lbl.text():
+                    continue
+                hfw = lbl.heightForWidth(lbl.width())
+                if hfw <= 0:
+                    continue
+                # _adjust_wrap_heights must have set minimumHeight to the
+                # full wrapped height so the layout can't compress the label.
+                assert lbl.minimumHeight() >= hfw, (
+                    f"minimumHeight {lbl.minimumHeight()} < heightForWidth {hfw} "
+                    f"for '{lbl.text()[:30]}'"
+                )
+        finally:
+            dlg.close()
+            i18n.init_language(saved_lang)
+
+    def test_wrap_labels_not_clipped_in_chinese(self, qtbot):
+        """In Chinese the field column is wider and text fits on one line,
+        but the fix must still not leave the label shorter than its text."""
+        from voicetype import i18n
+        saved_lang = i18n._current_lang
+        try:
+            i18n.init_language("zh")
+            dlg = SettingsDialog(AppConfig())
+            qtbot.addWidget(dlg)
+            dlg.show()
+            dlg._tabs.setCurrentIndex(1)
+            qtbot.wait(200)
+            for lbl in dlg._wrap_labels:
+                if lbl.width() <= 0 or not lbl.text():
+                    continue
+                hfw = lbl.heightForWidth(lbl.width())
+                if hfw <= 0:
+                    continue
+                assert lbl.minimumHeight() >= hfw, (
+                    f"minimumHeight {lbl.minimumHeight()} < heightForWidth {hfw} "
+                    f"for '{lbl.text()[:30]}'"
+                )
+        finally:
+            dlg.close()
+            i18n.init_language(saved_lang)
+
+
+class TestSettingsDialogModelFetch:
+    """Model-list fetching from the provider's /models endpoint."""
+
+    def test_refresh_buttons_created(self, qtbot):
+        """Each editable model combo gets a paired refresh button."""
+        dlg = SettingsDialog(AppConfig())
+        qtbot.addWidget(dlg)
+        assert "asr" in dlg._refresh_buttons
+        assert "polish" in dlg._refresh_buttons
+        assert dlg._refresh_buttons["asr"].isEnabled()
+        assert dlg._refresh_buttons["polish"].isEnabled()
+
+    def test_fetch_models_requires_api_key(self, qtbot, mocker):
+        """Fetching without an API key surfaces an error (no thread started)."""
+        dlg = SettingsDialog(AppConfig(asr=AsrConfig(api_key="")))
+        qtbot.addWidget(dlg)
+        mocker.patch("voicetype.ui.settings_dialog.Toast")
+        spy = mocker.spy(dlg, "_on_models_error")
+        mocker.patch("voicetype.ui.settings_dialog.threading.Thread")
+        dlg._fetch_models("asr")
+        spy.assert_called_once()
+        assert spy.call_args[0][0] == "asr"
+
+    def test_fetch_models_starts_background_thread(self, qtbot, mocker):
+        """With a key present, a daemon thread is started to fetch models."""
+        cfg = AppConfig(asr=AsrConfig(api_key="sk-test", base_url="https://api/v1"))
+        dlg = SettingsDialog(cfg)
+        qtbot.addWidget(dlg)
+        mock_thread = mocker.patch("voicetype.ui.settings_dialog.threading.Thread")
+        mocker.patch("voicetype.ui.settings_dialog.fetch_models", return_value=["m1", "m2"])
+        dlg._fetch_models("asr")
+        assert mock_thread.called
+        assert mock_thread.call_args.kwargs.get("daemon") is True
+
+    def test_on_models_fetched_populates_combo(self, qtbot):
+        """A successful fetch replaces the combo contents with the model list."""
+        dlg = SettingsDialog(AppConfig())
+        qtbot.addWidget(dlg)
+        dlg._on_models_fetched("asr", ["whisper-1", "gpt-4o"])
+        items = [dlg.stt_model_combo.itemText(i)
+                 for i in range(dlg.stt_model_combo.count())]
+        assert "whisper-1" in items
+        assert "gpt-4o" in items
+
+    def test_on_models_fetched_keeps_previous_selection(self, qtbot):
+        """The model selected before the fetch stays selected afterwards."""
+        dlg = SettingsDialog(AppConfig())
+        qtbot.addWidget(dlg)
+        dlg._model_before_fetch["polish"] = "gpt-4o"
+        dlg._on_models_fetched("polish", ["deepseek-chat", "gpt-4o", "qwen-plus"])
+        assert dlg.polish_model_combo.currentText() == "gpt-4o"
+
+    def test_on_models_fetched_preserves_unlisted_model(self, qtbot):
+        """A previously-selected model no longer listed is kept as an option."""
+        dlg = SettingsDialog(AppConfig())
+        qtbot.addWidget(dlg)
+        dlg._model_before_fetch["asr"] = "my-custom-model"
+        dlg._on_models_fetched("asr", ["whisper-1", "gpt-4o"])
+        items = [dlg.stt_model_combo.itemText(i)
+                 for i in range(dlg.stt_model_combo.count())]
+        assert "my-custom-model" in items
+        assert dlg.stt_model_combo.currentText() == "my-custom-model"
+
+    def test_on_models_fetched_replaces_not_appends(self, qtbot):
+        """Fetch replaces rather than appends — no duplicate items."""
+        dlg = SettingsDialog(AppConfig())
+        qtbot.addWidget(dlg)
+        dlg._on_models_fetched("asr", ["a", "b"])
+        dlg._on_models_fetched("asr", ["c", "d"])
+        items = [dlg.stt_model_combo.itemText(i)
+                 for i in range(dlg.stt_model_combo.count())]
+        assert items == ["c", "d"]
+
+    def test_on_models_fetched_empty_list_is_noop(self, qtbot):
+        """An empty model list doesn't clear the existing combo."""
+        dlg = SettingsDialog(AppConfig())
+        qtbot.addWidget(dlg)
+        original = dlg.stt_model_combo.count()
+        dlg._on_models_fetched("asr", [])
+        assert dlg.stt_model_combo.count() == original
+
+    def test_on_models_error_restores_button_and_clears_state(self, qtbot, mocker):
+        """A fetch failure re-enables the button and clears the pending state."""
+        dlg = SettingsDialog(AppConfig())
+        qtbot.addWidget(dlg)
+        mocker.patch("voicetype.ui.settings_dialog.Toast")
+        dlg._model_before_fetch["asr"] = "pending"
+        dlg._refresh_buttons["asr"].setEnabled(False)
+        dlg._refresh_buttons["asr"].setText("⏳")
+        dlg._on_models_error("asr", "boom")
+        assert dlg._refresh_buttons["asr"].isEnabled()
+        assert dlg._refresh_buttons["asr"].text() == "🔄"
+        assert "asr" not in dlg._model_before_fetch
+
+    def test_fetch_disables_combo_and_shows_loading(self, qtbot, mocker):
+        """During fetch, the combo shows the loading placeholder and is disabled."""
+        cfg = AppConfig(asr=AsrConfig(api_key="sk-test", base_url="https://api/v1"))
+        dlg = SettingsDialog(cfg)
+        qtbot.addWidget(dlg)
+        mocker.patch("voicetype.ui.settings_dialog.threading.Thread")
+        mocker.patch("voicetype.ui.settings_dialog.fetch_models", return_value=["m1"])
+        dlg._fetch_models("asr")
+        items = [dlg.stt_model_combo.itemText(i)
+                 for i in range(dlg.stt_model_combo.count())]
+        from voicetype import i18n
+        assert dlg.stt_model_combo.currentText() == i18n.t("settings.loading_models")
+        assert not dlg.stt_model_combo.isEnabled()
+        assert "m1" not in items  # old items cleared
+
+    def test_on_models_fetched_empty_list_restores_and_toasts(self, qtbot, mocker):
+        """When the provider returns no models, the combo is restored + toast."""
+        dlg = SettingsDialog(AppConfig())
+        qtbot.addWidget(dlg)
+        mock_toast = mocker.patch("voicetype.ui.settings_dialog.Toast")
+        dlg._model_before_fetch["asr"] = "selected"
+        dlg._model_items_before_fetch["asr"] = ["selected", "other"]
+        dlg._on_models_fetched("asr", [])
+        # Combo restored with original items
+        items = [dlg.stt_model_combo.itemText(i)
+                 for i in range(dlg.stt_model_combo.count())]
+        assert "selected" in items
+        assert "other" in items
+        assert dlg.stt_model_combo.currentText() == "selected"
+        assert dlg.stt_model_combo.isEnabled()
+        # Toast was shown
+        assert mock_toast.called
+
+    def test_restore_combo_without_saved_items_is_noop(self, qtbot):
+        """When _model_items_before_fetch has no entry, the combo is untouched."""
+        dlg = SettingsDialog(AppConfig())
+        qtbot.addWidget(dlg)
+        original_count = dlg.stt_model_combo.count()
+        original_text = dlg.stt_model_combo.currentText()
+        dlg._restore_combo_on_fetch_failure("asr")
+        assert dlg.stt_model_combo.count() == original_count
+        assert dlg.stt_model_combo.currentText() == original_text

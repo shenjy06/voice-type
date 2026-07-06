@@ -58,8 +58,11 @@ def _send_copy() -> str:
     except Exception:
         return ""
 
-    # If clipboard still has our marker, the copy didn't work (no selection or unsupported)
+    # If clipboard still has our marker, the copy didn't work (no selection
+    # or unsupported editor). Log at debug level so developers can tell the
+    # difference between "Ctrl+C did nothing" and "selection was truly empty".
     if result == _CLIPBOARD_MARKER:
+        logger.debug("Ctrl+C had no effect — clipboard unchanged (unsupported editor or no selection)")
         return ""
     return result
 

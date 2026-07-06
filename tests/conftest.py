@@ -1,5 +1,5 @@
-import pytest
 import os
+
 import pytest
 
 # Force offscreen qt platform when running tests on a headless display (CI,
@@ -12,9 +12,18 @@ if not os.environ.get("QT_QPA_PLATFORM"):
 from voicetype.config import AppConfig  # noqa: E402
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def tmp_config_path(tmp_path, monkeypatch):
-    """Redirect CONFIG_DIR/CONFIG_FILE to a temporary directory and return the config dir path."""
+    """Redirect CONFIG_DIR/CONFIG_FILE to a temporary directory for every test.
+
+    autouse=True is critical: settings-dialog and main-window tests call
+    ``config.save()`` (via ``_save_and_close`` / ``_save_quick_settings``).
+    Without this redirect those saves would overwrite the developer's real
+    ``~/.voice-type/config.json`` with test data (empty API keys, "sk-test",
+    …), destroying the user's config. Making it autouse guarantees every
+    test — including ones that forget to ask for the fixture explicitly —
+    is sandboxed. Tests that want the dir path can still request it by name.
+    """
     import voicetype.config as config_mod
     config_dir = tmp_path / ".voice-type"
     monkeypatch.setattr(config_mod, "CONFIG_DIR", config_dir)

@@ -42,6 +42,8 @@ class TextTyper:
         if not text:
             return False
 
+        paste_start = time.monotonic()
+
         # Try to restore the saved window
         window_restored = False
         if saved_hwnd and saved_hwnd != 0:
@@ -87,7 +89,7 @@ class TextTyper:
         if original_clipboard is not None and original_clipboard != text:
             self._schedule_clipboard_restore(original_clipboard)
 
-        logger.info("Paste successful (%d chars)", len(text))
+        logger.info("Paste successful (%d chars) in %.1fms", len(text), (time.monotonic() - paste_start) * 1000)
         return True
 
     def _schedule_clipboard_restore(self, original: str) -> None:
@@ -109,39 +111,61 @@ class TextTyper:
         returns nonzero on success, zero on failure — e.g. UIPI blocking), so
         a silently-dropped paste surfaces to the user as a "copied instead"
         toast instead of looking like success.
+
+        Before sending Ctrl+V, all modifier keys are force-released and an
+        Esc is tapped. The Alt-tap used by ``set_foreground_window`` to
+        bypass Windows foreground restrictions leaves the target app's menu
+        bar activated (visible in apps like Notepad++, where the menu bar
+        highlights after Alt). If we send V while the menu bar is active,
+        the V is interpreted as a menu mnemonic (e.g. "View" → Alt+V)
+        instead of pasting. Releasing modifiers + Esc dismisses the menu
+        so Ctrl+V lands in the editor as intended.
         """
         try:
             VK_CONTROL = 0x11
             VK_SHIFT = 0x10
             VK_V = 0x56
+            VK_MENU = 0x12      # Alt
+            VK_ESCAPE = 0x1B
 
             def _send(vk: int, flags: int) -> bool:
                 # keybd_event returns nonzero on success; ctypes default
                 # restype is c_int, so a falsy return means injection failed.
                 return bool(user32.keybd_event(vk, 0, flags, 0))
 
+            # Clear any stuck modifier state (Alt from the foreground-restore
+            # tap, or Ctrl/Shift from a previous paste) and dismiss a menu
+            # bar that Alt may have activated. These are best-effort: we
+            # intentionally ignore their return values because a cleanup
+            # failure should never block the actual Ctrl+V paste.
+            for vk in (VK_MENU, VK_SHIFT, VK_CONTROL):
+                _send(vk, KEYEVENTF_KEYUP)
+            _send(VK_ESCAPE, 0)
+            _send(VK_ESCAPE, KEYEVENTF_KEYUP)
+            time.sleep(0.02)
+
             if not _send(VK_CONTROL, 0):
                 logger.debug("keybd_event: Ctrl down failed")
                 return False
-            time.sleep(0.05)
+            time.sleep(0.02)
             if use_terminal_paste:
                 if not _send(VK_SHIFT, 0):
                     logger.debug("keybd_event: Shift down failed")
                     return False
-                time.sleep(0.05)
+                time.sleep(0.02)
             if not _send(VK_V, 0):
                 logger.debug("keybd_event: V down failed")
                 return False
-            time.sleep(0.05)
+            time.sleep(0.02)
             if not _send(VK_V, KEYEVENTF_KEYUP):
                 logger.debug("keybd_event: V up failed")
                 return False
-            time.sleep(0.05)
+            time.sleep(0.02)
             if use_terminal_paste:
                 if not _send(VK_SHIFT, KEYEVENTF_KEYUP):
                     logger.debug("keybd_event: Shift up failed")
                     return False
-                time.sleep(0.05)
+                time.sleep(0.02)
             if not _send(VK_CONTROL, KEYEVENTF_KEYUP):
                 logger.debug("keybd_event: Ctrl up failed")
                 return False

@@ -4,7 +4,7 @@ import logging
 import time
 from functools import lru_cache
 
-from voicetype.api_client import ApiClient
+from voicetype.api_client import ApiClient, warmup_connection
 from voicetype.config import AppConfig
 from voicetype.retry import retry_call
 
@@ -87,6 +87,14 @@ class TextPolisher:
             timeout=60,
         ).client
 
+    def warmup(self) -> None:
+        """Pre-establish the TLS connection so the first real polish call
+        doesn't pay the handshake cost (~200-500ms).
+
+        Best-effort: any failure is swallowed — see warmup_connection.
+        """
+        warmup_connection(self._client, label="Polish")
+
     @staticmethod
     def _build_user_message(text: str) -> str:
         """Safely wrap user text without interpreting braces."""
@@ -127,7 +135,7 @@ class TextPolisher:
     # already handled by the dedicated quote-strip step). The user explicitly
     # does not want any punctuation auto-added at the end; since LLMs don't
     # always obey the prompt, this is a deterministic safety net.
-    _TRAILING_PUNCTUATION = "。．.！!?？;；,，、：…—）】》」』"
+    _TRAILING_PUNCTUATION = "。．.！!?？;；,，、：…—）】》」』\"'＂＇"
 
     @classmethod
     def _strip_trailing_punctuation(cls, text: str) -> str:

@@ -1,5 +1,7 @@
 # Voice Type
 
+[中文](README-zh.md) | English
+
 Windows voice-to-text dictation tool. Record voice → Speech recognition → Text refinement → Auto-paste to cursor position.
 
 Licensed under [GPL-3.0](LICENSE).
@@ -7,6 +9,7 @@ Licensed under [GPL-3.0](LICENSE).
 ## Features
 
 - **Voice Recording**: One-key record/stop/cancel via global hotkeys without stealing focus from the target application
+- **Noise Reduction**: Optional spectral-gate denoising removes steady background noise (fans, AC, hum) before recognition — pure numpy, no extra dependencies. Targets stationary noise; transient sounds (keyboard clicks) are not well suppressed.
 - **Speech Recognition (STT)**: Transcribe recorded audio to text (OpenAI-compatible protocol)
 - **Smart Refinement**: LLM automatically removes filler words, fixes grammar, and improves clarity
 - **Glossary Corrections**: Replace frequently misrecognized names, project terms, and technical terms before refinement
@@ -19,6 +22,7 @@ Licensed under [GPL-3.0](LICENSE).
 - **Network Detection**: Automatically checks network availability on settings save to prevent invalid configurations
 - **Startup Check**: Automatically detects API configuration on first launch and shows setup wizard if unconfigured
 - **Bilingual UI**: Supports Chinese and English interface, switchable in settings (requires restart)
+- **Model Discovery**: Click the 🔄 button in settings to fetch all available models from your API provider — no need to copy model IDs manually
 
 ## Tech Stack
 
@@ -110,9 +114,11 @@ Click the gear icon in the upper-right corner of the floating window, or access 
 |-------|-------------|---------|
 | API Key | Authentication key for STT service | `sk-...` |
 | Base URL | API address of STT service | `https://api.siliconflow.cn/v1` |
-| Model | Speech recognition model | `FunAudioLLM/SenseVoiceSmall` |
+| Model | Speech recognition model (click 🔄 to fetch provider's full model list) | `FunAudioLLM/SenseVoiceSmall` |
 | Language | Recognition language | `zh` / `en` / `auto` |
 | Sample Rate | Recording sample rate | `16000` Hz |
+| Noise Reduction | Enable spectral-gate denoising before recognition | `Off` / `On` |
+| NR Strength | Denoising aggressiveness (higher suppresses more noise but may affect speech) | `Low` / `Medium` / `High` |
 
 ### Polish (Text Refinement) Configuration
 
@@ -120,7 +126,7 @@ Click the gear icon in the upper-right corner of the floating window, or access 
 |-------|-------------|---------|
 | API Key | Authentication key for LLM service | `sk-...` |
 | Base URL | API address of LLM service | `https://api.siliconflow.cn/v1` |
-| Model | Text refinement model | `gpt-4o` / `deepseek-chat` / `qwen-plus` |
+| Model | Text refinement model (click 🔄 to fetch provider's full model list) | `gpt-4o` / `deepseek-chat` / `qwen-plus` |
 
 ### Glossary Configuration
 
@@ -147,7 +153,7 @@ The Right Alt hotkey distinguishes between a tap (start/stop toggle) and modifie
 
 | Field | Description | Default |
 |-------|-------------|---------|
-| Paste Delay | Delay before pasting (milliseconds) | `300 ms` |
+| Paste Delay | Delay before pasting (milliseconds) | `120 ms` |
 | Paste Mode | Auto-detect target window, force `Ctrl+V`, force `Ctrl+Shift+V`, or copy only | Auto |
 | Auto-paste | Whether to auto-paste to cursor position | Enabled |
 
@@ -159,7 +165,7 @@ Voice Type uses OpenAI-compatible APIs and supports multiple providers. Below ar
 
 ### SiliconFlow
 
-Register: https://cloud.siliconflow.cn
+Register: https://cloud.siliconflow.cn/i/BLu934tI
 
 ```json
 {
@@ -229,6 +235,7 @@ voice-type/
 │       ├── config.py                # Config management: dataclass + JSON persistence
 │       ├── history.py               # SQLite local recognized text history storage
 │       ├── audio.py                 # Audio recording: sounddevice + soundfile OGG encoding
+│       ├── denoise.py               # Spectral-gate noise reduction (numpy-only)
 │       ├── asr.py                   # Speech recognition: OpenAI-compatible transcriptions API
 │       ├── glossary.py              # User glossary term replacement after ASR
 │       ├── polisher.py              # Text refinement: LLM chat completions API
@@ -243,11 +250,12 @@ voice-type/
 │           ├── settings_dialog.py   # Settings dialog (STT/Polish/Glossary/Output/Hotkeys)
 │           ├── system_tray.py       # System tray icon + pynput hotkey manager
 │           └── icon_utils.py        # Shared icon creation (circle + centered text)
-├── tests/                       # Unit tests (243, covering all modules)
+├── tests/                       # Unit tests (375, covering all modules)
 │   ├── conftest.py
 │   ├── test_audio.py
 │   ├── test_asr.py
 │   ├── test_config.py
+│   ├── test_denoise.py
 │   ├── test_main.py
 │   ├── test_network.py
 │   ├── test_glossary.py

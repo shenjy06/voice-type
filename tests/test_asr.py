@@ -115,3 +115,28 @@ class TestTranscriber:
         Transcriber(cfg)
 
         mock_api_cls.assert_called_once_with(api_key="my-key", base_url="https://my-api.com/v1", timeout=30)
+
+
+class TestTranscriberWarmup:
+    def test_warmup_calls_models_list(self, mocker):
+        """warmup() makes a lightweight models.list() call to establish TLS."""
+        mock_client = MagicMock()
+        mock_api = MagicMock()
+        mock_api.client = mock_client
+        mocker.patch("voicetype.asr.ApiClient", return_value=mock_api)
+
+        cfg = make_config(asr={"api_key": "sk", "base_url": "https://api"})
+        Transcriber(cfg).warmup()
+
+        mock_client.models.list.assert_called_once_with(timeout=5)
+
+    def test_warmup_swallows_errors(self, mocker):
+        """warmup() must never raise — it's best-effort connection pre-warming."""
+        mock_client = MagicMock()
+        mock_client.models.list.side_effect = RuntimeError("network down")
+        mock_api = MagicMock()
+        mock_api.client = mock_client
+        mocker.patch("voicetype.asr.ApiClient", return_value=mock_api)
+
+        cfg = make_config(asr={"api_key": "sk", "base_url": "https://api"})
+        Transcriber(cfg).warmup()  # must not raise

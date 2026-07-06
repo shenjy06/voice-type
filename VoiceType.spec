@@ -11,6 +11,16 @@
 datas = []
 binaries = []
 
+# soundfile ships libsndfile.dll (+ libvorbis/libogg dependencies) via its
+# Python package. collect_all ensures every DLL/data file ships in the
+# bundle. (Historically the default hook missed native deps on some setups;
+# keeping the explicit collect is a safety net.)
+from PyInstaller.utils.hooks import collect_all
+
+_sf_datas, _sf_binaries, _sf_hiddenimports = collect_all("soundfile")
+datas += _sf_datas
+binaries += _sf_binaries
+
 # These modules MUST end up in the PYZ even when other parts of the same
 # package are otherwise excluded. Keep this list minimal — only add a name
 # here when the app actually imports it at runtime.
@@ -27,6 +37,9 @@ hiddenimports = [
     "pynput.keyboard",
     "pynput.keyboard._win32",
 ]
+# Append soundfile's transitive hidden imports (collected above) so the
+# linker sees every module that soundfile may load at runtime.
+hiddenimports += _sf_hiddenimports
 
 # Explicit deny list. PyInstaller treats `excludes` as a tree: excluding
 # `pandas` also drops `pandas.core`, `pandas.io`, etc. Keep names here
@@ -191,7 +204,10 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    # UPX disabled: it can corrupt native C-extension DLLs (numpy, soundfile)
+    # causing hard-to-diagnose native crashes. Even though UPX isn't currently
+    # installed on the build machine, keeping upx=False is a safety default.
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,
