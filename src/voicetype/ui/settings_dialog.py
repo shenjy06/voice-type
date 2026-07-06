@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QComboBox, QFormLayout, QGroupBox, QSpinBox, QCheckBox,
     QDialogButtonBox, QTabWidget, QWidget, QPushButton, QProgressBar,
     QHBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView,
+    QCompleter,
 )
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QIcon, QCursor
@@ -115,8 +116,21 @@ class SettingsDialog(QDialog):
 
             The combo stays editable so the user can still type a model name
             that the provider doesn't list (some providers hide certain
-            models from the /models endpoint).
+            models from the /models endpoint). A completer on the combo lets
+            the user filter the provider's model list by typing a keyword —
+            essential when a provider returns dozens of models (e.g.
+            SiliconFlow lists 50+).
             """
+            # Attach a completer that filters by substring (not just prefix)
+            # so the user can type any fragment of the model id. The completer
+            # shares the combo's own model, so it stays in sync after
+            # fetch_models() repopulates the list.
+            completer = QCompleter(combo)
+            completer.setModel(combo.model())
+            completer.setCaseSensitivity(Qt.CaseInsensitive)
+            completer.setFilterMode(Qt.MatchContains)
+            combo.setCompleter(completer)
+
             container = QWidget()
             row = QHBoxLayout(container)
             row.setContentsMargins(0, 0, 0, 0)
