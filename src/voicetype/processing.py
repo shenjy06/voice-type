@@ -2,6 +2,7 @@
 
 import logging
 import os
+import time
 
 from PySide6.QtCore import QObject, Signal
 
@@ -70,7 +71,7 @@ def invalidate_clients() -> None:
 class ProcessingWorker(QObject):
     """Runs save -> transcribe -> glossary -> polish and emits signals.
 
-    The audio ``recorder`` is saved (OGG/Vorbis encoding) on this background
+    The audio ``recorder`` is saved (WAV/PCM encoding) on this background
     thread so the encoding cost never blocks the UI thread. The recorder holds
     the captured frames between ``stop()`` and this save; recording cannot
     restart during PROCESSING, so the frames are safe to read here.
@@ -104,27 +105,40 @@ class ProcessingWorker(QObject):
         self.context_after = context_after
 
     def run(self):
+        audio_path = None
+        pipeline_start = time.monotonic()
         try:
             self.started.emit()
-            # Encode the captured frames to a temp OGG file on this thread so
+            # Encode the captured frames to a temp WAV file on this thread so
             # the (potentially slow) Vorbis encoding never blocks the UI.
+            save_start = time.monotonic()
             audio_path = str(self.recorder.save())
             self.recorder = None  # release reference; buffer freed in save()
             logger.debug("Processing pipeline started: %s", os.path.basename(audio_path))
+            logger.info("Audio saved in %.0fms", (time.monotonic() - save_start) * 1000)
             transcriber = get_transcriber(self.config)
             transcript = transcriber.transcribe(audio_path)
-            # Delete audio file immediately after STT to limit sensitive data on disk.
+
+            # Transcription is done — the temp WAV file is no longer
+            # needed. Delete it now so our recording doesn't sit on
+            # disk during the (potentially slow) polish phase. The
+            # ``finally`` block below is a safety net for error paths
+            # that never reach this point.
             try:
                 os.remove(audio_path)
+                audio_path = None
             except OSError:
                 pass
+
             if not transcript:
-                logger.info("Transcription returned empty — pipeline finished")
+                logger.info("Transcription returned empty — pipeline finished in %.1fs",
+                            time.monotonic() - pipeline_start)
                 self.finished.emit("")
                 return
             transcript = apply_glossary(transcript, self.config.glossary)
             if not self.config.polish.enabled:
-                logger.info("Polishing disabled — emitting transcript directly")
+                logger.info("Polishing disabled — emitting transcript directly (pipeline %.1fs)",
+                            time.monotonic() - pipeline_start)
                 self.finished.emit(transcript)
                 return
             polisher = get_polisher(self.config)
@@ -133,8 +147,16 @@ class ProcessingWorker(QObject):
                 context_before=self.context_before,
                 context_after=self.context_after,
             )
-            logger.info("Processing pipeline finished successfully")
+            logger.info("Processing pipeline finished in %.1fs", time.monotonic() - pipeline_start)
             self.finished.emit(refined)
         except Exception as e:
             logger.error("Processing pipeline failed: %s", e, exc_info=True)
             self.error.emit(str(e))
+        finally:
+            # Delete the temporary audio file regardless of success or failure
+            # so failed runs never leak WAV files in the temp directory.
+            if audio_path is not None:
+                try:
+                    os.remove(audio_path)
+                except OSError:
+                    pass

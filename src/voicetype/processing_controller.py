@@ -76,7 +76,7 @@ class ProcessingController(QObject):
     ) -> None:
         """Start a new processing cycle for the given recorder.
 
-        The worker saves the recorder's captured audio (encoding it to OGG on
+        The worker saves the recorder's captured audio (encoding it to WAV on
         the background thread) before transcribing. ``context_before`` /
         ``context_after`` carry optional cursor context captured at recording
         start, enabling context-aware polishing.

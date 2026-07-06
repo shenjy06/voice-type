@@ -32,6 +32,8 @@ class TestDefaultConfigs:
     def test_recording_config_defaults(self):
         cfg = RecordingConfig()
         assert cfg.sample_rate == 16000
+        assert cfg.denoise_enabled is False
+        assert cfg.denoise_strength == "medium"
 
     def test_hotkey_config_defaults(self):
         cfg = HotkeyConfig()
@@ -40,7 +42,7 @@ class TestDefaultConfigs:
 
     def test_output_config_defaults(self):
         cfg = OutputConfig()
-        assert cfg.paste_delay_ms == 300
+        assert cfg.paste_delay_ms == 120
         assert cfg.auto_paste is True
         assert cfg.paste_mode == "auto"
 
@@ -61,6 +63,7 @@ class TestAppConfigDefaults:
         assert cfg.polish.base_url == "https://api.openai.com/v1"
         assert cfg.asr.model == "whisper-1"
         assert cfg.recording.sample_rate == 16000
+        assert cfg.recording.denoise_enabled is False
         assert cfg.output.auto_paste is True
         assert cfg.window.show_on_start is True
 
@@ -120,6 +123,19 @@ class TestAppConfigToDict:
         assert restored.glossary[0].source == "派森"
         assert restored.glossary[0].replacement == "Python"
         assert restored.window.show_on_start is False
+
+    def test_to_dict_round_trip_with_denoise(self):
+        cfg = AppConfig(
+            recording=RecordingConfig(
+                sample_rate=48000,
+                denoise_enabled=True,
+                denoise_strength="high",
+            ),
+        )
+        restored = AppConfig.from_dict(cfg.to_dict())
+        assert restored.recording.sample_rate == 48000
+        assert restored.recording.denoise_enabled is True
+        assert restored.recording.denoise_strength == "high"
 
 
 class TestAppConfigFromDict:
@@ -185,6 +201,27 @@ class TestAppConfigFromDict:
         # Only sample_rate should be read; hotkey uses defaults
         assert cfg.recording.sample_rate == 16000
         assert cfg.hotkey.toggle_enabled is True  # default
+
+    def test_from_dict_loads_denoise_settings(self):
+        """Denoise fields are read from the recording section."""
+        data = {
+            "recording": {
+                "sample_rate": 44100,
+                "denoise_enabled": True,
+                "denoise_strength": "low",
+            },
+        }
+        cfg = AppConfig.from_dict(data)
+        assert cfg.recording.sample_rate == 44100
+        assert cfg.recording.denoise_enabled is True
+        assert cfg.recording.denoise_strength == "low"
+
+    def test_from_dict_missing_denoise_uses_defaults(self):
+        """Old configs without denoise fields get safe defaults."""
+        data = {"recording": {"sample_rate": 16000}}
+        cfg = AppConfig.from_dict(data)
+        assert cfg.recording.denoise_enabled is False
+        assert cfg.recording.denoise_strength == "medium"
 
     def test_from_dict_hotkey_config(self):
         """Hotkey config is read from the 'hotkey' section."""

@@ -3,7 +3,7 @@
 import logging
 import time
 
-from voicetype.api_client import ApiClient
+from voicetype.api_client import ApiClient, warmup_connection
 from voicetype.config import AppConfig
 from voicetype.retry import retry_call
 
@@ -22,6 +22,14 @@ class Transcriber:
             base_url=config.asr.base_url,
             timeout=30,
         ).client
+
+    def warmup(self) -> None:
+        """Pre-establish the TLS connection so the first real transcription
+        doesn't pay the handshake cost (~200-500ms).
+
+        Best-effort: any failure is swallowed — see warmup_connection.
+        """
+        warmup_connection(self._client, label="ASR")
 
     def transcribe(self, audio_path: str) -> str:
         """Transcribe audio file to text."""

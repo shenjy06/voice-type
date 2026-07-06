@@ -47,11 +47,16 @@ class HotkeyConfig:
 @dataclass
 class RecordingConfig:
     sample_rate: int = 16000
+    # Audio preprocessing — spectral-gate noise reduction applied before
+    # ASR. Off by default so existing users see no behaviour change until
+    # they opt in via Settings → STT → Recording.
+    denoise_enabled: bool = False
+    denoise_strength: str = "medium"  # low | medium | high
 
 
 @dataclass
 class OutputConfig:
-    paste_delay_ms: int = 300
+    paste_delay_ms: int = 120
     auto_paste: bool = True
     paste_mode: str = "auto"
 
@@ -132,7 +137,7 @@ class AppConfig:
             language=data.get("language", "auto"),
             polish=PolishApiConfig(**_filtered(PolishApiConfig, polish_data)),
             asr=AsrConfig(**_filtered(AsrConfig, _safe_dict(data.get("asr")))),
-            recording=RecordingConfig(sample_rate=rec_data.get("sample_rate", 16000)),
+            recording=RecordingConfig(**_filtered(RecordingConfig, rec_data)),
             output=OutputConfig(**_filtered(OutputConfig, _safe_dict(data.get("output")))),
             glossary=glossary_entries,
             window=WindowConfig(**_filtered(WindowConfig, _safe_dict(data.get("window")))),

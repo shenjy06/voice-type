@@ -1,5 +1,7 @@
 # Voice Type
 
+[English](README.md) | 中文
+
 Windows 语音转文字速记工具。录制语音 → 语音识别 → 文本润色 → 自动粘贴到光标位置。
 
 采用 [GPL-3.0](LICENSE) 许可证开源。
@@ -7,6 +9,7 @@ Windows 语音转文字速记工具。录制语音 → 语音识别 → 文本�
 ## 功能特性
 
 - **语音录制**: 全局热键一键录制/停止/取消，不抢占目标应用焦点
+- **降噪**: 可选的谱门降噪，识别前去除稳态背景噪声（风扇、空调、电流声等）——纯 numpy 实现，无额外依赖。仅针对稳态噪声，瞬态声音（键盘敲击等）效果有限
 - **语音识别 (STT)**: 将录制的音频转录为文本（支持 OpenAI 兼容协议）
 - **智能润色**: LLM 自动去除语气词、修正语法、提升表达清晰度
 - **词库修正**: 在润色前自动替换常见误识别的人名、项目名和技术名词
@@ -19,6 +22,7 @@ Windows 语音转文字速记工具。录制语音 → 语音识别 → 文本�
 - **网络检测**: 保存设置时自动检测网络可用性，避免无效配置
 - **启动检查**: 首次启动时自动检测 API 配置，未配置时弹出设置引导
 - **中英文界面**: 支持中文/英文双语 UI，可在设置中切换语言，重启生效
+- **模型自动发现**: 设置中点击 🔄 按钮可自动获取提供商的全部可用模型，无需手动复制模型名
 
 ## 技术栈
 
@@ -108,9 +112,11 @@ pyinstaller --clean --noconfirm VoiceType.spec
 |------|------|------|
 | API Key | STT 服务的认证密钥 | `sk-...` |
 | Base URL | STT 服务的 API 地址 | `https://api.siliconflow.cn/v1` |
-| Model | 语音识别模型 | `FunAudioLLM/SenseVoiceSmall` |
+| Model | 语音识别模型（点击 🔄 可获取提供商全部模型列表） | `FunAudioLLM/SenseVoiceSmall` |
 | Language | 识别语言 | `zh` / `en` / `auto` |
 | Sample Rate | 录制采样率 | `16000` Hz |
+| Noise Reduction | 识别前是否启用谱门降噪 | `Off` / `On` |
+| NR Strength | 降噪强度（越高抑制噪声越多，但可能影响语音） | `Low` / `Medium` / `High` |
 
 ### Polish（文本润色）配置
 
@@ -118,7 +124,7 @@ pyinstaller --clean --noconfirm VoiceType.spec
 |------|------|------|
 | API Key | LLM 服务的认证密钥 | `sk-...` |
 | Base URL | LLM 服务的 API 地址 | `https://api.siliconflow.cn/v1` |
-| Model | 文本润色模型 | `gpt-4o` / `deepseek-chat` / `qwen-plus` |
+| Model | 文本润色模型（点击 🔄 可获取提供商全部模型列表） | `gpt-4o` / `deepseek-chat` / `qwen-plus` |
 
 ### Glossary（词库）配置
 
@@ -142,7 +148,7 @@ Right Alt 热键区分单击（切换录制）和组合键（按住它加其他�
 
 | 字段 | 说明 | 默认值 |
 |------|------|--------|
-| Paste Delay | 粘贴前延迟（毫秒） | `300 ms` |
+| Paste Delay | 粘贴前延迟（毫秒） | `120 ms` |
 | Paste Mode | 自动检测目标窗口、强制 `Ctrl+V`、强制 `Ctrl+Shift+V` 或仅复制 | 自动 |
 | Auto-paste | 是否自动粘贴到光标位置 | 开启 |
 
@@ -154,7 +160,7 @@ Voice Type 使用 OpenAI 兼容协议的 API，支持多种服务商。以下是
 
 ### SiliconFlow（硅基流动）
 
-注册地址: https://cloud.siliconflow.cn
+注册地址: https://cloud.siliconflow.cn/i/BLu934tI
 
 ```json
 {
@@ -224,6 +230,7 @@ voice-type/
 │       ├── config.py                # 配置管理：dataclass + JSON 序列化/持久化
 │       ├── history.py               # SQLite 本地识别文本历史记录
 │       ├── audio.py                 # 音频录制：sounddevice 异步录制 + soundfile 编码为 OGG
+│       ├── denoise.py               # 谱门降噪（纯 numpy 实现）
 │       ├── asr.py                   # 语音识别：OpenAI 兼容 API
 │       ├── glossary.py              # 词库修正：ASR 后专有名词替换
 │       ├── polisher.py              # 文本润色：LLM API + 系统提示词
@@ -238,11 +245,12 @@ voice-type/
 │           ├── settings_dialog.py   # 设置对话框（STT/Polish/Glossary/Output/Hotkeys）
 │           ├── system_tray.py       # 系统托盘 + 全局热键管理
 │           └── icon_utils.py        # 共享图标创建（圆形 + 居中文字）
-├── tests/                       # 单元测试（243 项，覆盖全部模块）
+├── tests/                       # 单元测试（375 项，覆盖全部模块）
 │   ├── conftest.py
 │   ├── test_audio.py
 │   ├── test_asr.py
 │   ├── test_config.py
+│   ├── test_denoise.py
 │   ├── test_main.py
 │   ├── test_network.py
 │   ├── test_glossary.py
