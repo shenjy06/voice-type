@@ -7,6 +7,7 @@ encryption, plug crypto.encrypt/decrypt into to_dict/from_dict and run
 integration tests in your target environment first.
 """
 
+import copy
 import json
 import logging
 import time
@@ -202,3 +203,98 @@ class AppConfig:
         AppConfig._last_saved_dict = new_dict
         elapsed = (time.monotonic() - start) * 1000
         logger.debug("Config saved in %.1f ms", elapsed)
+
+    def export_to(self, path: Path) -> None:
+        """Export this config to a JSON file at ``path``.
+
+        Unlike :meth:`save`, this always writes (no change detection) and
+        targets an arbitrary user-chosen location — for backup, migration,
+        or sharing. The format is identical to ``config.json`` so an
+        exported file can be re-imported on another machine.
+        """
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(self.to_dict(), f, indent=2, ensure_ascii=False)
+
+    @classmethod
+    def import_from(cls, path: Path) -> "AppConfig":
+        """Load a config from a JSON file at ``path``.
+
+        Raises ``OSError`` on read failure or ``json.JSONDecodeError`` on
+        malformed JSON; the caller is expected to surface both as a single
+        "invalid config file" message. ``from_dict`` handles the rest
+        (unknown keys dropped, missing fields defaulted) so an exported
+        file from an older or newer version still loads.
+        """
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        return cls.from_dict(data)
+
+    def is_default(self) -> bool:
+        """Return True if this config is essentially a default/empty one.
+
+        A config counts as default when no API keys have been set and no
+        substantial settings differ from AppConfig() defaults. This is
+        used by the import dialog to warn before overwriting current
+        settings with an effectively blank configuration.
+        """
+        if self.is_configured():
+            return False
+        default = AppConfig()
+        return (
+            self.language == default.language
+            and self.polish == default.polish
+            and self.asr == default.asr
+            and self.recording == default.recording
+            and self.output == default.output
+            and self.glossary == default.glossary
+            and self.window == default.window
+            and self.hotkey == default.hotkey
+        )
+
+    def summary(self) -> str:
+        """Return a short human-readable summary suitable for a preview dialog.
+
+        Omits API keys (security) and shows model names, enabled features,
+        and glossary count.
+        """
+        parts = []
+        # STT
+        parts.append(f"STT: {self.asr.model} ({self.asr.language})"
+                     + (" +streaming" if self.asr.streaming_enabled else ""))
+        # Polish
+        if self.polish.enabled:
+            parts.append(f"Polish: {self.polish.model} [{self.polish.style}]")
+        else:
+            parts.append("Polish: disabled")
+        # Recording extras
+        extras = []
+        if self.recording.denoise_enabled:
+            extras.append(f"denoise({self.recording.denoise_strength})")
+        if self.recording.vad_enabled:
+            extras.append(f"VAD({self.recording.vad_silence_duration_ms}ms)")
+        if extras:
+            parts.append("Recording: " + ", ".join(extras))
+        # Output
+        parts.append(f"Output: paste={self.output.paste_mode}"
+                     + (" auto" if self.output.auto_paste else ""))
+        # Glossary
+        if self.glossary:
+            parts.append(f"Glossary: {len(self.glossary)} terms")
+        # Window
+        parts.append(f"Window: top={self.window.always_on_top}"
+                     + f" startup={self.window.auto_start}")
+        return "\n".join(parts)
+
+    def update_from(self, other: "AppConfig") -> None:
+        """Copy all fields from ``other`` in place, preserving object identity.
+
+        Needed because external code (Application) holds a reference to the
+        existing AppConfig instance; replacing ``self.config`` with a new
+        object would break that link. Mirrors how ``_apply_save`` mutates
+        fields rather than replacing the instance. Values are deep-copied so
+        mutable sub-objects (the glossary list, sub-config dataclasses) are
+        not shared between the two instances.
+        """
+        for f in fields(self):
+            setattr(self, f.name, copy.deepcopy(getattr(other, f.name)))

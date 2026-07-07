@@ -1,14 +1,17 @@
 """Settings dialog — configure API, models, hotkey, etc."""
 
+import copy
+import json
 import logging
 import threading
+from pathlib import Path
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QLabel, QLineEdit,
     QComboBox, QFormLayout, QGroupBox, QSpinBox, QCheckBox,
     QDialogButtonBox, QTabWidget, QWidget, QPushButton, QProgressBar,
     QHBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView,
-    QCompleter,
+    QCompleter, QFileDialog, QMessageBox,
 )
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QIcon, QCursor
@@ -238,6 +241,24 @@ class SettingsDialog(QDialog):
 
         stt_misc_group.setLayout(stt_misc_layout)
         general_layout.addWidget(stt_misc_group)
+
+        # Config management — export/import the whole config as JSON. Lives
+        # on the General tab because it's a global (cross-section) operation,
+        # not tied to any single API or recording setting.
+        config_group = QGroupBox(t("settings.config_management"))
+        config_row = QHBoxLayout()
+        self.export_btn = QPushButton(t("settings.export_config"))
+        self.import_btn = QPushButton(t("settings.import_config"))
+        self.export_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self.import_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self.export_btn.clicked.connect(self._export_config)
+        self.import_btn.clicked.connect(self._import_config)
+        config_row.addWidget(self.export_btn)
+        config_row.addWidget(self.import_btn)
+        config_row.addStretch()
+        config_group.setLayout(config_row)
+        general_layout.addWidget(config_group)
+
         general_layout.addStretch()
         self._tabs.addTab(general_tab, t("settings.general"))
 
@@ -702,6 +723,87 @@ class SettingsDialog(QDialog):
         self.config.save()
         self.settings_saved.emit()
         self.accept()
+
+    # ---- config import / export -------------------------------------------
+
+    def _export_config(self):
+        """Export the current config to a JSON file chosen by the user."""
+        path, _ = QFileDialog.getSaveFileName(
+            self, t("settings.export_config"),
+            "voice-type-config.json", "JSON (*.json)",
+        )
+        if not path:
+            return
+        try:
+            self.config.export_to(Path(path))
+        except OSError as e:
+            self._show_dialog_toast(t("settings.config_write_failed").format(error=e))
+            return
+        self._show_dialog_toast(f"{t('settings.export_success')} — {path}")
+
+    def _import_config(self):
+        """Load a config from a JSON file and refresh the dialog fields.
+
+        Only mutates ``self.config`` in place (via ``update_from``) so the
+        external reference held by Application stays valid.  The user sees
+        a preview of the loaded values in the confirmation dialog and must
+        still click Save to persist — this keeps Import aligned with the
+        dialog's edit-then-save semantics.
+        """
+        path, _ = QFileDialog.getOpenFileName(
+            self, t("settings.import_config"), "", "JSON (*.json)",
+        )
+        if not path:
+            return
+        try:
+            new_config = AppConfig.import_from(Path(path))
+        except (OSError, json.JSONDecodeError) as e:
+            self._show_dialog_toast(t("settings.import_failed").format(error=e))
+            return
+
+        # Warn when the imported file is effectively empty — silently
+        # resetting to factory defaults is almost never intentional.
+        if new_config.is_default():
+            reply = QMessageBox.warning(
+                self, t("settings.import_empty_config_title"),
+                t("settings.import_empty_config_warning"),
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+            )
+            if reply != QMessageBox.Yes:
+                return
+
+        # Show a preview so the user sees what they're about to apply.
+        preview_text = t("settings.import_preview_text").format(
+            summary=new_config.summary(),
+        )
+        reply = QMessageBox.question(
+            self, t("settings.import_confirm_title"),
+            preview_text,
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        # Snapshot current config so we can roll back if _load_config fails.
+        snapshot = copy.deepcopy(self.config)
+        try:
+            self.config.update_from(new_config)
+            self._load_config()
+        except Exception:
+            # Restore the previous state so the dialog isn't left in an
+            # inconsistent half-imported state.
+            self.config.update_from(snapshot)
+            self._load_config()
+            self._show_dialog_toast(t("settings.import_failed").format(
+                error=t("settings.import_failed"),
+            ))
+            return
+
+        # Re-snapshot so saving right after import doesn't trigger the
+        # network-availability check — the imported config is assumed valid
+        # and the check only adds delay in the migration scenario.
+        self._initial_api_state = self._snapshot_api_state()
+        self._show_dialog_toast(f"{t('settings.import_success')} — {path}")
 
     def _add_glossary_row(self, source: str = "", replacement: str = ""):
         row = self.glossary_table.rowCount()
