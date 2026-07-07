@@ -11,6 +11,8 @@ Windows 语音转文字速记工具。录制语音 → 语音识别 → 文本�
 - **语音录制**: 全局热键一键录制/停止/取消，不抢占目标应用焦点
 - **降噪**: 可选的谱门降噪，识别前去除稳态背景噪声（风扇、空调、电流声等）——纯 numpy 实现，无额外依赖。仅针对稳态噪声，瞬态声音（键盘敲击等）效果有限
 - **静音自动停止 (VAD)**: 可选的静音自动停止，检测到持续静音后自动停止录音，无需手动按键。只有开口后才开始计静音，开口前的停顿不会误触发
+- **流式实时转写**: 可选的实时语音转写，通过 WebSocket 将音频流式发送到服务端，说话时文字即时显示（OpenAI Realtime API 协议）
+- **处理失败重试**: 批量处理失败（网络抖动、限流、API 超时）后保留音频文件，可从托盘菜单一键重试，无需重新录制
 - **语音识别 (STT)**: 将录制的音频转录为文本（支持 OpenAI 兼容协议）
 - **智能润色**: LLM 自动去除语气词、修正语法、提升表达清晰度
 - **词库修正**: 在润色前自动替换常见误识别的人名、项目名和技术名词
@@ -21,6 +23,7 @@ Windows 语音转文字速记工具。录制语音 → 语音识别 → 文本�
 - **系统托盘**: 点击 X 最小化到托盘，托盘菜单提供录制切换、设置、退出功能
 - **全局热键**: 使用 pynput 监听键盘，在任何应用中均可响应
 - **网络检测**: 保存设置时自动检测网络可用性，避免无效配置
+- **配置导入导出**: 将完整配置（含 API 密钥）导出为 JSON 文件，可备份或在多台机器间迁移；导入时显示配置预览，空配置文件会触发警告
 - **启动检查**: 首次启动时自动检测 API 配置，未配置时弹出设置引导
 - **中英文界面**: 支持中文/英文双语 UI，可在设置中切换语言，重启生效
 - **模型自动发现**: 设置中点击 🔄 按钮可自动获取提供商的全部可用模型，无需手动复制模型名
@@ -120,6 +123,7 @@ pyinstaller --clean --noconfirm VoiceType.spec
 | NR Strength | 降噪强度（越高抑制噪声越多，但可能影响语音） | `Low` / `Medium` / `High` |
 | Auto-stop on silence | 检测到持续静音后自动停止录音（开口前的静音不计） | `Off` / `On` |
 | Silence duration | 触发自动停止的静音时长 | `1500 ms` |
+| Streaming | 将音频实时流式发送到服务端进行转写（使用上方的接口地址和 API 密钥） | `Off` / `On` |
 
 ### Polish（文本润色）配置
 
@@ -156,6 +160,14 @@ Right Alt 热键区分单击（切换录制）和组合键（按住它加其他�
 | Auto-paste | 是否自动粘贴到光标位置 | 开启 |
 
 如果自动粘贴失败，识别文本会保留在剪贴板中，可手动粘贴。
+
+### 配置管理
+
+设置对话框提供导出和导入按钮，用于备份或迁移配置：
+
+- **导出** 将当前完整配置（含 API 密钥）保存到指定的 JSON 文件
+- **导入** 加载配置文件，在确认前展示配置预览摘要；若文件为空/默认值将弹窗警告
+- 导入后设置仅加载到对话框，需点击保存才生效——可先检查确认再保存
 
 ## API 密钥配置
 
@@ -219,8 +231,9 @@ Voice Type 使用 OpenAI 兼容协议的 API，支持多种服务商。以下是
 4. 按 `Right Alt`（单击一次）开始录制（状态气泡显示"录制中..."）
 5. 说话完毕后，按 `Right Alt`（单击一次）停止录制
 6. 等待处理完成（状态气泡显示"润色中..."），润色后的文本将自动出现在光标位置
-7. 如需放弃本次录制，按 `Right Alt + C` 取消（音频将被丢弃）
-8. 点击窗口 X 按钮最小化到托盘，通过托盘菜单 "Quit" 完全退出
+7. 如果处理失败（网络错误、限流等），通过托盘菜单"重试上次处理"使用同一份音频重新处理，无需重新录制
+8. 如需放弃本次录制，按 `Right Alt + C` 取消（音频将被丢弃）
+9. 点击窗口 X 按钮最小化到托盘，通过托盘菜单 "Quit" 完全退出
 
 ## 项目结构
 
@@ -235,8 +248,12 @@ voice-type/
 │       ├── audio.py                 # 音频录制：sounddevice 异步录制 + soundfile 编码为 OGG
 │       ├── denoise.py               # 谱门降噪（纯 numpy 实现）
 │       ├── asr.py                   # 语音识别：OpenAI 兼容 API
+│       ├── streaming_asr.py         # 流式实时转写：WebSocket（OpenAI Realtime 协议）
 │       ├── glossary.py              # 词库修正：ASR 后专有名词替换
 │       ├── polisher.py              # 文本润色：LLM API + 系统提示词
+│       ├── processing.py            # 处理管线协调（STT + 词库 + 润色）
+│       ├── processing_controller.py  # 处理线程协调
+│       ├── recording_controller.py   # 录制线程协调
 │       ├── typer.py                 # 文本注入：窗口管理 + 剪贴板
 │       ├── window_manager.py        # Windows 窗口控制：ctypes API
 │       ├── network.py               # 网络检测：HTTP 连通性检查
@@ -248,17 +265,19 @@ voice-type/
 │           ├── settings_dialog.py   # 设置对话框（STT/Polish/Glossary/Output/Hotkeys）
 │           ├── system_tray.py       # 系统托盘 + 全局热键管理
 │           └── icon_utils.py        # 共享图标创建（圆形 + 居中文字）
-├── tests/                       # 单元测试（375 项，覆盖全部模块）
+├── tests/                       # 单元测试（456 项，覆盖全部模块）
 │   ├── conftest.py
 │   ├── test_audio.py
 │   ├── test_asr.py
 │   ├── test_config.py
+│   ├── test_controllers.py
 │   ├── test_denoise.py
 │   ├── test_main.py
 │   ├── test_network.py
 │   ├── test_glossary.py
 │   ├── test_i18n.py
 │   ├── test_polisher.py
+│   ├── test_streaming_asr.py
 │   ├── test_typer.py
 │   └── ui/
 │       ├── test_main_window.py
