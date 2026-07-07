@@ -22,6 +22,7 @@ class TrayIcon(QObject):
     history_requested = Signal()
     settings_requested = Signal()
     recording_toggled = Signal()
+    retry_requested = Signal()
     auto_paste_toggled = Signal(bool)
     polish_toggled = Signal(bool)
     polish_style_changed = Signal(str)
@@ -62,6 +63,13 @@ class TrayIcon(QObject):
         self.record_action = QAction(t("tray.start_recording"), menu)
         self.record_action.triggered.connect(self.recording_toggled.emit)
         menu.addAction(self.record_action)
+
+        self._retry_action = QAction(t("tray.retry"), menu)
+        # Enabled only when a previous processing cycle failed and its audio
+        # file has been retained for retry.
+        self._retry_action.setEnabled(False)
+        self._retry_action.triggered.connect(self.retry_requested.emit)
+        menu.addAction(self._retry_action)
 
         menu.addSeparator()
 
@@ -150,6 +158,10 @@ class TrayIcon(QObject):
     def show(self):
         self._tray.show()
 
+    def set_retry_available(self, available: bool):
+        """Enable/disable the 'Retry last' menu item."""
+        self._retry_action.setEnabled(available)
+
     def set_recording(self, recording: bool):
         """Update tray menu based on recording state."""
         self._is_recording = recording
@@ -168,6 +180,7 @@ class TrayIcon(QObject):
         self.record_action.setText(
             t("tray.stop_recording") if self._is_recording else t("tray.start_recording")
         )
+        self._retry_action.setText(t("tray.retry"))
         self.auto_paste_action.setText(t("tray.auto_paste"))
         self.polish_action.setText(t("tray.polish"))
         self.polish_style_menu.setTitle(t("tray.polish_style"))

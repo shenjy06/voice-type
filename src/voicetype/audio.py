@@ -336,6 +336,17 @@ class AudioRecorder:
                 return True
         return False
 
+    def take_audio_path(self) -> Path | None:
+        """Return _temp_file and clear the reference.
+
+        Ownership of the file transfers to the caller — ``cleanup()`` will no
+        longer delete it. Used by the retry flow so the retained audio file
+        survives ``recorder.cleanup()`` and can be reprocessed.
+        """
+        temp_file = self._temp_file
+        self._temp_file = None
+        return temp_file
+
     def cleanup(self) -> None:
         temp_file = self._temp_file
         self._temp_file = None

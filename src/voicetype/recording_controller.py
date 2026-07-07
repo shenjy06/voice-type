@@ -210,9 +210,15 @@ class RecordingController:
         self._ui.set_done()
 
     def cancel_during_processing(self, error_msg: str | None = None) -> None:
-        """Reset UI + recorder after a processing failure."""
+        """Reset UI after a processing failure.
+
+        Does NOT clean up the recorder's audio file — on failure the file is
+        retained so the caller (Application) can retry with the same audio.
+        Application takes ownership of the path via ``take_audio_path()``
+        before this is called, so the recorder no longer holds a reference
+        to it either.
+        """
         self._bubble.dismiss()
-        self._recorder.cleanup()
         if error_msg:
             self._ui.set_error(error_msg)
         self._ui.set_done()

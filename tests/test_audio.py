@@ -259,6 +259,37 @@ class TestAudioRecorderCleanup:
         recorder.cleanup()
 
 
+class TestAudioRecorderTakeAudioPath:
+    def test_returns_temp_file_and_clears_reference(self, mocker):
+        """take_audio_path() returns _temp_file and clears the reference."""
+        mock_path = mocker.MagicMock()
+        recorder = AudioRecorder()
+        recorder._temp_file = mock_path
+
+        result = recorder.take_audio_path()
+
+        assert result is mock_path
+        assert recorder._temp_file is None
+
+    def test_returns_none_when_no_file(self):
+        """take_audio_path() returns None when no temp file is set."""
+        recorder = AudioRecorder()
+        recorder._temp_file = None
+
+        assert recorder.take_audio_path() is None
+
+    def test_prevents_subsequent_cleanup_deletion(self, mocker):
+        """After take_audio_path(), cleanup() must not delete the file."""
+        mock_path = mocker.MagicMock()
+        recorder = AudioRecorder()
+        recorder._temp_file = mock_path
+
+        recorder.take_audio_path()
+        recorder.cleanup()
+
+        mock_path.unlink.assert_not_called()
+
+
 class TestAudioRecorderCancel:
     def test_cancel_stops_and_deletes(self, mocker):
         """cancel() stops recording and deletes the audio file."""

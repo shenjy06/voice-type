@@ -70,9 +70,10 @@ class ProcessingController(QObject):
 
     def start(
         self,
-        recorder,
+        recorder=None,
         context_before: str = "",
         context_after: str = "",
+        audio_path: str | None = None,
     ) -> None:
         """Start a new processing cycle for the given recorder.
 
@@ -80,6 +81,10 @@ class ProcessingController(QObject):
         the background thread) before transcribing. ``context_before`` /
         ``context_after`` carry optional cursor context captured at recording
         start, enabling context-aware polishing.
+
+        When ``audio_path`` is provided (retry), the worker reuses that file
+        and skips ``recorder.save()``; ``recorder`` may be ``None`` in that
+        case.
         """
         if self.is_running():
             return
@@ -88,7 +93,8 @@ class ProcessingController(QObject):
 
         thread = QThread()
         worker = ProcessingWorker(
-            self._config, recorder, context_before, context_after
+            self._config, recorder, context_before, context_after,
+            audio_path=audio_path,
         )
         worker.moveToThread(thread)
 

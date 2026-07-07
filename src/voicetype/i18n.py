@@ -88,6 +88,7 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "tray.paste_mode": "Paste Mode",
         "tray.asr_language": "Recognition Language",
         "tray.history": "History...",
+        "tray.retry": "Retry last",
         "tray.settings": "Settings...",
         "tray.quit": "Quit",
         "history.title": "History",
@@ -103,6 +104,7 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "error.no_audio_detail": "No audio was recorded",
         "msg.settings_saved": "Settings saved",
         "msg.error_format": "Error: {msg}",
+        "msg.error_retry_hint": "Error: {msg}. Retry from the tray menu.",
         "msg.paste_failed_copied": "Auto-paste failed. The polished text remains on the clipboard; you can paste it manually.",
     },
     "zh": {
@@ -190,6 +192,7 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "tray.paste_mode": "粘贴模式",
         "tray.asr_language": "识别语言",
         "tray.history": "历史记录...",
+        "tray.retry": "重试上次处理",
         "tray.settings": "设置...",
         "tray.quit": "退出",
         "history.title": "历史记录",
@@ -205,6 +208,7 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "error.no_audio_detail": "未录制到音频",
         "msg.settings_saved": "设置已保存",
         "msg.error_format": "错误：{msg}",
+        "msg.error_retry_hint": "处理失败：{msg}。可从托盘菜单重试。",
         "msg.paste_failed_copied": "自动粘贴失败。润色内容已经保留在剪贴板中，可手动粘贴。",
     },
 }

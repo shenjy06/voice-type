@@ -107,6 +107,12 @@ class Application:
         # Track paste threads so we can join them at quit, preventing
         # ctypes calls from daemon threads after Qt objects are destroyed.
         self._paste_threads: list[threading.Thread] = []
+        # Retry state: when a processing cycle fails, the audio file path +
+        # cursor context are retained here so the user can retry from the
+        # tray menu without re-recording. Cleared on new recording / retry
+        # success / quit.
+        self._retry_audio_path: str | None = None
+        self._retry_context: tuple[str, str] = ("", "")
         logger.info("Application initialized (configured=%s)", self.config.is_configured())
 
         # Audio-level sync timer — owned at Application level so it can be
@@ -183,6 +189,7 @@ class Application:
         self.tray.history_requested.connect(self._show_history)
         self.tray.settings_requested.connect(self._show_settings)
         self.tray.recording_toggled.connect(self._toggle_recording)
+        self.tray.retry_requested.connect(self._retry_processing)
         self.tray.auto_paste_toggled.connect(self._set_auto_paste)
         self.tray.polish_toggled.connect(self._set_polish_enabled)
         self.tray.paste_mode_changed.connect(self._set_paste_mode)
@@ -240,6 +247,9 @@ class Application:
 
     def _on_recording_started(self):
         logger.debug("Recording started event received")
+        # Starting fresh — abandon any retained retry audio from a previous
+        # failed cycle so its file doesn't leak.
+        self._abandon_retry_state()
         self._recording_controller.on_recording_started()
 
     def _on_recording_stopped(self):
@@ -273,6 +283,12 @@ class Application:
 
     def _on_processing_done(self, refined_text: str):
         self._recording_controller.reset_after_processing()
+        # Success — the worker has already deleted the audio file. Clear
+        # retry state and disable the tray menu entry.
+        if self._retry_audio_path is not None:
+            self._retry_audio_path = None
+            self._retry_context = ("", "")
+            self.tray.set_retry_available(False)
 
         if refined_text:
             logger.info("Processing done: %d chars", len(refined_text))
@@ -333,8 +349,63 @@ class Application:
 
     def _on_processing_error(self, error_msg: str):
         logger.error("Processing error: %s", error_msg)
+        # Retain the audio file for retry. On a normal-flow failure the
+        # recorder still holds the path — take ownership so it survives
+        # (cancel_during_processing no longer calls recorder.cleanup()).
+        # On a retry-flow failure the recorder has nothing to take (the
+        # path is already in _retry_audio_path); take returns None and the
+        # existing retry state is preserved unchanged.
+        audio_path = self.audio_recorder.take_audio_path()
+        if audio_path is not None:
+            self._retry_audio_path = str(audio_path)
+            self._retry_context = self._recording_controller.cursor_context
         self._recording_controller.cancel_during_processing(error_msg)
-        self.tray.show_message(t("app.name"), t("msg.error_format").format(msg=error_msg))
+        retryable = self._retry_audio_path is not None
+        self.tray.set_retry_available(retryable)
+        hint = t("msg.error_retry_hint") if retryable else t("msg.error_format")
+        self.tray.show_message(t("app.name"), hint.format(msg=error_msg))
+
+    def _retry_processing(self):
+        """Re-run the last failed processing cycle using its retained audio.
+
+        Reuses the saved audio file + cursor context so the user doesn't
+        have to re-record. No-op if no retry state exists, or if a cycle is
+        already running, or if a new recording is in progress.
+        """
+        if self._retry_audio_path is None:
+            return
+        if self._processing_controller.is_running():
+            return
+        if self._recording_controller.is_recording:
+            return
+        logger.info("Retrying processing with retained audio: %s", self._retry_audio_path)
+        context_before, context_after = self._retry_context
+        # Drive the UI into PROCESSING — mirrors the transition the normal
+        # stop path performs so the bubble + window reflect the retry.
+        self.window.set_processing()
+        self._status_bubble.show_status(t("status.polishing"))
+        self.tray.set_retry_available(False)
+        self._processing_controller.start(
+            audio_path=self._retry_audio_path,
+            context_before=context_before,
+            context_after=context_after,
+        )
+
+    def _abandon_retry_state(self):
+        """Delete the retained retry audio file (if any) and clear the state.
+
+        Called when the user starts a new recording (the old failed audio is
+        no longer wanted) and at application quit (don't leak the file).
+        """
+        if self._retry_audio_path is None:
+            return
+        try:
+            os.remove(self._retry_audio_path)
+        except OSError:
+            pass
+        self._retry_audio_path = None
+        self._retry_context = ("", "")
+        self.tray.set_retry_available(False)
 
     # ---- dialogs & toast ---------------------------------------------------
 
@@ -433,6 +504,7 @@ class Application:
         for t in self._paste_threads:
             t.join(timeout=3.0)
         self._flush_config_save()
+        self._abandon_retry_state()
         self.audio_recorder.stop()
         self.audio_recorder.cleanup()
         self._processing_controller.shutdown()
