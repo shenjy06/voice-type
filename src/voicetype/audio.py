@@ -147,10 +147,16 @@ class AudioRecorder:
         sample_rate: int = 16000,
         denoise_enabled: bool = False,
         denoise_strength: str = "medium",
+        vad_enabled: bool = False,
+        vad_silence_duration_ms: int = 1500,
+        vad_threshold: float = 0.02,
     ):
         self.sample_rate = sample_rate
         self.denoise_enabled = denoise_enabled
         self.denoise_strength = denoise_strength
+        self.vad_enabled = vad_enabled
+        self.vad_silence_duration_ms = vad_silence_duration_ms
+        self.vad_threshold = vad_threshold
         self._recording = False
         self._frames: list[np.ndarray] = []
         self._stream: sd.InputStream | None = None
@@ -160,6 +166,13 @@ class AudioRecorder:
         self._temp_dir = Path(tempfile.gettempdir()) / TEMP_AUDIO_DIR_NAME
         self._temp_dir.mkdir(parents=True, exist_ok=True)
         _tighten_dir_permissions(self._temp_dir)
+        # VAD state — all touched only under self._lock. ``on_silence`` is the
+        # cross-thread hook invoked (outside the lock) when silence has
+        # persisted past ``vad_silence_duration_ms`` after the first speech.
+        self.on_silence = None
+        self._vad_speech_detected = False
+        self._vad_silence_start: float | None = None
+        self._vad_triggered = False
 
     @property
     def is_recording(self) -> bool:
@@ -181,6 +194,11 @@ class AudioRecorder:
         with self._lock:
             self._frames = []
             self._input_level = 0.0
+            # Reset VAD so each recording starts fresh — speech not yet
+            # detected, no silence timer running, trigger latch cleared.
+            self._vad_speech_detected = False
+            self._vad_silence_start = None
+            self._vad_triggered = False
         # Initialise before the try-block: if sd.InputStream(...) itself raises
         # (e.g. no input device / permission denied), `stream` would otherwise
         # be unbound in the handler and the cleanup check would raise
@@ -276,12 +294,47 @@ class AudioRecorder:
         # level write need the lock, so we hold it for the minimum span.
         level = _calculate_input_level(indata)
         frame = indata.copy()
+        trigger = False
         with self._lock:
             if self._recording:
                 self._frames.append(frame)
                 self._input_level = level
+                if self._update_vad(level):
+                    trigger = True
             else:
                 self._input_level = 0.0
+        # Fire the silence callback OUTSIDE the lock — the receiver (a Qt
+        # signal emit) is thread-safe and never touches this lock, but
+        # invoking it under the lock would block the audio thread behind
+        # whatever the UI thread is doing.
+        if trigger and self.on_silence is not None:
+            try:
+                self.on_silence()
+            except Exception:
+                logger.warning("VAD silence callback raised", exc_info=True)
+
+    def _update_vad(self, level: float) -> bool:
+        """Advance the VAD state machine; return True to trigger auto-stop.
+
+        Called under self._lock on the audio thread. Silence is only counted
+        after the first speech has been detected (``level >= vad_threshold``),
+        so a pause before the user starts talking does not trigger an early
+        stop. Once triggered, the latch (``_vad_triggered``) prevents repeat
+        fires until the next ``start()`` resets it.
+        """
+        if not self.vad_enabled or self.on_silence is None or self._vad_triggered:
+            return False
+        now = time.monotonic()
+        if level >= self.vad_threshold:
+            self._vad_speech_detected = True
+            self._vad_silence_start = None
+        elif self._vad_speech_detected:
+            if self._vad_silence_start is None:
+                self._vad_silence_start = now
+            elif (now - self._vad_silence_start) * 1000 >= self.vad_silence_duration_ms:
+                self._vad_triggered = True
+                return True
+        return False
 
     def cleanup(self) -> None:
         temp_file = self._temp_file

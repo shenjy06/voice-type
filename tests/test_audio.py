@@ -285,6 +285,138 @@ class TestAudioRecorderCancel:
         assert recorder._temp_file is None
 
 
+class TestAudioRecorderVAD:
+    """Voice Activity Detection — auto-stop on sustained silence."""
+
+    def test_disabled_never_triggers(self):
+        """VAD off → _update_vad always returns False."""
+        recorder = AudioRecorder()
+        recorder.on_silence = lambda: None
+        assert recorder._update_vad(0.5) is False
+        assert recorder._update_vad(0.0) is False
+
+    def test_no_silence_callback_no_trigger(self):
+        """on_silence None → VAD never triggers even when enabled."""
+        recorder = AudioRecorder(vad_enabled=True)
+        assert recorder._update_vad(0.5) is False
+        assert recorder._update_vad(0.0) is False
+
+    def test_silence_before_speech_does_not_trigger(self, mocker):
+        """Silence before first speech is ignored — no early stop."""
+        mocker.patch("voicetype.audio.time.monotonic", return_value=0.0)
+        recorder = AudioRecorder(vad_enabled=True, vad_silence_duration_ms=1000)
+        recorder.on_silence = lambda: None
+        assert recorder._update_vad(0.0) is False
+        assert recorder._vad_speech_detected is False
+
+    def test_speech_then_silence_below_duration_no_trigger(self, mocker):
+        """Silence shorter than the threshold does not trigger."""
+        t = mocker.patch("voicetype.audio.time.monotonic")
+        t.return_value = 0.0
+        recorder = AudioRecorder(vad_enabled=True, vad_silence_duration_ms=1500)
+        recorder.on_silence = lambda: None
+        assert recorder._update_vad(0.5) is False  # speech
+        t.return_value = 1.0
+        assert recorder._update_vad(0.0) is False  # silence begins
+        t.return_value = 2.0  # elapsed = 1000ms < 1500ms
+        assert recorder._update_vad(0.0) is False
+
+    def test_speech_then_silence_above_duration_triggers(self, mocker):
+        """Silence past the duration triggers exactly once."""
+        t = mocker.patch("voicetype.audio.time.monotonic")
+        t.return_value = 0.0
+        recorder = AudioRecorder(vad_enabled=True, vad_silence_duration_ms=1000)
+        recorder.on_silence = lambda: None
+        assert recorder._update_vad(0.5) is False  # speech
+        t.return_value = 1.0
+        assert recorder._update_vad(0.0) is False  # silence begins
+        t.return_value = 2.5  # elapsed = 1500ms >= 1000ms
+        assert recorder._update_vad(0.0) is True
+
+    def test_trigger_latches_no_repeat(self, mocker):
+        """After triggering, subsequent callbacks don't fire again."""
+        t = mocker.patch("voicetype.audio.time.monotonic")
+        t.return_value = 0.0
+        recorder = AudioRecorder(vad_enabled=True, vad_silence_duration_ms=1000)
+        recorder.on_silence = lambda: None
+        recorder._update_vad(0.5)  # speech
+        t.return_value = 1.0
+        recorder._update_vad(0.0)  # silence begins
+        t.return_value = 2.5
+        assert recorder._update_vad(0.0) is True  # trigger
+        t.return_value = 5.0
+        assert recorder._update_vad(0.0) is False  # latched
+
+    def test_speech_resets_silence_timer_then_triggers(self, mocker):
+        """After speech resets the timer, a fresh silence window must elapse."""
+        t = mocker.patch("voicetype.audio.time.monotonic")
+        t.return_value = 0.0
+        recorder = AudioRecorder(vad_enabled=True, vad_silence_duration_ms=1000)
+        recorder.on_silence = lambda: None
+        recorder._update_vad(0.5)        # speech
+        t.return_value = 1.0
+        recorder._update_vad(0.0)        # silence begins at 1.0
+        t.return_value = 1.2
+        recorder._update_vad(0.5)        # speech interrupts — resets
+        t.return_value = 1.3
+        assert recorder._update_vad(0.0) is False  # new silence begins at 1.3
+        t.return_value = 2.0             # 700ms < 1000ms
+        assert recorder._update_vad(0.0) is False
+        t.return_value = 2.5             # 1200ms >= 1000ms
+        assert recorder._update_vad(0.0) is True
+
+    def test_start_resets_vad_state(self, mocker):
+        """start() clears speech-detected + trigger latch + silence timer."""
+        mock_stream = mocker.MagicMock()
+        mocker.patch("voicetype.audio.sd", InputStream=mocker.MagicMock(return_value=mock_stream))
+        t = mocker.patch("voicetype.audio.time.monotonic")
+        t.return_value = 0.0
+        recorder = AudioRecorder(vad_enabled=True, vad_silence_duration_ms=1000)
+        recorder.on_silence = lambda: None
+        recorder._update_vad(0.5)  # speech
+        t.return_value = 1.0
+        recorder._update_vad(0.0)  # silence begins
+        t.return_value = 2.5
+        recorder._update_vad(0.0)  # trigger
+        assert recorder._vad_triggered is True
+        recorder.start()
+        assert recorder._vad_triggered is False
+        assert recorder._vad_speech_detected is False
+        assert recorder._vad_silence_start is None
+
+    def test_callback_fires_on_silence_outside_lock(self, mocker):
+        """_callback invokes on_silence when VAD triggers."""
+        mock_time = mocker.patch("voicetype.audio.time.monotonic")
+        mock_time.return_value = 0.0
+        recorder = AudioRecorder(vad_enabled=True, vad_silence_duration_ms=1000)
+        fired = []
+        recorder.on_silence = lambda: fired.append(True)
+        recorder._recording = True
+        # Speech
+        recorder._callback(np.array([[0.5]], dtype=np.float32), 1, None, None)
+        # Silence begins
+        mock_time.return_value = 1.0
+        recorder._callback(np.array([[0.0]], dtype=np.float32), 1, None, None)
+        # Silence past duration — triggers callback
+        mock_time.return_value = 2.5
+        recorder._callback(np.array([[0.0]], dtype=np.float32), 1, None, None)
+        assert fired == [True]
+
+    def test_callback_swallows_callback_exception(self, mocker):
+        """A raising on_silence must not propagate out of _callback."""
+        mock_time = mocker.patch("voicetype.audio.time.monotonic")
+        mock_time.return_value = 0.0
+        recorder = AudioRecorder(vad_enabled=True, vad_silence_duration_ms=1000)
+        recorder.on_silence = lambda: (_ for _ in ()).throw(RuntimeError("boom"))
+        recorder._recording = True
+        recorder._callback(np.array([[0.5]], dtype=np.float32), 1, None, None)
+        mock_time.return_value = 1.0
+        recorder._callback(np.array([[0.0]], dtype=np.float32), 1, None, None)
+        mock_time.return_value = 2.5
+        # Must not raise.
+        recorder._callback(np.array([[0.0]], dtype=np.float32), 1, None, None)
+
+
 class TestMicrophoneMonitor:
     def test_start_creates_stream(self, mocker):
         mock_stream = mocker.MagicMock()

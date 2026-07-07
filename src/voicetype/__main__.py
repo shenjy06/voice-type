@@ -66,6 +66,18 @@ class _PasteBridge(QObject):
     paste_failed = Signal()
 
 
+class _SilenceBridge(QObject):
+    """Marshals the VAD silence event from the audio thread to the UI thread.
+
+    ``AudioRecorder.on_silence`` is invoked on sounddevice's audio callback
+    thread; emitting this signal from there delivers it queued to this
+    object's thread (the UI thread), where stopping the recording is safe.
+    Same pattern as :class:`_PasteBridge`.
+    """
+
+    silence_detected = Signal()
+
+
 class Application:
     """Top-level orchestrator. Delegates stateful work to controllers."""
 
@@ -85,6 +97,9 @@ class Application:
             self.config.recording.sample_rate,
             denoise_enabled=self.config.recording.denoise_enabled,
             denoise_strength=self.config.recording.denoise_strength,
+            vad_enabled=self.config.recording.vad_enabled,
+            vad_silence_duration_ms=self.config.recording.vad_silence_duration_ms,
+            vad_threshold=self.config.recording.vad_threshold,
         )
         self.typer = TextTyper(self.config)
         self.history_store = HistoryStore()
@@ -108,6 +123,14 @@ class Application:
         # thread (created here so it lives on the UI/main thread).
         self._paste_bridge = _PasteBridge()
         self._paste_bridge.paste_failed.connect(self._on_paste_failed)
+
+        # Bridge for marshaling VAD silence detection from the audio thread to
+        # the UI thread. The recorder invokes ``on_silence`` on its callback
+        # thread; the signal is delivered queued here so we can stop the
+        # recording on the UI thread (same path as the user pressing stop).
+        self._silence_bridge = _SilenceBridge()
+        self._silence_bridge.silence_detected.connect(self._on_silence_detected)
+        self.audio_recorder.on_silence = self._silence_bridge.silence_detected.emit
 
         self._init_ui()
         self._init_controllers()
@@ -295,6 +318,19 @@ class Application:
         """Show the paste-failed toast (invoked on the UI thread via signal)."""
         self._show_toast(t("msg.paste_failed_copied"))
 
+    def _on_silence_detected(self):
+        """Handle VAD auto-stop (invoked on the UI thread via signal).
+
+        Equivalent to the user pressing the toggle hotkey to stop: drives the
+        UI through stop_recording, which emits recording_stopped and starts
+        processing. Guarded so a stale signal that arrives after the user
+        already stopped manually is a no-op.
+        """
+        if not self._recording_controller.is_recording:
+            return
+        logger.debug("VAD silence detected — auto-stopping recording")
+        self._recording_controller.stop()
+
     def _on_processing_error(self, error_msg: str):
         logger.error("Processing error: %s", error_msg)
         self._recording_controller.cancel_during_processing(error_msg)
@@ -358,6 +394,9 @@ class Application:
         self.audio_recorder.sample_rate = self.config.recording.sample_rate
         self.audio_recorder.denoise_enabled = self.config.recording.denoise_enabled
         self.audio_recorder.denoise_strength = self.config.recording.denoise_strength
+        self.audio_recorder.vad_enabled = self.config.recording.vad_enabled
+        self.audio_recorder.vad_silence_duration_ms = self.config.recording.vad_silence_duration_ms
+        self.audio_recorder.vad_threshold = self.config.recording.vad_threshold
         self.window.retranslate()
         self.tray.retranslate()
         self.tray.apply_config(self.config)

@@ -90,11 +90,21 @@ class RecordingController:
         transcribed/polished.
         """
         if self._ui.is_recording():
-            self._ui.stop_recording()
+            self.stop()
         elif self._is_processing():
             pass
         else:
             self._ui.start_recording()
+
+    def stop(self) -> None:
+        """Stop an in-progress recording (manual toggle or VAD auto-stop).
+
+        Drives the UI through stop_recording, which emits recording_stopped
+        and kicks off processing. No-op when not currently recording, so a
+        stale VAD signal arriving after a manual stop is safe.
+        """
+        if self._ui.is_recording():
+            self._ui.stop_recording()
 
     def _is_processing(self) -> bool:
         """Return True when the UI window is currently in PROCESSING state.

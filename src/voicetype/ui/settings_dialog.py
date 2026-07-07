@@ -95,6 +95,7 @@ class SettingsDialog(QDialog):
             self.mic_device_label,
             self.mic_status_label,
             self.denoise_hint_label,
+            self.vad_hint_label,
         ]
         self._tabs.currentChanged.connect(lambda _: self._schedule_adjust_wrap_heights())
         # Snapshot original API-related fields to detect changes on save
@@ -246,6 +247,20 @@ class SettingsDialog(QDialog):
         self.denoise_hint_label.setWordWrap(True)
         self.denoise_hint_label.setStyleSheet("color: #9ca3af; font-size: 12px;")
         stt_misc_layout.addRow("", self.denoise_hint_label)
+
+        self.vad_check = QCheckBox(t("settings.vad_enabled"))
+        stt_misc_layout.addRow("", self.vad_check)
+
+        self.vad_silence_spin = QSpinBox()
+        self.vad_silence_spin.setRange(500, 5000)
+        self.vad_silence_spin.setSingleStep(100)
+        self.vad_silence_spin.setSuffix(" ms")
+        stt_misc_layout.addRow(t("settings.vad_silence_duration"), self.vad_silence_spin)
+
+        self.vad_hint_label = QLabel(t("settings.vad_hint"))
+        self.vad_hint_label.setWordWrap(True)
+        self.vad_hint_label.setStyleSheet("color: #9ca3af; font-size: 12px;")
+        stt_misc_layout.addRow("", self.vad_hint_label)
 
         stt_misc_group.setLayout(stt_misc_layout)
         stt_layout.addWidget(stt_misc_group)
@@ -408,6 +423,9 @@ class SettingsDialog(QDialog):
             idx = self.denoise_strength_combo.findData("medium")
         self.denoise_strength_combo.setCurrentIndex(idx)
         self._on_denoise_toggled(self.denoise_check.isChecked())
+
+        self.vad_check.setChecked(self.config.recording.vad_enabled)
+        self.vad_silence_spin.setValue(self.config.recording.vad_silence_duration_ms)
 
         # Polish tab
         self.polish_api_key_input.setText(self.config.polish.api_key)
@@ -630,6 +648,8 @@ class SettingsDialog(QDialog):
         self.config.recording.sample_rate = self.sample_rate_spin.value()
         self.config.recording.denoise_enabled = self.denoise_check.isChecked()
         self.config.recording.denoise_strength = self.denoise_strength_combo.currentData()
+        self.config.recording.vad_enabled = self.vad_check.isChecked()
+        self.config.recording.vad_silence_duration_ms = self.vad_silence_spin.value()
 
         # Polish
         self.config.polish.api_key = self.polish_api_key_input.text().strip()

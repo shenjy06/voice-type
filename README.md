@@ -10,6 +10,7 @@ Licensed under [GPL-3.0](LICENSE).
 
 - **Voice Recording**: One-key record/stop/cancel via global hotkeys without stealing focus from the target application
 - **Noise Reduction**: Optional spectral-gate denoising removes steady background noise (fans, AC, hum) before recognition — pure numpy, no extra dependencies. Targets stationary noise; transient sounds (keyboard clicks) are not well suppressed.
+- **Silence Auto-stop (VAD)**: Optionally stop recording automatically after sustained silence is detected — no need to press stop. Silence is only counted after you start speaking, so pauses before talking are ignored.
 - **Speech Recognition (STT)**: Transcribe recorded audio to text (OpenAI-compatible protocol)
 - **Smart Refinement**: LLM automatically removes filler words, fixes grammar, and improves clarity
 - **Glossary Corrections**: Replace frequently misrecognized names, project terms, and technical terms before refinement
@@ -119,6 +120,8 @@ Click the gear icon in the upper-right corner of the floating window, or access 
 | Sample Rate | Recording sample rate | `16000` Hz |
 | Noise Reduction | Enable spectral-gate denoising before recognition | `Off` / `On` |
 | NR Strength | Denoising aggressiveness (higher suppresses more noise but may affect speech) | `Low` / `Medium` / `High` |
+| Auto-stop on silence | Stop recording automatically after sustained silence is detected (silence before first speech is ignored) | `Off` / `On` |
+| Silence duration | Silence duration that triggers auto-stop | `1500 ms` |
 
 ### Polish (Text Refinement) Configuration
 

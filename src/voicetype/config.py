@@ -52,6 +52,16 @@ class RecordingConfig:
     # they opt in via Settings → STT → Recording.
     denoise_enabled: bool = False
     denoise_strength: str = "medium"  # low | medium | high
+    # Voice Activity Detection — auto-stop the recording after the user
+    # stops speaking. Off by default for backward compatibility; opt in
+    # via Settings → STT → Recording. Silence is only counted after the
+    # first speech is detected, so the user can pause before talking
+    # without triggering an early stop.
+    vad_enabled: bool = False
+    vad_silence_duration_ms: int = 1500
+    # RMS level (0.0-1.0, same scale as input_level) below which audio
+    # counts as silence. 0.02 matches the mic-test silent threshold.
+    vad_threshold: float = 0.02
 
 
 @dataclass
