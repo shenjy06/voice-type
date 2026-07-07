@@ -67,10 +67,6 @@ class TestAppConfigDefaults:
         assert cfg.output.auto_paste is True
         assert cfg.window.show_on_start is True
 
-    def test_api_property_returns_polish(self):
-        cfg = AppConfig()
-        assert cfg.api is cfg.polish
-
     def test_is_configured_returns_false_for_defaults(self):
         cfg = AppConfig()
         assert cfg.is_configured() is False

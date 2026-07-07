@@ -23,6 +23,8 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "settings.models_fetch_failed": "Failed to fetch models: {error}",
         "settings.language": "Language:",
         "settings.lang_auto": "Auto (Chinese/English mixed)",
+        "settings.streaming_enabled": "Streaming real-time ASR",
+        "settings.streaming_hint": "Stream audio to the provider for live transcription. Uses the Base URL, API key and model from above.",
         "settings.recording_group": "Recording",
         "settings.sample_rate": "Sample Rate:",
         "settings.mic_device": "Input Device:",
@@ -98,6 +100,7 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "history.paste": "Paste",
         "history.clear": "Clear",
         "status.recording": "Recording...",
+        "status.streaming": "Transcribing...",
         "status.polishing": "Polishing...",
         "error.no_audio": "No audio recorded",
         "error.title": "Error",
@@ -105,6 +108,8 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "msg.settings_saved": "Settings saved",
         "msg.error_format": "Error: {msg}",
         "msg.error_retry_hint": "Error: {msg}. Retry from the tray menu.",
+        "msg.streaming_fallback": "Streaming ASR unavailable — recording in file mode.",
+        "msg.retry_unavailable": "The audio file is no longer available.",
         "msg.paste_failed_copied": "Auto-paste failed. The polished text remains on the clipboard; you can paste it manually.",
     },
     "zh": {
@@ -127,6 +132,8 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "settings.models_fetch_failed": "获取模型失败：{error}",
         "settings.language": "语言：",
         "settings.lang_auto": "自动（中英混合）",
+        "settings.streaming_enabled": "流式实时转写",
+        "settings.streaming_hint": "将音频实时流式发送到提供商进行转写。使用上方的接口地址、API 密钥和模型。",
         "settings.recording_group": "录音",
         "settings.sample_rate": "采样率：",
         "settings.mic_device": "输入设备：",
@@ -202,6 +209,7 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "history.paste": "粘贴",
         "history.clear": "清空",
         "status.recording": "录制中...",
+        "status.streaming": "转写中...",
         "status.polishing": "润色中...",
         "error.no_audio": "未录制到音频",
         "error.title": "错误",
@@ -209,6 +217,8 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "msg.settings_saved": "设置已保存",
         "msg.error_format": "错误：{msg}",
         "msg.error_retry_hint": "处理失败：{msg}。可从托盘菜单重试。",
+        "msg.streaming_fallback": "流式转写不可用，已切换为文件模式。",
+        "msg.retry_unavailable": "音频文件已失效。",
         "msg.paste_failed_copied": "自动粘贴失败。润色内容已经保留在剪贴板中，可手动粘贴。",
     },
 }
@@ -222,14 +232,15 @@ def _detect_chinese_locale() -> str:
         loc = locale.getlocale()[0]
         if loc and "chinese" in loc.lower():
             return "zh"
-    except Exception:
+    except (ValueError, AttributeError):
         pass
     try:
         import ctypes
+        # Primary language ID 0x04 = LANG_CHINESE (simplified or traditional)
         lang_id = ctypes.windll.kernel32.GetUserDefaultUILanguage()
         if (lang_id & 0xFF) == 0x04:
             return "zh"
-    except Exception:
+    except (OSError, ImportError, AttributeError, ValueError):
         pass
     return "en"
 

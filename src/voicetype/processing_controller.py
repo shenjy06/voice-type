@@ -74,6 +74,7 @@ class ProcessingController(QObject):
         context_before: str = "",
         context_after: str = "",
         audio_path: str | None = None,
+        streaming_transcriber=None,
     ) -> None:
         """Start a new processing cycle for the given recorder.
 
@@ -85,6 +86,10 @@ class ProcessingController(QObject):
         When ``audio_path`` is provided (retry), the worker reuses that file
         and skips ``recorder.save()``; ``recorder`` may be ``None`` in that
         case.
+
+        When ``streaming_transcriber`` is provided (streaming mode), the
+        worker calls ``finalize()`` on it to collect the transcript instead
+        of saving + transcribing a file.
         """
         if self.is_running():
             return
@@ -95,6 +100,7 @@ class ProcessingController(QObject):
         worker = ProcessingWorker(
             self._config, recorder, context_before, context_after,
             audio_path=audio_path,
+            streaming_transcriber=streaming_transcriber,
         )
         worker.moveToThread(thread)
 

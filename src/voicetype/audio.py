@@ -142,6 +142,22 @@ class MicrophoneMonitor:
 
 
 class AudioRecorder:
+    """Captures and saves mono audio via sounddevice InputStream.
+
+    Audio is recorded as float32 via a callback on sounddevice's internal
+    thread.  The callback only holds ``self._lock`` for the minimum span
+    needed to append frames and update the level / VAD state — CPU work
+    (level computation, frame copy, PCM conversion) happens outside the
+    lock.  Optional features (denoise, VAD, streaming) are gated by
+    constructor flags; all are ``False`` by default for backward
+    compatibility.
+
+    Public hooks (callbacks invoked on the audio thread, receivers must
+    marshal to their own thread):
+        ``on_silence``       — no arguments; VAD silence threshold reached
+        ``on_audio_chunk``   — ``bytes`` of 16-bit PCM; streaming mode only
+    """
+
     def __init__(
         self,
         sample_rate: int = 16000,
@@ -150,6 +166,7 @@ class AudioRecorder:
         vad_enabled: bool = False,
         vad_silence_duration_ms: int = 1500,
         vad_threshold: float = 0.02,
+        streaming_enabled: bool = False,
     ):
         self.sample_rate = sample_rate
         self.denoise_enabled = denoise_enabled
@@ -157,6 +174,7 @@ class AudioRecorder:
         self.vad_enabled = vad_enabled
         self.vad_silence_duration_ms = vad_silence_duration_ms
         self.vad_threshold = vad_threshold
+        self.streaming_enabled = streaming_enabled
         self._recording = False
         self._frames: list[np.ndarray] = []
         self._stream: sd.InputStream | None = None
@@ -173,6 +191,9 @@ class AudioRecorder:
         self._vad_speech_detected = False
         self._vad_silence_start: float | None = None
         self._vad_triggered = False
+        # Streaming ASR hook — invoked on the audio thread with 16-bit PCM
+        # bytes when set. See StreamingTranscriber.
+        self.on_audio_chunk = None
 
     @property
     def is_recording(self) -> bool:
@@ -295,12 +316,18 @@ class AudioRecorder:
         level = _calculate_input_level(indata)
         frame = indata.copy()
         trigger = False
+        stream_chunk = False
         with self._lock:
             if self._recording:
-                self._frames.append(frame)
+                # In streaming mode the frames buffer is not needed — audio
+                # is piped to the ASR client in real time and never saved.
+                if not self.streaming_enabled:
+                    self._frames.append(frame)
                 self._input_level = level
                 if self._update_vad(level):
                     trigger = True
+                if self.streaming_enabled:
+                    stream_chunk = True
             else:
                 self._input_level = 0.0
         # Fire the silence callback OUTSIDE the lock — the receiver (a Qt
@@ -312,6 +339,24 @@ class AudioRecorder:
                 self.on_silence()
             except Exception:
                 logger.warning("VAD silence callback raised", exc_info=True)
+        # Stream PCM to the realtime ASR client. ``on_audio_chunk`` is a
+        # non-blocking queue put, so the audio callback thread never stalls
+        # on network I/O.
+        if stream_chunk and self.on_audio_chunk is not None:
+            try:
+                self.on_audio_chunk(self._to_pcm16(frame))
+            except Exception:
+                logger.warning("on_audio_chunk callback raised", exc_info=True)
+
+    @staticmethod
+    def _to_pcm16(frame: np.ndarray) -> bytes:
+        """Convert float32 audio [-1, 1] to 16-bit signed little-endian PCM.
+
+        DashScope's realtime ASR expects raw PCM frames (mono, 16-bit, at the
+        configured sample rate) — not a container format like WAV.
+        """
+        pcm = np.ascontiguousarray(frame * 32767, dtype=np.int16)
+        return pcm.tobytes()
 
     def _update_vad(self, level: float) -> bool:
         """Advance the VAD state machine; return True to trigger auto-stop.
@@ -356,16 +401,3 @@ class AudioRecorder:
                 logger.debug("Cleaned up audio file: %s", temp_file.name)
             except OSError as e:
                 logger.warning("Failed to clean up audio file %s: %s", temp_file.name, e)
-
-    def cancel(self) -> None:
-        """Stop recording and delete audio file without processing."""
-        if self._recording:
-            self.stop()
-        temp_file = self._temp_file
-        self._temp_file = None
-        if temp_file and temp_file.exists():
-            try:
-                temp_file.unlink()
-                logger.info("Recording cancelled, deleted: %s", temp_file.name)
-            except OSError as e:
-                logger.warning("Failed to delete cancelled audio %s: %s", temp_file.name, e)

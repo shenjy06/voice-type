@@ -96,6 +96,7 @@ class ProcessingWorker(QObject):
         context_before: str = "",
         context_after: str = "",
         audio_path: str | None = None,
+        streaming_transcriber=None,
     ):
         super().__init__()
         self.config = config
@@ -108,17 +109,30 @@ class ProcessingWorker(QObject):
         # a previous failed run) instead of calling recorder.save(). Used by
         # retry; in that case ``recorder`` is not touched.
         self._reused_audio_path = audio_path
+        # When set, the worker is in streaming mode — audio was piped to
+        # this transcriber during recording; finalize() collects the text.
+        # Mutually exclusive with the other two modes.
+        self._streaming_transcriber = streaming_transcriber
 
     def run(self):
         audio_path = None
         pipeline_start = time.monotonic()
         try:
             self.started.emit()
-            if self._reused_audio_path is not None:
+            if self._streaming_transcriber is not None:
+                # Streaming mode: audio was piped to the ASR client during
+                # recording; finalize to collect the accumulated transcript.
+                # No file is saved in this mode.
+                transcript = self._streaming_transcriber.finalize()
+                logger.info("Streaming transcript finalized in %.1fs: %d chars",
+                            time.monotonic() - pipeline_start, len(transcript))
+            elif self._reused_audio_path is not None:
                 # Retry: reuse the audio file retained from a previous failed
                 # run instead of re-encoding from the recorder.
                 audio_path = self._reused_audio_path
                 logger.debug("Retrying with retained audio: %s", os.path.basename(audio_path))
+                transcriber = get_transcriber(self.config)
+                transcript = transcriber.transcribe(audio_path)
             else:
                 # Encode the captured frames to a temp WAV file on this thread
                 # so the (potentially slow) encoding never blocks the UI.
@@ -127,8 +141,8 @@ class ProcessingWorker(QObject):
                 self.recorder = None  # release reference; buffer freed in save()
                 logger.debug("Processing pipeline started: %s", os.path.basename(audio_path))
                 logger.info("Audio saved in %.0fms", (time.monotonic() - save_start) * 1000)
-            transcriber = get_transcriber(self.config)
-            transcript = transcriber.transcribe(audio_path)
+                transcriber = get_transcriber(self.config)
+                transcript = transcriber.transcribe(audio_path)
 
             if not transcript:
                 logger.info("Transcription returned empty — pipeline finished in %.1fs",

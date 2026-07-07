@@ -23,7 +23,7 @@ DEFAULT_BASE_URL = "https://api.openai.com/v1"
 
 @dataclass
 class PolishApiConfig:
-    base_url: str = "https://api.openai.com/v1"
+    base_url: str = DEFAULT_BASE_URL
     api_key: str = ""
     model: str = "gpt-4o"
     enabled: bool = True
@@ -32,10 +32,15 @@ class PolishApiConfig:
 
 @dataclass
 class AsrConfig:
-    base_url: str = "https://api.openai.com/v1"
+    base_url: str = DEFAULT_BASE_URL
     api_key: str = ""
     model: str = "whisper-1"
     language: str = "auto"
+    # Streaming real-time ASR via WebSocket (OpenAI Realtime API protocol).
+    # When enabled, the recorder streams PCM chunks to the streaming provider
+    # and text appears live in the status bubble. Uses base_url as the
+    # WebSocket endpoint.
+    streaming_enabled: bool = False
 
 
 @dataclass
@@ -94,11 +99,6 @@ class AppConfig:
     glossary: list[GlossaryEntry] = field(default_factory=list)
     window: WindowConfig = field(default_factory=WindowConfig)
     hotkey: HotkeyConfig = field(default_factory=HotkeyConfig)
-
-    # Back-compat alias
-    @property
-    def api(self):
-        return self.polish
 
     def to_dict(self) -> dict:
         return asdict(self)

@@ -383,8 +383,13 @@ class FloatingRecordingWindow(QWidget):
     def set_done(self):
         self._transition_to(RecorderState.DONE)
 
-    def set_error(self, msg: str = "Error"):
-        # The error message is optional UI context; state machine is what matters.
+    def set_error(self, msg: str = ""):
+        """Transition to ERROR state.
+
+        ``msg`` is reserved for future UI use (e.g. showing the error text
+        in a tooltip).  Currently only the state transition is needed.
+        """
+        _ = msg  # reserved, not yet displayed
         self._transition_to(RecorderState.ERROR)
 
     def closeEvent(self, event: QCloseEvent):

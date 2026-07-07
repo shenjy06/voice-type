@@ -64,7 +64,7 @@ class HistoryStore:
             count = self._conn.execute("SELECT COUNT(*) FROM history").fetchone()[0]
             if count > self.limit * 2:
                 self._trim(self._conn)
-        self._dirty = True
+            self._dirty = True
         return entry
 
     def load(self) -> list[HistoryEntry]:
@@ -87,7 +87,7 @@ class HistoryStore:
     def clear(self) -> None:
         with self._lock, self._conn:
             self._conn.execute("DELETE FROM history")
-        self._dirty = True
+            self._dirty = True
         logger.info("History cleared")
 
     def _init_db(self, conn: sqlite3.Connection) -> None:

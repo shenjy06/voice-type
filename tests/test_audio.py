@@ -1,5 +1,7 @@
 """Tests for voice_type.audio — AudioRecorder."""
 
+import struct
+
 import numpy as np
 import pytest
 from pathlib import Path
@@ -290,32 +292,6 @@ class TestAudioRecorderTakeAudioPath:
         mock_path.unlink.assert_not_called()
 
 
-class TestAudioRecorderCancel:
-    def test_cancel_stops_and_deletes(self, mocker):
-        """cancel() stops recording and deletes the audio file."""
-        mock_stream = mocker.MagicMock()
-        mocker.patch("voicetype.audio.sd", InputStream=mocker.MagicMock(return_value=mock_stream))
-        mock_path = mocker.MagicMock()
-        mock_path.exists.return_value = True
-
-        recorder = AudioRecorder()
-        recorder.start()
-        recorder._temp_file = mock_path
-        recorder.cancel()
-
-        assert recorder.is_recording is False
-        mock_path.unlink.assert_called_once()
-        assert recorder._temp_file is None
-
-    def test_cancel_without_recording(self, mocker):
-        """cancel() when not recording just clears state."""
-        recorder = AudioRecorder()
-        recorder._temp_file = None
-        recorder.cancel()
-
-        assert recorder._temp_file is None
-
-
 class TestAudioRecorderVAD:
     """Voice Activity Detection — auto-stop on sustained silence."""
 
@@ -438,7 +414,11 @@ class TestAudioRecorderVAD:
         mock_time = mocker.patch("voicetype.audio.time.monotonic")
         mock_time.return_value = 0.0
         recorder = AudioRecorder(vad_enabled=True, vad_silence_duration_ms=1000)
-        recorder.on_silence = lambda: (_ for _ in ()).throw(RuntimeError("boom"))
+
+        def _raise_error() -> None:
+            raise RuntimeError("boom")
+
+        recorder.on_silence = _raise_error
         recorder._recording = True
         recorder._callback(np.array([[0.5]], dtype=np.float32), 1, None, None)
         mock_time.return_value = 1.0
@@ -446,6 +426,62 @@ class TestAudioRecorderVAD:
         mock_time.return_value = 2.5
         # Must not raise.
         recorder._callback(np.array([[0.0]], dtype=np.float32), 1, None, None)
+
+
+class TestAudioRecorderStreaming:
+    """Streaming mode — pipes PCM to an ASR client instead of buffering."""
+
+    def test_streaming_disabled_by_default(self):
+        recorder = AudioRecorder()
+        assert recorder.streaming_enabled is False
+        assert recorder.on_audio_chunk is None
+
+    def test_streaming_accepted(self):
+        recorder = AudioRecorder(streaming_enabled=True)
+        assert recorder.streaming_enabled is True
+
+    def test_callback_does_not_store_frames_when_streaming(self):
+        """In streaming mode, frames are not buffered (audio is piped live)."""
+        recorder = AudioRecorder(streaming_enabled=True)
+        recorder._recording = True
+        data = np.array([[0.1]], dtype=np.float32)
+        recorder._callback(data, 1, None, None)
+        assert len(recorder._frames) == 0
+
+    def test_callback_stores_frames_when_not_streaming(self):
+        """In non-streaming mode, frames are buffered as usual."""
+        recorder = AudioRecorder(streaming_enabled=False)
+        recorder._recording = True
+        data = np.array([[0.1]], dtype=np.float32)
+        recorder._callback(data, 1, None, None)
+        assert len(recorder._frames) == 1
+
+    def test_callback_invokes_on_audio_chunk_with_pcm(self):
+        """on_audio_chunk is called with 16-bit PCM bytes when streaming."""
+        recorder = AudioRecorder(streaming_enabled=True)
+        recorder._recording = True
+        chunks = []
+        recorder.on_audio_chunk = chunks.append
+        # float32 input [-1, 1], shape (4, 1)
+        data = np.array([[0.0], [0.5], [-0.5], [1.0]], dtype=np.float32)
+        recorder._callback(data, 4, None, None)
+        assert len(chunks) == 1
+        pcm = chunks[0]
+        # 4 samples * 2 bytes = 8 bytes
+        assert len(pcm) == 8
+        values = struct.unpack("<4h", pcm)
+        assert values[0] == 0
+        assert 16000 < values[1] < 17000  # 0.5 * 32767 ≈ 16383
+        assert -17000 < values[2] < -16000
+        assert values[3] == 32767
+
+    def test_callback_no_on_audio_chunk_when_not_streaming(self):
+        """on_audio_chunk is not invoked in non-streaming mode."""
+        recorder = AudioRecorder(streaming_enabled=False)
+        recorder._recording = True
+        recorder.on_audio_chunk = lambda _: pytest.fail("should not be called")
+        data = np.array([[0.1]], dtype=np.float32)
+        recorder._callback(data, 1, None, None)  # must not call on_audio_chunk
 
 
 class TestMicrophoneMonitor:

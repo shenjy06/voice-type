@@ -1,5 +1,6 @@
 """Tests for voice_type.__main__ — ProcessingWorker and Application."""
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 
@@ -107,6 +108,34 @@ class TestProcessingWorker:
         assert "API timeout" in error_msg
         # Audio file must NOT be deleted on failure — retained for retry.
         mock_remove.assert_not_called()
+
+    def test_streaming_mode_finalizes_transcriber(self, qtbot, mocker):
+        """Streaming mode: worker calls finalize() and skips save/transcribe."""
+        from voicetype.processing import ProcessingWorker
+
+        mock_streaming = mocker.MagicMock()
+        mock_streaming.finalize.return_value = "streamed text"
+        mock_polisher = mocker.patch("voicetype.processing.TextPolisher")
+        mock_polisher.return_value.polish.return_value = "refined"
+        mocker.patch("voicetype.processing.os.remove")
+
+        cfg = mocker.MagicMock()
+        cfg.polish.enabled = True
+        recorder = _make_recorder()  # save() should NOT be called
+        worker = ProcessingWorker(
+            cfg, recorder, streaming_transcriber=mock_streaming,
+        )
+
+        results = []
+        worker.finished.connect(lambda t: results.append(t))
+        worker.run()
+
+        mock_streaming.finalize.assert_called_once()
+        recorder.save.assert_not_called()
+        mock_polisher.return_value.polish.assert_called_once_with(
+            "streamed text", context_before="", context_after=""
+        )
+        assert results == ["refined"]
 
     def test_save_failure_emits_error(self, qtbot, mocker):
         """A save failure (e.g. no audio data) surfaces as a processing error."""
@@ -468,7 +497,6 @@ class TestApplication:
 
     def test_on_processing_error_retains_audio_for_retry(self, qtbot, mocker):
         """On failure the audio path is retained and retry is enabled."""
-        from pathlib import Path
         app = self._make_application(qtbot, mocker)
         app.audio_recorder.take_audio_path = mocker.MagicMock(
             return_value=Path("/tmp/failed.wav")
@@ -487,6 +515,9 @@ class TestApplication:
         app._processing_controller.is_running = mocker.MagicMock(return_value=False)
         # is_recording is a read-only property that delegates to ui.is_recording()
         app.window.is_recording.return_value = False
+        # _retry_processing checks if the retained file still exists before
+        # starting the retry cycle.
+        mocker.patch("os.path.exists", return_value=True)
 
         app._retry_processing()
 

@@ -277,7 +277,7 @@ class HotkeyManager(QObject):
                 # own thread (e.g. hotkey triggers quit from within the
                 # callback). In that case the thread will exit naturally
                 # when the callback returns; skip the join.
-                pass
+                logger.debug("Skipping listener join from callback thread")
             self._listener = None
         logger.info("Hotkey listener stopped")
         self._toggle_key_pressed = False

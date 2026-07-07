@@ -143,6 +143,7 @@ class TestSettingsDialogMicrophoneTest:
         monitor = mocker.MagicMock()
         monitor.start.return_value = True
         monitor.is_running = True
+        monitor.input_level = 0.0  # prevent timer callback from crashing
         mock_monitor_cls = mocker.patch(
             "voicetype.ui.settings_dialog.MicrophoneMonitor",
             return_value=monitor,
@@ -415,7 +416,7 @@ class TestSettingsDialogWrapHeights:
             dlg = SettingsDialog(AppConfig())
             qtbot.addWidget(dlg)
             dlg.show()
-            dlg._tabs.setCurrentIndex(1)  # STT tab
+            dlg._tabs.setCurrentIndex(0)  # General tab (recording settings)
             # _adjust_wrap_heights is deferred via QTimer.singleShot(0, ...);
             # the mic device name is fetched on a background thread and
             # delivered via a queued signal. Wait for both to settle.
@@ -446,7 +447,7 @@ class TestSettingsDialogWrapHeights:
             dlg = SettingsDialog(AppConfig())
             qtbot.addWidget(dlg)
             dlg.show()
-            dlg._tabs.setCurrentIndex(1)
+            dlg._tabs.setCurrentIndex(0)  # General tab
             qtbot.wait(200)
             for lbl in dlg._wrap_labels:
                 if lbl.width() <= 0 or not lbl.text():

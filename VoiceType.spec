@@ -36,6 +36,7 @@ hiddenimports = [
     "pynput",
     "pynput.keyboard",
     "pynput.keyboard._win32",
+    "websocket",
 ]
 # Append soundfile's transitive hidden imports (collected above) so the
 # linker sees every module that soundfile may load at runtime.

@@ -18,11 +18,15 @@ from voicetype.config import AppConfig, DEFAULT_BASE_URL, GlossaryEntry
 from voicetype.constants import PASTE_MODES, ASR_LANGUAGES, DENOISE_STRENGTHS
 from voicetype.network import check_network_available
 from voicetype.ui.hotkey_recorder import HotkeyRecorder
+from voicetype.ui.icon_utils import make_circle_icon
 from voicetype.ui.main_window import Toast
+from voicetype.i18n import t
 
 logger = logging.getLogger(__name__)
-from voicetype.ui.icon_utils import make_circle_icon
-from voicetype.i18n import t
+
+# Shared hint-label stylesheet to avoid repetition (6 occurrences).
+_HINT_STYLESHEET = "color: #9ca3af; font-size: 12px;"
+_MIC_POLL_INTERVAL_MS = 100
 
 _SETTINGS_ICON = None
 
@@ -78,9 +82,10 @@ class SettingsDialog(QDialog):
         self.setWindowFlags(Qt.Dialog)
         self._mic_monitor = None
         self._mic_timer = QTimer(self)
-        self._mic_timer.setInterval(100)
+        self._mic_timer.setInterval(_MIC_POLL_INTERVAL_MS)
         self._mic_timer.timeout.connect(self._refresh_microphone_level)
         self._wrap_adjust_pending = False
+        self._toast = None  # managed by _show_dialog_toast
         # Refresh buttons by section ("asr"/"polish") — populated in _init_ui.
         # Must exist before _init_ui() runs because _make_model_row writes to it.
         self._refresh_buttons: dict[str, QPushButton] = {}
@@ -96,6 +101,7 @@ class SettingsDialog(QDialog):
             self.mic_status_label,
             self.denoise_hint_label,
             self.vad_hint_label,
+            self.streaming_hint_label,
         ]
         self._tabs.currentChanged.connect(lambda _: self._schedule_adjust_wrap_heights())
         # Snapshot original API-related fields to detect changes on save
@@ -167,6 +173,71 @@ class SettingsDialog(QDialog):
 
         lang_group.setLayout(lang_layout)
         general_layout.addWidget(lang_group)
+
+        # Recording settings (sample rate, mic, denoise, VAD) live on the
+        # General tab — they're hardware/local concerns, not API config.
+        stt_misc_group = QGroupBox(t("settings.recording_group"))
+        stt_misc_layout = QFormLayout()
+
+        self.sample_rate_spin = QSpinBox()
+        self.sample_rate_spin.setRange(8000, 48000)
+        self.sample_rate_spin.setSingleStep(8000)
+        stt_misc_layout.addRow(t("settings.sample_rate"), self.sample_rate_spin)
+
+        self.mic_device_label = QLabel()
+        self.mic_device_label.setWordWrap(True)
+        stt_misc_layout.addRow(t("settings.mic_device"), self.mic_device_label)
+
+        self.mic_level_bar = QProgressBar()
+        self.mic_level_bar.setRange(0, 100)
+        self.mic_level_bar.setValue(0)
+        self.mic_level_bar.setTextVisible(False)
+        self.mic_level_bar.setFixedHeight(10)
+        self.mic_level_bar.setStyleSheet(
+            "QProgressBar { background: #1f2937; border: 1px solid #4b5563; border-radius: 5px; }"
+            "QProgressBar::chunk { background: #22c55e; border-radius: 4px; }"
+        )
+        stt_misc_layout.addRow(t("settings.mic_level"), self.mic_level_bar)
+
+        self.mic_status_label = QLabel(t("settings.mic_status_idle"))
+        self.mic_status_label.setWordWrap(True)
+        self.mic_status_label.setStyleSheet(_HINT_STYLESHEET)
+        stt_misc_layout.addRow("", self.mic_status_label)
+
+        self.mic_test_btn = QPushButton(t("settings.mic_test_start"))
+        self.mic_test_btn.clicked.connect(self._toggle_microphone_monitor)
+        stt_misc_layout.addRow("", self.mic_test_btn)
+
+        self.denoise_check = QCheckBox(t("settings.denoise_enabled"))
+        self.denoise_check.toggled.connect(self._on_denoise_toggled)
+        stt_misc_layout.addRow("", self.denoise_check)
+
+        self.denoise_strength_combo = QComboBox()
+        for label_key, value in DENOISE_STRENGTHS:
+            self.denoise_strength_combo.addItem(t(label_key), value)
+        stt_misc_layout.addRow(t("settings.denoise_strength"), self.denoise_strength_combo)
+
+        self.denoise_hint_label = QLabel(t("settings.denoise_hint"))
+        self.denoise_hint_label.setWordWrap(True)
+        self.denoise_hint_label.setStyleSheet(_HINT_STYLESHEET)
+        stt_misc_layout.addRow("", self.denoise_hint_label)
+
+        self.vad_check = QCheckBox(t("settings.vad_enabled"))
+        stt_misc_layout.addRow("", self.vad_check)
+
+        self.vad_silence_spin = QSpinBox()
+        self.vad_silence_spin.setRange(500, 5000)
+        self.vad_silence_spin.setSingleStep(100)
+        self.vad_silence_spin.setSuffix(" ms")
+        stt_misc_layout.addRow(t("settings.vad_silence_duration"), self.vad_silence_spin)
+
+        self.vad_hint_label = QLabel(t("settings.vad_hint"))
+        self.vad_hint_label.setWordWrap(True)
+        self.vad_hint_label.setStyleSheet(_HINT_STYLESHEET)
+        stt_misc_layout.addRow("", self.vad_hint_label)
+
+        stt_misc_group.setLayout(stt_misc_layout)
+        general_layout.addWidget(stt_misc_group)
         general_layout.addStretch()
         self._tabs.addTab(general_tab, t("settings.general"))
 
@@ -199,71 +270,17 @@ class SettingsDialog(QDialog):
             self.stt_lang_combo.addItem(label, code)
         stt_api_layout.addRow(t("settings.language"), self.stt_lang_combo)
 
+        self.streaming_check = QCheckBox(t("settings.streaming_enabled"))
+        self.streaming_check.toggled.connect(self._on_streaming_toggled)
+        stt_api_layout.addRow("", self.streaming_check)
+
+        self.streaming_hint_label = QLabel(t("settings.streaming_hint"))
+        self.streaming_hint_label.setWordWrap(True)
+        self.streaming_hint_label.setStyleSheet(_HINT_STYLESHEET)
+        stt_api_layout.addRow("", self.streaming_hint_label)
+
         stt_api_group.setLayout(stt_api_layout)
         stt_layout.addWidget(stt_api_group)
-
-        stt_misc_group = QGroupBox(t("settings.recording_group"))
-        stt_misc_layout = QFormLayout()
-
-        self.sample_rate_spin = QSpinBox()
-        self.sample_rate_spin.setRange(8000, 48000)
-        self.sample_rate_spin.setSingleStep(8000)
-        stt_misc_layout.addRow(t("settings.sample_rate"), self.sample_rate_spin)
-
-        self.mic_device_label = QLabel()
-        self.mic_device_label.setWordWrap(True)
-        stt_misc_layout.addRow(t("settings.mic_device"), self.mic_device_label)
-
-        self.mic_level_bar = QProgressBar()
-        self.mic_level_bar.setRange(0, 100)
-        self.mic_level_bar.setValue(0)
-        self.mic_level_bar.setTextVisible(False)
-        self.mic_level_bar.setFixedHeight(10)
-        self.mic_level_bar.setStyleSheet(
-            "QProgressBar { background: #1f2937; border: 1px solid #4b5563; border-radius: 5px; }"
-            "QProgressBar::chunk { background: #22c55e; border-radius: 4px; }"
-        )
-        stt_misc_layout.addRow(t("settings.mic_level"), self.mic_level_bar)
-
-        self.mic_status_label = QLabel(t("settings.mic_status_idle"))
-        self.mic_status_label.setWordWrap(True)
-        self.mic_status_label.setStyleSheet("color: #9ca3af; font-size: 12px;")
-        stt_misc_layout.addRow("", self.mic_status_label)
-
-        self.mic_test_btn = QPushButton(t("settings.mic_test_start"))
-        self.mic_test_btn.clicked.connect(self._toggle_microphone_monitor)
-        stt_misc_layout.addRow("", self.mic_test_btn)
-
-        self.denoise_check = QCheckBox(t("settings.denoise_enabled"))
-        self.denoise_check.toggled.connect(self._on_denoise_toggled)
-        stt_misc_layout.addRow("", self.denoise_check)
-
-        self.denoise_strength_combo = QComboBox()
-        for label_key, value in DENOISE_STRENGTHS:
-            self.denoise_strength_combo.addItem(t(label_key), value)
-        stt_misc_layout.addRow(t("settings.denoise_strength"), self.denoise_strength_combo)
-
-        self.denoise_hint_label = QLabel(t("settings.denoise_hint"))
-        self.denoise_hint_label.setWordWrap(True)
-        self.denoise_hint_label.setStyleSheet("color: #9ca3af; font-size: 12px;")
-        stt_misc_layout.addRow("", self.denoise_hint_label)
-
-        self.vad_check = QCheckBox(t("settings.vad_enabled"))
-        stt_misc_layout.addRow("", self.vad_check)
-
-        self.vad_silence_spin = QSpinBox()
-        self.vad_silence_spin.setRange(500, 5000)
-        self.vad_silence_spin.setSingleStep(100)
-        self.vad_silence_spin.setSuffix(" ms")
-        stt_misc_layout.addRow(t("settings.vad_silence_duration"), self.vad_silence_spin)
-
-        self.vad_hint_label = QLabel(t("settings.vad_hint"))
-        self.vad_hint_label.setWordWrap(True)
-        self.vad_hint_label.setStyleSheet("color: #9ca3af; font-size: 12px;")
-        stt_misc_layout.addRow("", self.vad_hint_label)
-
-        stt_misc_group.setLayout(stt_misc_layout)
-        stt_layout.addWidget(stt_misc_group)
         stt_layout.addStretch()
         self._tabs.addTab(stt_tab, t("settings.stt_tab"))
 
@@ -374,12 +391,12 @@ class SettingsDialog(QDialog):
 
         self._hint_label = QLabel(t("settings.hotkey_hint"))
         self._hint_label.setWordWrap(True)
-        self._hint_label.setStyleSheet("color: #9ca3af; font-size: 12px;")
+        self._hint_label.setStyleSheet(_HINT_STYLESHEET)
         hotkey_layout.addWidget(self._hint_label)
 
         self._cancel_label = QLabel(t("settings.hotkey_cancel"))
         self._cancel_label.setWordWrap(True)
-        self._cancel_label.setStyleSheet("color: #9ca3af; font-size: 12px;")
+        self._cancel_label.setStyleSheet(_HINT_STYLESHEET)
         hotkey_layout.addWidget(self._cancel_label)
 
         hotkey_group.setLayout(hotkey_layout)
@@ -415,6 +432,8 @@ class SettingsDialog(QDialog):
         if idx < 0:
             idx = self.stt_lang_combo.findData("auto")
         self.stt_lang_combo.setCurrentIndex(idx)
+        self.streaming_check.setChecked(self.config.asr.streaming_enabled)
+        self._on_streaming_toggled(self.config.asr.streaming_enabled)
         self.sample_rate_spin.setValue(self.config.recording.sample_rate)
 
         self.denoise_check.setChecked(self.config.recording.denoise_enabled)
@@ -473,14 +492,25 @@ class SettingsDialog(QDialog):
         current = self._snapshot_api_state()
         return current != self._initial_api_state
 
+    def _show_dialog_toast(self, text: str) -> None:
+        """Show a toast, closing any previous one to prevent leaks."""
+        if self._toast is not None:
+            try:
+                self._toast.close()
+            except Exception:
+                pass
+            self._toast = None
+        toast = Toast(text, parent=self)
+        toast.show()
+        self._toast = toast
+
     def _save_and_close(self):
         # Validate keys synchronously first — no network needed for that.
         api_key = self.stt_api_key_input.text().strip()
         polish_key = self.polish_api_key_input.text().strip()
         if not api_key and not polish_key:
             logger.warning("Save rejected: no API key provided")
-            self._toast = Toast(t("settings.api_key_required"), parent=self)
-            self._toast.show()
+            self._show_dialog_toast(t("settings.api_key_required"))
             return
 
         # Only require network access if an API-related field actually changed.
@@ -496,7 +526,10 @@ class SettingsDialog(QDialog):
         self._set_checking_network(True)
 
         def _check():
-            ok = check_network_available()
+            try:
+                ok = check_network_available()
+            except Exception:
+                ok = False
             self._network_check_done.emit(ok)
 
         threading.Thread(target=_check, daemon=True).start()
@@ -505,8 +538,7 @@ class SettingsDialog(QDialog):
         self._set_checking_network(False)
         if not ok:
             logger.warning("Save rejected: network unavailable")
-            self._toast = Toast(t("settings.network_error"), parent=self)
-            self._toast.show()
+            self._show_dialog_toast(t("settings.network_error"))
             return
         self._apply_save()
 
@@ -593,11 +625,9 @@ class SettingsDialog(QDialog):
 
         if not model_ids:
             self._restore_combo_on_fetch_failure(section)
-            self._toast = Toast(
-                t("settings.models_fetch_failed").format(error=t("settings.models_loaded").format(count=0)),
-                parent=self,
+            self._show_dialog_toast(
+                t("settings.models_fetch_failed").format(error=t("settings.models_loaded").format(count=0))
             )
-            self._toast.show()
             logger.info("Fetched 0 models for section %s", section)
             return
 
@@ -615,10 +645,9 @@ class SettingsDialog(QDialog):
             idx = combo.findText(previous)
             if idx >= 0:
                 combo.setCurrentIndex(idx)
-        self._toast = Toast(
-            t("settings.models_loaded").format(count=len(model_ids)), parent=self
+        self._show_dialog_toast(
+            t("settings.models_loaded").format(count=len(model_ids))
         )
-        self._toast.show()
         logger.info("Fetched %d models for section %s", len(model_ids), section)
 
     def _on_models_error(self, section: str, error: str) -> None:
@@ -626,10 +655,9 @@ class SettingsDialog(QDialog):
         self._model_before_fetch.pop(section, None)
         self._restore_combo_on_fetch_failure(section)
         self._set_refreshing(section, False)
-        self._toast = Toast(
-            t("settings.models_fetch_failed").format(error=error), parent=self
+        self._show_dialog_toast(
+            t("settings.models_fetch_failed").format(error=error)
         )
-        self._toast.show()
         logger.warning("Model fetch failed for section %s: %s", section, error)
 
     def _apply_save(self):
@@ -645,6 +673,7 @@ class SettingsDialog(QDialog):
         self.config.asr.base_url = self.stt_base_url_input.text().strip()
         self.config.asr.model = self.stt_model_combo.currentText()
         self.config.asr.language = self.stt_lang_combo.currentData()
+        self.config.asr.streaming_enabled = self.streaming_check.isChecked()
         self.config.recording.sample_rate = self.sample_rate_spin.value()
         self.config.recording.denoise_enabled = self.denoise_check.isChecked()
         self.config.recording.denoise_strength = self.denoise_strength_combo.currentData()
@@ -709,6 +738,16 @@ class SettingsDialog(QDialog):
         """Enable/disable the strength selector to match the checkbox."""
         self.denoise_strength_combo.setEnabled(enabled)
         self.denoise_hint_label.setEnabled(enabled)
+
+    def _on_streaming_toggled(self, enabled: bool):
+        """Hide the ASR model refresh button when streaming is enabled.
+
+        Streaming uses a WebSocket endpoint, not the REST ``/models`` API,
+        so fetching the model list is not applicable in streaming mode.
+        """
+        btn = self._refresh_buttons.get("asr")
+        if btn is not None:
+            btn.setVisible(not enabled)
 
     def _update_microphone_device_label(self):
         # sd.query_devices(kind="input") enumerates PortAudio devices, which
