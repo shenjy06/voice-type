@@ -3,6 +3,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from voicetype.config import (
     AppConfig,
     AsrConfig,
@@ -400,20 +402,12 @@ class TestExportImport:
     def test_import_from_raises_on_malformed_json(self, tmp_path):
         out = tmp_path / "bad.json"
         out.write_text("{not valid json", encoding="utf-8")
-        try:
+        with pytest.raises(json.JSONDecodeError):
             AppConfig.import_from(out)
-        except json.JSONDecodeError:
-            pass
-        else:
-            raise AssertionError("expected JSONDecodeError for malformed file")
 
     def test_import_from_raises_on_missing_file(self, tmp_path):
-        try:
+        with pytest.raises(OSError):
             AppConfig.import_from(tmp_path / "nonexistent.json")
-        except OSError:
-            pass
-        else:
-            raise AssertionError("expected OSError for missing file")
 
     def test_update_from_preserves_identity(self):
         """update_from mutates the existing object rather than replacing it."""
@@ -523,12 +517,8 @@ class TestEncryptedExportImport:
         raw = out.read_text(encoding="utf-8")
         assert "sk-enc" not in raw
         # Wrong password fails.
-        try:
+        with pytest.raises(InvalidPasswordError):
             AppConfig.import_from(out, password="wrong")
-        except InvalidPasswordError:
-            pass
-        else:
-            raise AssertionError("expected InvalidPasswordError for wrong password")
         # Correct password round-trips.
         loaded = AppConfig.import_from(out, password="s3cret")
         assert loaded.asr.api_key == "sk-enc"
@@ -537,12 +527,8 @@ class TestEncryptedExportImport:
         cfg = AppConfig(asr=AsrConfig(api_key="sk-enc"))
         out = tmp_path / "enc.json"
         cfg.export_to(out, password="s3cret")
-        try:
+        with pytest.raises(EncryptedConfigError):
             AppConfig.import_from(out)
-        except EncryptedConfigError:
-            pass
-        else:
-            raise AssertionError("expected EncryptedConfigError when no password")
 
     def test_plaintext_export_still_works(self, tmp_path):
         cfg = AppConfig(asr=AsrConfig(api_key="sk-plain"))
@@ -598,3 +584,16 @@ class TestProfiles:
         from voicetype import config as config_mod
         raw = (config_mod.PROFILES_DIR / "work.json").read_text(encoding="utf-8")
         assert "sk-p" in raw
+
+class TestProfileNameValidation:
+    """Profile names must not allow path traversal."""
+
+    @pytest.mark.parametrize("bad", ["", "..", ".", "a/b", "a\\b", " work ", "../config"])
+    def test_invalid_names_rejected(self, bad):
+        with pytest.raises(ValueError):
+            save_profile(bad, AppConfig())
+
+    @pytest.mark.parametrize("good", ["work", "个人", "work 2", "a.b", "profile_1"])
+    def test_valid_names_accepted(self, good):
+        save_profile(good, AppConfig())
+        assert good in list_profiles()

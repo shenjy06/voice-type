@@ -1,10 +1,12 @@
 """Configuration management — loads/saves user settings from JSON.
 
-The `voicetype.crypto` module is available for at-rest encryption of API keys
-but is intentionally NOT wired into to_dict/from_dict here because the
-raw ctypes DPAPI binding is unstable in some environments. To enable
-encryption, plug crypto.encrypt/decrypt into to_dict/from_dict and run
-integration tests in your target environment first.
+API keys are stored in plaintext in config.json (and in exported/profile
+files unless a password is supplied). The `voicetype.crypto` module provides
+portable password-based encryption (Fernet + PBKDF2) used by
+``export_to``/``import_from`` for encrypted config files. The at-rest
+DPAPI path documented in crypto.py is intentionally not wired into
+to_dict/from_dict because the raw ctypes binding is unstable in some
+environments.
 """
 
 import copy
@@ -231,11 +233,15 @@ class AppConfig:
         if password:
             plaintext = json.dumps(self.to_dict(), ensure_ascii=False)
             envelope = crypto.encrypt_with_password(plaintext, password)
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(envelope, f, ensure_ascii=False)
+            content = json.dumps(envelope, ensure_ascii=False)
         else:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(self.to_dict(), f, indent=2, ensure_ascii=False)
+            content = json.dumps(self.to_dict(), indent=2, ensure_ascii=False)
+        # Atomic write (tmp + replace) so a mid-write failure can't leave a
+        # half-written export behind, mirroring save().
+        tmp_path = path.with_suffix(path.suffix + ".tmp")
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        tmp_path.replace(path)
 
     @classmethod
     def import_from(cls, path: Path, password: str | None = None) -> "AppConfig":
@@ -339,6 +345,26 @@ class AppConfig:
 # settings_dialog), so startup loading stays a single-file operation.
 
 
+def _validate_profile_name(name: str) -> None:
+    """Raise ``ValueError`` if ``name`` could escape the profiles directory.
+
+    A profile name is used directly as a filename, so path separators and
+    ``..`` are rejected to prevent traversal. Unicode, interior spaces, and
+    punctuation are all allowed - the goal is only security, not style.
+    """
+    stripped = name.strip()
+    if not stripped:
+        raise ValueError("profile name is empty")
+    if stripped in (".", ".."):
+        raise ValueError(f"invalid profile name: {stripped!r}")
+    if "\\" in stripped or "/" in stripped:
+        raise ValueError(
+            f"profile name must not contain path separators: {stripped!r}"
+        )
+    if stripped != name:
+        raise ValueError("profile name must not have surrounding whitespace")
+
+
 def list_profiles() -> list[str]:
     """Return sorted profile names available on disk (empty if none)."""
     if not PROFILES_DIR.exists():
@@ -348,17 +374,20 @@ def list_profiles() -> list[str]:
 
 def save_profile(name: str, config: "AppConfig") -> None:
     """Persist ``config`` as a named profile (plaintext JSON)."""
+    _validate_profile_name(name)
     PROFILES_DIR.mkdir(parents=True, exist_ok=True)
     config.export_to(PROFILES_DIR / f"{name}.json")
 
 
 def load_profile(name: str) -> "AppConfig":
     """Load a named profile. Raises OSError/JSONDecodeError on failure."""
+    _validate_profile_name(name)
     return AppConfig.import_from(PROFILES_DIR / f"{name}.json")
 
 
 def delete_profile(name: str) -> None:
     """Delete a named profile file if it exists, clearing the active marker."""
+    _validate_profile_name(name)
     (PROFILES_DIR / f"{name}.json").unlink(missing_ok=True)
     if get_active_profile() == name:
         set_active_profile(None)

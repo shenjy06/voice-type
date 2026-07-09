@@ -64,12 +64,24 @@ class PasswordDialog(QDialog):
             self._pw2 = QLineEdit()
             self._pw2.setEchoMode(QLineEdit.Password)
             layout.addWidget(self._pw2)
+        self._error_label = QLabel()
+        self._error_label.setStyleSheet("color: #ef4444; font-size: 12px;")
+        self._error_label.setVisible(False)
+        layout.addWidget(self._error_label)
         buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel
         )
-        buttons.accepted.connect(self.accept)
+        buttons.accepted.connect(self._try_accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def _try_accept(self):
+        """Validate before accepting - block OK if confirmation doesn't match."""
+        if self._pw2 is not None and self._pw.text() != self._pw2.text():
+            self._error_label.setText(t("settings.password_mismatch"))
+            self._error_label.setVisible(True)
+            return
+        self.accept()
 
     def password(self) -> str:
         return self._pw.text()
@@ -794,14 +806,6 @@ class SettingsDialog(QDialog):
         self.config.hotkey.toggle_hotkey = self.hotkey_recorder.hotkey()
 
         self.config.save()
-        # Keep the active profile in sync with the current configuration so a
-        # later "Switch profile" still shows the latest values for this one.
-        active = get_active_profile()
-        if active:
-            try:
-                save_profile(active, self.config)
-            except OSError as e:
-                logger.warning("Could not sync active profile %r: %s", active, e)
         self.settings_saved.emit()
         self.accept()
 
@@ -827,9 +831,6 @@ class SettingsDialog(QDialog):
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         password = dlg.password()
-        if password and not dlg.matches():
-            self._show_dialog_toast(t("settings.password_mismatch"))
-            return
         try:
             self.config.export_to(Path(path), password=password or None)
         except OSError as e:
@@ -855,9 +856,9 @@ class SettingsDialog(QDialog):
         if new_config is None:
             return
 
-        # Warn when the imported file is effectively empty — silently
-        # resetting to factory defaults is almost never intentional.
         if new_config.is_default():
+            # Empty config: warn once, then apply directly. The summary
+            # preview would just show a wall of defaults, so skip it.
             reply = QMessageBox.warning(
                 self, t("settings.import_empty_config_title"),
                 t("settings.import_empty_config_warning"),
@@ -865,6 +866,9 @@ class SettingsDialog(QDialog):
             )
             if reply != QMessageBox.Yes:
                 return
+            self._apply_config(new_config)
+            self._show_dialog_toast(f"{t('settings.import_success')} - {path}")
+            return
 
         # Show a preview so the user sees what they're about to apply.
         preview_text = t("settings.import_preview_text").format(
@@ -888,20 +892,26 @@ class SettingsDialog(QDialog):
         unreadable / the password is wrong.
         """
         password = None
+        attempts = 0
         while True:
             try:
                 return AppConfig.import_from(path, password=password)
             except EncryptedConfigError:
-                ok, pw = self._ask_import_password()
-                if not ok:
-                    return None
-                password = pw
+                pass  # no password yet - fall through to the prompt
             except InvalidPasswordError:
+                attempts += 1
+                if attempts >= 3:
+                    self._show_dialog_toast(t("settings.import_invalid_password"))
+                    return None
                 self._show_dialog_toast(t("settings.import_invalid_password"))
-                return None
             except (OSError, json.JSONDecodeError) as e:
                 self._show_dialog_toast(t("settings.import_failed").format(error=e))
                 return None
+            # Prompt for a password and retry (reached on Encrypted/Invalid).
+            ok, pw = self._ask_import_password()
+            if not ok:
+                return None
+            password = pw
 
     def _ask_import_password(self) -> tuple[bool, str]:
         """Prompt for the password to decrypt an imported file."""
@@ -922,6 +932,7 @@ class SettingsDialog(QDialog):
             self.config.update_from(new_config)
             self._load_config()
         except Exception:
+            logger.exception("Failed to apply config; rolling back")
             self.config.update_from(snapshot)
             self._load_config()
             self._show_dialog_toast(t("settings.import_failed").format(
@@ -948,7 +959,7 @@ class SettingsDialog(QDialog):
                 for entry in entries:
                     writer.writerow([entry.source, entry.replacement])
         except OSError as e:
-            self._show_dialog_toast(t("settings.glossary_import_csv_failed").format(error=e))
+            self._show_dialog_toast(t("settings.glossary_export_csv_failed").format(error=e))
             return
         self._show_dialog_toast(t("settings.glossary_export_csv_success"))
 
@@ -965,25 +976,27 @@ class SettingsDialog(QDialog):
         except (OSError, csv.Error) as e:
             self._show_dialog_toast(t("settings.glossary_import_csv_failed").format(error=e))
             return
-        # Skip a leading header row if present, then append valid entries.
-        started = False
-        imported = 0
-        for row in rows:
+        # Drop a leading header row if the first non-empty row looks like one.
+        data_rows = rows
+        for i, row in enumerate(rows):
             if not row:
                 continue
-            if not started:
-                started = True
-                if (row[0].strip().lower() == "source"
-                        and len(row) > 1
-                        and row[1].strip().lower() == "replacement"):
-                    continue
+            is_header = (
+                len(row) > 1
+                and row[0].strip().lower() == "source"
+                and row[1].strip().lower() == "replacement"
+            )
+            data_rows = rows[i + 1:] if is_header else rows[i:]
+            break
+        imported = 0
+        for row in data_rows:
             if len(row) >= 2 and row[0].strip() and row[1].strip():
                 self._add_glossary_row(row[0], row[1])
                 imported += 1
         if imported:
             self._show_dialog_toast(t("settings.glossary_import_csv_success"))
         else:
-            self._show_dialog_toast(t("settings.glossary_import_csv_failed").format(error="no rows"))
+            self._show_dialog_toast(t("settings.glossary_import_csv_empty"))
 
     # ---- named profiles --------------------------------------------------
 
@@ -1020,6 +1033,10 @@ class SettingsDialog(QDialog):
             return
         try:
             new_config = load_profile(name)
+        except ValueError:
+            self._show_dialog_toast(t("settings.profile_name_invalid"))
+            self._refresh_profile_combo()
+            return
         except (OSError, json.JSONDecodeError) as e:
             self._show_dialog_toast(t("settings.import_failed").format(error=e))
             self._refresh_profile_combo()
@@ -1030,7 +1047,12 @@ class SettingsDialog(QDialog):
         self._show_dialog_toast(t("settings.profile_loaded").format(name=name))
 
     def _save_profile_as(self) -> None:
-        """Prompt for a name and save the current config as a new profile."""
+        """Prompt for a name and save the current config as a new profile.
+
+        If the name already exists, ask before overwriting. Profiles are
+        stable snapshots, so updating one is an explicit action (the dialog
+        no longer auto-overwrites the active profile on Save).
+        """
         name, ok = QInputDialog.getText(
             self, t("settings.profile_save_new_title"),
             t("settings.profile_save_new_prompt"),
@@ -1039,10 +1061,18 @@ class SettingsDialog(QDialog):
         if not ok or not name:
             return
         if name in list_profiles():
-            self._show_dialog_toast(t("settings.profile_name_exists"))
-            return
+            reply = QMessageBox.question(
+                self, t("settings.profile_overwrite_confirm_title"),
+                t("settings.profile_overwrite_confirm_text").format(name=name),
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+            )
+            if reply != QMessageBox.Yes:
+                return
         try:
             save_profile(name, self.config)
+        except ValueError:
+            self._show_dialog_toast(t("settings.profile_name_invalid"))
+            return
         except OSError as e:
             self._show_dialog_toast(t("settings.config_write_failed").format(error=e))
             return
@@ -1062,7 +1092,11 @@ class SettingsDialog(QDialog):
         )
         if reply != QMessageBox.Yes:
             return
-        delete_profile(name)
+        try:
+            delete_profile(name)
+        except ValueError:
+            self._show_dialog_toast(t("settings.profile_name_invalid"))
+            return
         self._refresh_profile_combo()
         self._show_dialog_toast(t("settings.profile_deleted").format(name=name))
 

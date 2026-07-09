@@ -79,3 +79,7 @@ class TestPasswordEncryption:
         assert not crypto.is_encrypted_envelope({"polish": {}})
         assert not crypto.is_encrypted_envelope("not a dict")
         assert crypto.is_encrypted_envelope({"format": crypto.ENC_FORMAT})
+
+    def test_pbkdf2_iterations_meets_owasp_minimum(self):
+        # OWASP (2023+) recommends >= 600k iterations for PBKDF2-HMAC-SHA256.
+        assert crypto.PBKDF2_ITERATIONS >= 600_000

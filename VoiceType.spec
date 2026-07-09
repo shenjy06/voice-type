@@ -21,6 +21,15 @@ _sf_datas, _sf_binaries, _sf_hiddenimports = collect_all("soundfile")
 datas += _sf_datas
 binaries += _sf_binaries
 
+# cryptography ships Rust C extensions and OpenSSL bindings. collect_all
+# pulls in the native deps (cryptography._rust, bundled OpenSSL) so that
+# encrypted config export/import works in the frozen bundle. Listing only
+# the top-level module name in hiddenimports is NOT enough - the native
+# extension would fail to load at runtime.
+_crypto_datas, _crypto_binaries, _crypto_hiddenimports = collect_all("cryptography")
+datas += _crypto_datas
+binaries += _crypto_binaries
+
 # These modules MUST end up in the PYZ even when other parts of the same
 # package are otherwise excluded. Keep this list minimal — only add a name
 # here when the app actually imports it at runtime.
@@ -37,12 +46,10 @@ hiddenimports = [
     "pynput.keyboard",
     "pynput.keyboard._win32",
     "websocket",
-    "cryptography",
-    "cryptography.fernet",
 ]
-# Append soundfile's transitive hidden imports (collected above) so the
-# linker sees every module that soundfile may load at runtime.
-hiddenimports += _sf_hiddenimports
+# Append transitive hidden imports collected above (soundfile, cryptography)
+# so the linker sees every module they may load at runtime.
+hiddenimports += _sf_hiddenimports + _crypto_hiddenimports
 
 # Explicit deny list. PyInstaller treats `excludes` as a tree: excluding
 # `pandas` also drops `pandas.core`, `pandas.io`, etc. Keep names here

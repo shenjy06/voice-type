@@ -36,7 +36,10 @@ _FALLBACK_PREFIX = "v0:"
 # plus a random salt. Unlike the OS-bound DPAPI path, this is portable across
 # machines — suitable for backup/migration files that carry API keys.
 ENC_FORMAT = "voice-type-config-enc-v1"
-PBKDF2_ITERATIONS = 200_000
+# OWASP (2023+) recommends >= 600k iterations for PBKDF2-HMAC-SHA256.
+# The iteration count is stored in the envelope, so raising it later still
+# decrypts old files (old count is read back from the envelope at decrypt time).
+PBKDF2_ITERATIONS = 600_000
 SALT_BYTES = 16
 
 
