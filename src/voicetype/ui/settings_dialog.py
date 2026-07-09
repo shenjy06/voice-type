@@ -1,5 +1,6 @@
 """Settings dialog — configure API, models, hotkey, etc."""
 
+import csv
 import copy
 import json
 import logging
@@ -11,13 +12,18 @@ from PySide6.QtWidgets import (
     QComboBox, QFormLayout, QGroupBox, QSpinBox, QCheckBox,
     QDialogButtonBox, QTabWidget, QWidget, QPushButton, QProgressBar,
     QHBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView,
-    QCompleter, QFileDialog, QMessageBox,
+    QCompleter, QFileDialog, QMessageBox, QInputDialog,
 )
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QIcon, QCursor
 from voicetype.api_client import fetch_models
 from voicetype.audio import MicrophoneMonitor, get_default_input_device_name
-from voicetype.config import AppConfig, DEFAULT_BASE_URL, GlossaryEntry
+from voicetype.config import (
+    AppConfig, DEFAULT_BASE_URL, GlossaryEntry,
+    EncryptedConfigError, InvalidPasswordError,
+    list_profiles, save_profile, load_profile, delete_profile,
+    get_active_profile, set_active_profile,
+)
 from voicetype.constants import PASTE_MODES, ASR_LANGUAGES, DENOISE_STRENGTHS
 from voicetype.network import check_network_available
 from voicetype.ui.hotkey_recorder import HotkeyRecorder
@@ -40,6 +46,36 @@ def _get_settings_icon() -> QIcon:
     if _SETTINGS_ICON is None:
         _SETTINGS_ICON = make_circle_icon("⚙", (99, 102, 241), font_size=14, font_family="Segoe UI")
     return _SETTINGS_ICON
+
+
+class PasswordDialog(QDialog):
+    """Collect a password (optionally with a confirmation field) for export."""
+
+    def __init__(self, parent, title: str, prompt: str, confirm: bool = True):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(prompt))
+        self._pw = QLineEdit()
+        self._pw.setEchoMode(QLineEdit.Password)
+        layout.addWidget(self._pw)
+        self._pw2 = None
+        if confirm:
+            self._pw2 = QLineEdit()
+            self._pw2.setEchoMode(QLineEdit.Password)
+            layout.addWidget(self._pw2)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def password(self) -> str:
+        return self._pw.text()
+
+    def matches(self) -> bool:
+        return self._pw2 is None or self._pw.text() == self._pw2.text()
 
 
 class SettingsDialog(QDialog):
@@ -246,6 +282,7 @@ class SettingsDialog(QDialog):
         # on the General tab because it's a global (cross-section) operation,
         # not tied to any single API or recording setting.
         config_group = QGroupBox(t("settings.config_management"))
+        config_layout = QVBoxLayout()
         config_row = QHBoxLayout()
         self.export_btn = QPushButton(t("settings.export_config"))
         self.import_btn = QPushButton(t("settings.import_config"))
@@ -256,8 +293,29 @@ class SettingsDialog(QDialog):
         config_row.addWidget(self.export_btn)
         config_row.addWidget(self.import_btn)
         config_row.addStretch()
-        config_group.setLayout(config_row)
+        config_layout.addLayout(config_row)
+
+        # Named profiles — switch between saved configurations.
+        profile_row = QHBoxLayout()
+        profile_row.addWidget(QLabel(t("settings.profile_label")))
+        self.profile_combo = QComboBox()
+        self.profile_combo.setCursor(QCursor(Qt.PointingHandCursor))
+        self.profile_combo.currentTextChanged.connect(self._on_profile_selected)
+        profile_row.addWidget(self.profile_combo)
+        self.profile_save_btn = QPushButton(t("settings.profile_save_new"))
+        self.profile_delete_btn = QPushButton(t("settings.profile_delete"))
+        self.profile_save_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self.profile_delete_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self.profile_save_btn.clicked.connect(self._save_profile_as)
+        self.profile_delete_btn.clicked.connect(self._delete_profile)
+        profile_row.addWidget(self.profile_save_btn)
+        profile_row.addWidget(self.profile_delete_btn)
+        profile_row.addStretch()
+        config_layout.addLayout(profile_row)
+
+        config_group.setLayout(config_layout)
         general_layout.addWidget(config_group)
+        self._refresh_profile_combo()
 
         general_layout.addStretch()
         self._tabs.addTab(general_tab, t("settings.general"))
@@ -368,6 +426,14 @@ class SettingsDialog(QDialog):
         glossary_buttons.addWidget(self.glossary_add_btn)
         glossary_buttons.addWidget(self.glossary_remove_btn)
         glossary_buttons.addStretch()
+        self.glossary_import_csv_btn = QPushButton(t("settings.glossary_import_csv"))
+        self.glossary_export_csv_btn = QPushButton(t("settings.glossary_export_csv"))
+        self.glossary_import_csv_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self.glossary_export_csv_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self.glossary_import_csv_btn.clicked.connect(self._import_glossary_csv)
+        self.glossary_export_csv_btn.clicked.connect(self._export_glossary_csv)
+        glossary_buttons.addWidget(self.glossary_import_csv_btn)
+        glossary_buttons.addWidget(self.glossary_export_csv_btn)
         glossary_group_layout.addLayout(glossary_buttons)
 
         glossary_group.setLayout(glossary_group_layout)
@@ -721,21 +787,44 @@ class SettingsDialog(QDialog):
         self.config.hotkey.toggle_hotkey = self.hotkey_recorder.hotkey()
 
         self.config.save()
+        # Keep the active profile in sync with the current configuration so a
+        # later "Switch profile" still shows the latest values for this one.
+        active = get_active_profile()
+        if active:
+            try:
+                save_profile(active, self.config)
+            except OSError as e:
+                logger.warning("Could not sync active profile %r: %s", active, e)
         self.settings_saved.emit()
         self.accept()
 
     # ---- config import / export -------------------------------------------
 
     def _export_config(self):
-        """Export the current config to a JSON file chosen by the user."""
+        """Export the current config to a JSON file chosen by the user.
+
+        Prompts for an optional password; if given, the file is encrypted so
+        API keys aren't stored in plaintext. An empty password exports the
+        file unencrypted (backward compatible).
+        """
         path, _ = QFileDialog.getSaveFileName(
             self, t("settings.export_config"),
             "voice-type-config.json", "JSON (*.json)",
         )
         if not path:
             return
+        dlg = PasswordDialog(
+            self, t("settings.export_encrypt_title"),
+            t("settings.export_encrypt_prompt"), confirm=True,
+        )
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        password = dlg.password()
+        if password and not dlg.matches():
+            self._show_dialog_toast(t("settings.password_mismatch"))
+            return
         try:
-            self.config.export_to(Path(path))
+            self.config.export_to(Path(path), password=password or None)
         except OSError as e:
             self._show_dialog_toast(t("settings.config_write_failed").format(error=e))
             return
@@ -745,8 +834,8 @@ class SettingsDialog(QDialog):
         """Load a config from a JSON file and refresh the dialog fields.
 
         Only mutates ``self.config`` in place (via ``update_from``) so the
-        external reference held by Application stays valid.  The user sees
-        a preview of the loaded values in the confirmation dialog and must
+        external reference held by Application stays valid. The user sees a
+        preview of the loaded values in the confirmation dialog and must
         still click Save to persist — this keeps Import aligned with the
         dialog's edit-then-save semantics.
         """
@@ -755,10 +844,8 @@ class SettingsDialog(QDialog):
         )
         if not path:
             return
-        try:
-            new_config = AppConfig.import_from(Path(path))
-        except (OSError, json.JSONDecodeError) as e:
-            self._show_dialog_toast(t("settings.import_failed").format(error=e))
+        new_config = self._read_config_file(Path(path))
+        if new_config is None:
             return
 
         # Warn when the imported file is effectively empty — silently
@@ -784,26 +871,193 @@ class SettingsDialog(QDialog):
         if reply != QMessageBox.Yes:
             return
 
-        # Snapshot current config so we can roll back if _load_config fails.
+        self._apply_config(new_config)
+        self._show_dialog_toast(f"{t('settings.import_success')} — {path}")
+
+    def _read_config_file(self, path: Path) -> "AppConfig | None":
+        """Read a config file, prompting for a password if it's encrypted.
+
+        Returns the loaded config, or None if the user cancels / the file is
+        unreadable / the password is wrong.
+        """
+        password = None
+        while True:
+            try:
+                return AppConfig.import_from(path, password=password)
+            except EncryptedConfigError:
+                ok, pw = self._ask_import_password()
+                if not ok:
+                    return None
+                password = pw
+            except InvalidPasswordError:
+                self._show_dialog_toast(t("settings.import_invalid_password"))
+                return None
+            except (OSError, json.JSONDecodeError) as e:
+                self._show_dialog_toast(t("settings.import_failed").format(error=e))
+                return None
+
+    def _ask_import_password(self) -> tuple[bool, str]:
+        """Prompt for the password to decrypt an imported file."""
+        return QInputDialog.getText(
+            self, t("settings.import_password_title"),
+            t("settings.import_password_prompt"), QLineEdit.Password,
+        )
+
+    def _apply_config(self, new_config: "AppConfig") -> None:
+        """Replace in-place the dialog's config with ``new_config``.
+
+        Snapshots first so a failure in ``_load_config`` can be rolled back,
+        keeping the dialog consistent. Resets the API-state snapshot so a
+        subsequent save won't trigger an unnecessary network check.
+        """
         snapshot = copy.deepcopy(self.config)
         try:
             self.config.update_from(new_config)
             self._load_config()
         except Exception:
-            # Restore the previous state so the dialog isn't left in an
-            # inconsistent half-imported state.
             self.config.update_from(snapshot)
             self._load_config()
             self._show_dialog_toast(t("settings.import_failed").format(
                 error=t("settings.import_failed"),
             ))
             return
-
-        # Re-snapshot so saving right after import doesn't trigger the
-        # network-availability check — the imported config is assumed valid
-        # and the check only adds delay in the migration scenario.
         self._initial_api_state = self._snapshot_api_state()
-        self._show_dialog_toast(f"{t('settings.import_success')} — {path}")
+
+    # ---- glossary CSV ----------------------------------------------------
+
+    def _export_glossary_csv(self):
+        """Write the current glossary entries to a CSV file (UTF-8 BOM)."""
+        path, _ = QFileDialog.getSaveFileName(
+            self, t("settings.glossary_export_csv"),
+            "voice-type-glossary.csv", "CSV (*.csv)",
+        )
+        if not path:
+            return
+        entries = self._collect_glossary_entries()
+        try:
+            with open(path, "w", encoding="utf-8-sig", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["source", "replacement"])
+                for entry in entries:
+                    writer.writerow([entry.source, entry.replacement])
+        except OSError as e:
+            self._show_dialog_toast(t("settings.glossary_import_csv_failed").format(error=e))
+            return
+        self._show_dialog_toast(t("settings.glossary_export_csv_success"))
+
+    def _import_glossary_csv(self):
+        """Append glossary entries read from a CSV file to the table."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, t("settings.glossary_import_csv"), "", "CSV (*.csv)",
+        )
+        if not path:
+            return
+        try:
+            with open(path, encoding="utf-8-sig", newline="") as f:
+                rows = list(csv.reader(f))
+        except (OSError, csv.Error) as e:
+            self._show_dialog_toast(t("settings.glossary_import_csv_failed").format(error=e))
+            return
+        # Skip a leading header row if present, then append valid entries.
+        started = False
+        imported = 0
+        for row in rows:
+            if not row:
+                continue
+            if not started:
+                started = True
+                if (row[0].strip().lower() == "source"
+                        and len(row) > 1
+                        and row[1].strip().lower() == "replacement"):
+                    continue
+            if len(row) >= 2 and row[0].strip() and row[1].strip():
+                self._add_glossary_row(row[0], row[1])
+                imported += 1
+        if imported:
+            self._show_dialog_toast(t("settings.glossary_import_csv_success"))
+        else:
+            self._show_dialog_toast(t("settings.glossary_import_csv_failed").format(error="no rows"))
+
+    # ---- named profiles --------------------------------------------------
+
+    def _refresh_profile_combo(self) -> None:
+        """Repopulate the profile combo and select the active profile."""
+        self.profile_combo.blockSignals(True)
+        self.profile_combo.clear()
+        active = get_active_profile()
+        profiles = list_profiles()
+        if active and active not in profiles:
+            # Active profile file vanished (e.g. deleted externally).
+            active = None
+        self.profile_combo.addItems(profiles)
+        if active:
+            idx = self.profile_combo.findText(active)
+            if idx >= 0:
+                self.profile_combo.setCurrentIndex(idx)
+        elif profiles:
+            self.profile_combo.setCurrentIndex(0)
+        self.profile_combo.blockSignals(False)
+
+    def _on_profile_selected(self, name: str) -> None:
+        """Switch to the chosen profile (with confirmation) when changed."""
+        name = name.strip()
+        if not name or name == get_active_profile():
+            return
+        reply = QMessageBox.question(
+            self, t("settings.import_confirm_title"),
+            t("settings.profile_switch_confirm_text"),
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            self._refresh_profile_combo()
+            return
+        try:
+            new_config = load_profile(name)
+        except (OSError, json.JSONDecodeError) as e:
+            self._show_dialog_toast(t("settings.import_failed").format(error=e))
+            self._refresh_profile_combo()
+            return
+        self._apply_config(new_config)
+        set_active_profile(name)
+        self._refresh_profile_combo()
+        self._show_dialog_toast(t("settings.profile_loaded").format(name=name))
+
+    def _save_profile_as(self) -> None:
+        """Prompt for a name and save the current config as a new profile."""
+        name, ok = QInputDialog.getText(
+            self, t("settings.profile_save_new_title"),
+            t("settings.profile_save_new_prompt"),
+        )
+        name = name.strip()
+        if not ok or not name:
+            return
+        if name in list_profiles():
+            self._show_dialog_toast(t("settings.profile_name_exists"))
+            return
+        try:
+            save_profile(name, self.config)
+        except OSError as e:
+            self._show_dialog_toast(t("settings.config_write_failed").format(error=e))
+            return
+        set_active_profile(name)
+        self._refresh_profile_combo()
+        self._show_dialog_toast(t("settings.profile_saved").format(name=name))
+
+    def _delete_profile(self) -> None:
+        """Delete the currently selected profile (with confirmation)."""
+        name = self.profile_combo.currentText().strip()
+        if not name:
+            return
+        reply = QMessageBox.question(
+            self, t("settings.profile_delete_confirm_title"),
+            t("settings.profile_delete_confirm_text").format(name=name),
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        delete_profile(name)
+        self._refresh_profile_combo()
+        self._show_dialog_toast(t("settings.profile_deleted").format(name=name))
 
     def _add_glossary_row(self, source: str = "", replacement: str = ""):
         row = self.glossary_table.rowCount()

@@ -13,6 +13,14 @@ from voicetype.config import (
     HotkeyConfig,
     GlossaryEntry,
     DEFAULT_BASE_URL,
+    EncryptedConfigError,
+    InvalidPasswordError,
+    list_profiles,
+    save_profile,
+    load_profile,
+    delete_profile,
+    get_active_profile,
+    set_active_profile,
 )
 
 
@@ -502,3 +510,91 @@ class TestSummary:
         s = cfg.summary()
         assert "sk-secret" not in s
         assert "sk-secret2" not in s
+
+
+class TestEncryptedExportImport:
+    """Password-encrypted config export/import round-trips."""
+
+    def test_encrypted_export_import_round_trip(self, tmp_path):
+        cfg = AppConfig(asr=AsrConfig(api_key="sk-enc", model="whisper-1"))
+        out = tmp_path / "enc.json"
+        cfg.export_to(out, password="s3cret")
+        # The on-disk file must not contain the plaintext key.
+        raw = out.read_text(encoding="utf-8")
+        assert "sk-enc" not in raw
+        # Wrong password fails.
+        try:
+            AppConfig.import_from(out, password="wrong")
+        except InvalidPasswordError:
+            pass
+        else:
+            raise AssertionError("expected InvalidPasswordError for wrong password")
+        # Correct password round-trips.
+        loaded = AppConfig.import_from(out, password="s3cret")
+        assert loaded.asr.api_key == "sk-enc"
+
+    def test_encrypted_import_without_password_raises(self, tmp_path):
+        cfg = AppConfig(asr=AsrConfig(api_key="sk-enc"))
+        out = tmp_path / "enc.json"
+        cfg.export_to(out, password="s3cret")
+        try:
+            AppConfig.import_from(out)
+        except EncryptedConfigError:
+            pass
+        else:
+            raise AssertionError("expected EncryptedConfigError when no password")
+
+    def test_plaintext_export_still_works(self, tmp_path):
+        cfg = AppConfig(asr=AsrConfig(api_key="sk-plain"))
+        out = tmp_path / "plain.json"
+        cfg.export_to(out)  # no password -> plaintext
+        loaded = AppConfig.import_from(out)
+        assert loaded.asr.api_key == "sk-plain"
+
+
+class TestProfiles:
+    """Named config profiles — save/list/load/delete + active tracking."""
+
+    def _sample(self) -> AppConfig:
+        return AppConfig(
+            language="zh",
+            asr=AsrConfig(api_key="sk-p", model="whisper-1", language="en"),
+            polish=PolishApiConfig(enabled=False),
+        )
+
+    def test_save_and_list_profiles(self):
+        save_profile("work", self._sample())
+        save_profile("personal", AppConfig())
+        assert list_profiles() == ["personal", "work"]
+
+    def test_load_profile_round_trip(self):
+        save_profile("work", self._sample())
+        loaded = load_profile("work")
+        assert loaded.language == "zh"
+        assert loaded.asr.api_key == "sk-p"
+        assert loaded.polish.enabled is False
+
+    def test_delete_profile(self):
+        save_profile("work", self._sample())
+        delete_profile("work")
+        assert list_profiles() == []
+
+    def test_active_profile_get_set(self):
+        assert get_active_profile() is None
+        set_active_profile("work")
+        assert get_active_profile() == "work"
+        set_active_profile(None)
+        assert get_active_profile() is None
+
+    def test_active_profile_cleared_on_delete(self):
+        save_profile("work", self._sample())
+        set_active_profile("work")
+        delete_profile("work")
+        # Deleting the active profile clears the active marker.
+        assert get_active_profile() != "work"
+
+    def test_profile_file_is_plaintext(self, tmp_path):
+        save_profile("work", self._sample())
+        from voicetype import config as config_mod
+        raw = (config_mod.PROFILES_DIR / "work.json").read_text(encoding="utf-8")
+        assert "sk-p" in raw

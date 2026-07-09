@@ -14,12 +14,24 @@ import time
 from dataclasses import dataclass, field, asdict, fields
 from pathlib import Path
 
+import voicetype.crypto as crypto
+
 logger = logging.getLogger(__name__)
 
 CONFIG_DIR = Path.home() / ".voice-type"
 CONFIG_FILE = CONFIG_DIR / "config.json"
+PROFILES_DIR = CONFIG_DIR / "profiles"
+ACTIVE_PROFILE_FILE = CONFIG_DIR / "active_profile"
 
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
+
+
+class EncryptedConfigError(Exception):
+    """Raised when import_from meets an encrypted file but no password."""
+
+
+class InvalidPasswordError(Exception):
+    """Raised when import_from cannot decrypt a file with the given password."""
 
 
 @dataclass
@@ -204,20 +216,29 @@ class AppConfig:
         elapsed = (time.monotonic() - start) * 1000
         logger.debug("Config saved in %.1f ms", elapsed)
 
-    def export_to(self, path: Path) -> None:
+    def export_to(self, path: Path, password: str | None = None) -> None:
         """Export this config to a JSON file at ``path``.
 
         Unlike :meth:`save`, this always writes (no change detection) and
         targets an arbitrary user-chosen location — for backup, migration,
         or sharing. The format is identical to ``config.json`` so an
         exported file can be re-imported on another machine.
+
+        If ``password`` is provided, the file is encrypted with a portable
+        (password-derived) envelope so API keys aren't stored in plaintext.
         """
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(self.to_dict(), f, indent=2, ensure_ascii=False)
+        if password:
+            plaintext = json.dumps(self.to_dict(), ensure_ascii=False)
+            envelope = crypto.encrypt_with_password(plaintext, password)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(envelope, f, ensure_ascii=False)
+        else:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(self.to_dict(), f, indent=2, ensure_ascii=False)
 
     @classmethod
-    def import_from(cls, path: Path) -> "AppConfig":
+    def import_from(cls, path: Path, password: str | None = None) -> "AppConfig":
         """Load a config from a JSON file at ``path``.
 
         Raises ``OSError`` on read failure or ``json.JSONDecodeError`` on
@@ -225,9 +246,21 @@ class AppConfig:
         "invalid config file" message. ``from_dict`` handles the rest
         (unknown keys dropped, missing fields defaulted) so an exported
         file from an older or newer version still loads.
+
+        If the file is password-encrypted, ``password`` must be supplied:
+        raising :class:`EncryptedConfigError` when it's missing and
+        :class:`InvalidPasswordError` when it doesn't decrypt. The caller
+        typically catches the former, prompts for a password, and retries.
         """
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
+        if crypto.is_encrypted_envelope(data):
+            if password is None:
+                raise EncryptedConfigError(str(path))
+            plaintext = crypto.decrypt_with_password(data, password)
+            if plaintext is None:
+                raise InvalidPasswordError(str(path))
+            data = json.loads(plaintext)
         return cls.from_dict(data)
 
     def is_default(self) -> bool:
@@ -298,3 +331,51 @@ class AppConfig:
         """
         for f in fields(self):
             setattr(self, f.name, copy.deepcopy(getattr(other, f.name)))
+
+
+# ---- named config profiles ------------------------------------------------
+# Profiles are named snapshots stored separately from the active config.json.
+# Switching a profile copies its content into the active config (see
+# settings_dialog), so startup loading stays a single-file operation.
+
+
+def list_profiles() -> list[str]:
+    """Return sorted profile names available on disk (empty if none)."""
+    if not PROFILES_DIR.exists():
+        return []
+    return sorted(p.stem for p in PROFILES_DIR.glob("*.json"))
+
+
+def save_profile(name: str, config: "AppConfig") -> None:
+    """Persist ``config`` as a named profile (plaintext JSON)."""
+    PROFILES_DIR.mkdir(parents=True, exist_ok=True)
+    config.export_to(PROFILES_DIR / f"{name}.json")
+
+
+def load_profile(name: str) -> "AppConfig":
+    """Load a named profile. Raises OSError/JSONDecodeError on failure."""
+    return AppConfig.import_from(PROFILES_DIR / f"{name}.json")
+
+
+def delete_profile(name: str) -> None:
+    """Delete a named profile file if it exists, clearing the active marker."""
+    (PROFILES_DIR / f"{name}.json").unlink(missing_ok=True)
+    if get_active_profile() == name:
+        set_active_profile(None)
+
+
+def get_active_profile() -> str | None:
+    """Return the active profile name, or None for the default config."""
+    if ACTIVE_PROFILE_FILE.exists():
+        name = ACTIVE_PROFILE_FILE.read_text(encoding="utf-8").strip()
+        return name or None
+    return None
+
+
+def set_active_profile(name: str | None) -> None:
+    """Record (or clear, when None) the active profile name."""
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    if name is None:
+        ACTIVE_PROFILE_FILE.unlink(missing_ok=True)
+    else:
+        ACTIVE_PROFILE_FILE.write_text(name, encoding="utf-8")
