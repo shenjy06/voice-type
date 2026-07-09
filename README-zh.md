@@ -108,7 +108,7 @@ pyinstaller --clean --noconfirm VoiceType.spec
 
 ## 设置
 
-点击浮动窗口右上角的齿轮图标打开设置页面，或通过系统托盘菜单进入设置。设置页面分为五个标签页：STT、Polish、Glossary、Output、Hotkeys。
+点击浮动窗口右上角的齿轮图标打开设置页面，或通过系统托盘菜单进入设置。设置页面分为以下标签页：通用、录音、STT、Polish、Glossary、输出、热键。
 
 ### STT（语音识别）配置
 

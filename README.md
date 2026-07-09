@@ -110,7 +110,7 @@ The generated `dist/VoiceType.exe` is a standalone executable — no Python envi
 
 ## Settings
 
-Click the gear icon in the upper-right corner of the floating window, or access settings via the system tray menu. The settings dialog has five tabs: STT, Polish, Glossary, Output, and Hotkeys.
+Click the gear icon in the upper-right corner of the floating window, or access settings via the system tray menu. The settings dialog has tabs: General, Recording, STT, Polish, Glossary, Output, and Hotkeys.
 
 ### STT (Speech-to-Text) Configuration
 

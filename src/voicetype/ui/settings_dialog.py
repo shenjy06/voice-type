@@ -213,8 +213,55 @@ class SettingsDialog(QDialog):
         lang_group.setLayout(lang_layout)
         general_layout.addWidget(lang_group)
 
-        # Recording settings (sample rate, mic, denoise, VAD) live on the
-        # General tab — they're hardware/local concerns, not API config.
+        # Config management — export/import the whole config as JSON. Lives
+        # on the General tab because it's a global (cross-section) operation,
+        # not tied to any single API or recording setting.
+        config_group = QGroupBox(t("settings.config_management"))
+        config_layout = QVBoxLayout()
+        config_row = QHBoxLayout()
+        self.export_btn = QPushButton(t("settings.export_config"))
+        self.import_btn = QPushButton(t("settings.import_config"))
+        self.export_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self.import_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self.export_btn.clicked.connect(self._export_config)
+        self.import_btn.clicked.connect(self._import_config)
+        config_row.addWidget(self.export_btn)
+        config_row.addWidget(self.import_btn)
+        config_row.addStretch()
+        config_layout.addLayout(config_row)
+
+        # Named profiles — switch between saved configurations.
+        profile_row = QHBoxLayout()
+        profile_row.addWidget(QLabel(t("settings.profile_label")))
+        self.profile_combo = QComboBox()
+        self.profile_combo.setCursor(QCursor(Qt.PointingHandCursor))
+        self.profile_combo.currentTextChanged.connect(self._on_profile_selected)
+        profile_row.addWidget(self.profile_combo)
+        self.profile_save_btn = QPushButton(t("settings.profile_save_new"))
+        self.profile_delete_btn = QPushButton(t("settings.profile_delete"))
+        self.profile_save_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self.profile_delete_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self.profile_save_btn.clicked.connect(self._save_profile_as)
+        self.profile_delete_btn.clicked.connect(self._delete_profile)
+        profile_row.addWidget(self.profile_save_btn)
+        profile_row.addWidget(self.profile_delete_btn)
+        profile_row.addStretch()
+        config_layout.addLayout(profile_row)
+
+        config_group.setLayout(config_layout)
+        general_layout.addWidget(config_group)
+        self._refresh_profile_combo()
+
+        general_layout.addStretch()
+        self._tabs.addTab(general_tab, t("settings.general"))
+
+        # === Tab: Recording ===
+        recording_tab = QWidget()
+        recording_layout = QVBoxLayout(recording_tab)
+        recording_layout.setSpacing(12)
+
+        # Recording settings (sample rate, mic, denoise, VAD) are hardware/
+        # local concerns, grouped on their own tab between General and STT.
         stt_misc_group = QGroupBox(t("settings.recording_group"))
         stt_misc_layout = QFormLayout()
 
@@ -276,51 +323,11 @@ class SettingsDialog(QDialog):
         stt_misc_layout.addRow("", self.vad_hint_label)
 
         stt_misc_group.setLayout(stt_misc_layout)
-        general_layout.addWidget(stt_misc_group)
+        recording_layout.addWidget(stt_misc_group)
+        recording_layout.addStretch()
+        self._tabs.addTab(recording_tab, t("settings.recording_tab"))
 
-        # Config management — export/import the whole config as JSON. Lives
-        # on the General tab because it's a global (cross-section) operation,
-        # not tied to any single API or recording setting.
-        config_group = QGroupBox(t("settings.config_management"))
-        config_layout = QVBoxLayout()
-        config_row = QHBoxLayout()
-        self.export_btn = QPushButton(t("settings.export_config"))
-        self.import_btn = QPushButton(t("settings.import_config"))
-        self.export_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        self.import_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        self.export_btn.clicked.connect(self._export_config)
-        self.import_btn.clicked.connect(self._import_config)
-        config_row.addWidget(self.export_btn)
-        config_row.addWidget(self.import_btn)
-        config_row.addStretch()
-        config_layout.addLayout(config_row)
-
-        # Named profiles — switch between saved configurations.
-        profile_row = QHBoxLayout()
-        profile_row.addWidget(QLabel(t("settings.profile_label")))
-        self.profile_combo = QComboBox()
-        self.profile_combo.setCursor(QCursor(Qt.PointingHandCursor))
-        self.profile_combo.currentTextChanged.connect(self._on_profile_selected)
-        profile_row.addWidget(self.profile_combo)
-        self.profile_save_btn = QPushButton(t("settings.profile_save_new"))
-        self.profile_delete_btn = QPushButton(t("settings.profile_delete"))
-        self.profile_save_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        self.profile_delete_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        self.profile_save_btn.clicked.connect(self._save_profile_as)
-        self.profile_delete_btn.clicked.connect(self._delete_profile)
-        profile_row.addWidget(self.profile_save_btn)
-        profile_row.addWidget(self.profile_delete_btn)
-        profile_row.addStretch()
-        config_layout.addLayout(profile_row)
-
-        config_group.setLayout(config_layout)
-        general_layout.addWidget(config_group)
-        self._refresh_profile_combo()
-
-        general_layout.addStretch()
-        self._tabs.addTab(general_tab, t("settings.general"))
-
-        # === Tab 1: STT (Speech-to-Text) ===
+        # === Tab: STT (Speech-to-Text) ===
         stt_tab = QWidget()
         stt_layout = QVBoxLayout(stt_tab)
         stt_layout.setSpacing(12)
