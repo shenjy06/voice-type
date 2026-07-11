@@ -90,11 +90,21 @@ class RecordingController:
         transcribed/polished.
         """
         if self._ui.is_recording():
-            self._ui.stop_recording()
+            self.stop()
         elif self._is_processing():
             pass
         else:
             self._ui.start_recording()
+
+    def stop(self) -> None:
+        """Stop an in-progress recording (manual toggle or VAD auto-stop).
+
+        Drives the UI through stop_recording, which emits recording_stopped
+        and kicks off processing. No-op when not currently recording, so a
+        stale VAD signal arriving after a manual stop is safe.
+        """
+        if self._ui.is_recording():
+            self._ui.stop_recording()
 
     def _is_processing(self) -> bool:
         """Return True when the UI window is currently in PROCESSING state.
@@ -200,9 +210,15 @@ class RecordingController:
         self._ui.set_done()
 
     def cancel_during_processing(self, error_msg: str | None = None) -> None:
-        """Reset UI + recorder after a processing failure."""
+        """Reset UI after a processing failure.
+
+        Does NOT clean up the recorder's audio file — on failure the file is
+        retained so the caller (Application) can retry with the same audio.
+        Application takes ownership of the path via ``take_audio_path()``
+        before this is called, so the recorder no longer holds a reference
+        to it either.
+        """
         self._bubble.dismiss()
-        self._recorder.cleanup()
         if error_msg:
             self._ui.set_error(error_msg)
         self._ui.set_done()

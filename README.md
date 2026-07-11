@@ -10,6 +10,9 @@ Licensed under [GPL-3.0](LICENSE).
 
 - **Voice Recording**: One-key record/stop/cancel via global hotkeys without stealing focus from the target application
 - **Noise Reduction**: Optional spectral-gate denoising removes steady background noise (fans, AC, hum) before recognition — pure numpy, no extra dependencies. Targets stationary noise; transient sounds (keyboard clicks) are not well suppressed.
+- **Silence Auto-stop (VAD)**: Optionally stop recording automatically after sustained silence is detected — no need to press stop. Silence is only counted after you start speaking, so pauses before talking are ignored.
+- **Streaming Real-time ASR**: Optionally stream audio in real-time via WebSocket for live transcription as you speak (OpenAI Realtime API protocol)
+- **Processing Retry**: Failed batch processing (network jitter, rate limiting, API timeout) preserves the audio — retry from the tray menu without re-recording
 - **Speech Recognition (STT)**: Transcribe recorded audio to text (OpenAI-compatible protocol)
 - **Smart Refinement**: LLM automatically removes filler words, fixes grammar, and improves clarity
 - **Glossary Corrections**: Replace frequently misrecognized names, project terms, and technical terms before refinement
@@ -20,9 +23,13 @@ Licensed under [GPL-3.0](LICENSE).
 - **System Tray**: Click X to minimize to tray; tray menu provides recording toggle, settings, and quit
 - **Global Hotkeys**: Uses `pynput` keyboard listener for global hotkey detection — responsive in any application
 - **Network Detection**: Automatically checks network availability on settings save to prevent invalid configurations
+- **Config Import/Export**: Export and import full configuration as JSON for backup or migration; previews imported settings before applying and warns on empty files
 - **Startup Check**: Automatically detects API configuration on first launch and shows setup wizard if unconfigured
 - **Bilingual UI**: Supports Chinese and English interface, switchable in settings (requires restart)
-- **Model Discovery**: Click the 🔄 button in settings to fetch all available models from your API provider — no need to copy model IDs manually
+- **Light/Dark/System Theme**: Three theme modes selectable in settings — dark, light, or follow the Windows system theme. All UI surfaces (dialog, floating window, tray, toast, history) share one unified palette with indigo accent and vector icons.
+- **Model Discovery**: Click the refresh button in settings to fetch all available models from your API provider — no need to copy model IDs manually
+- **Named Profiles**: Save and switch between multiple named configurations (work, personal, etc.) from the settings General tab
+- **Encrypted Config Export**: Export config files with password protection to keep API keys secure when sharing or migrating
 
 ## Tech Stack
 
@@ -106,7 +113,15 @@ The generated `dist/VoiceType.exe` is a standalone executable — no Python envi
 
 ## Settings
 
-Click the gear icon in the upper-right corner of the floating window, or access settings via the system tray menu. The settings dialog has five tabs: STT, Polish, Glossary, Output, and Hotkeys.
+Click the gear icon in the upper-right corner of the floating window, or access settings via the system tray menu. The settings dialog has tabs: General, Recording, STT, Polish, Glossary, Output, and Hotkeys.
+
+### General
+
+| Field | Description | Default |
+|-------|-------------|---------|
+| UI Language | Interface language | Auto (System) |
+| Theme | Light, dark, or follow the Windows system theme | Dark |
+| Auto-start | Start with Windows | Off |
 
 ### STT (Speech-to-Text) Configuration
 
@@ -114,11 +129,14 @@ Click the gear icon in the upper-right corner of the floating window, or access 
 |-------|-------------|---------|
 | API Key | Authentication key for STT service | `sk-...` |
 | Base URL | API address of STT service | `https://api.siliconflow.cn/v1` |
-| Model | Speech recognition model (click 🔄 to fetch provider's full model list) | `FunAudioLLM/SenseVoiceSmall` |
+| Model | Speech recognition model (click the refresh button to fetch the provider's full model list) | `FunAudioLLM/SenseVoiceSmall` |
 | Language | Recognition language | `zh` / `en` / `auto` |
 | Sample Rate | Recording sample rate | `16000` Hz |
 | Noise Reduction | Enable spectral-gate denoising before recognition | `Off` / `On` |
 | NR Strength | Denoising aggressiveness (higher suppresses more noise but may affect speech) | `Low` / `Medium` / `High` |
+| Auto-stop on silence | Stop recording automatically after sustained silence is detected (silence before first speech is ignored) | `Off` / `On` |
+| Silence duration | Silence duration that triggers auto-stop | `1500 ms` |
+| Streaming | Stream audio in real-time for live transcription (uses Base URL and API key from above) | `Off` / `On` |
 
 ### Polish (Text Refinement) Configuration
 
@@ -126,7 +144,7 @@ Click the gear icon in the upper-right corner of the floating window, or access 
 |-------|-------------|---------|
 | API Key | Authentication key for LLM service | `sk-...` |
 | Base URL | API address of LLM service | `https://api.siliconflow.cn/v1` |
-| Model | Text refinement model (click 🔄 to fetch provider's full model list) | `gpt-4o` / `deepseek-chat` / `qwen-plus` |
+| Model | Text refinement model (click the refresh button to fetch the provider's full model list) | `gpt-4o` / `deepseek-chat` / `qwen-plus` |
 
 ### Glossary Configuration
 
@@ -158,6 +176,14 @@ The Right Alt hotkey distinguishes between a tap (start/stop toggle) and modifie
 | Auto-paste | Whether to auto-paste to cursor position | Enabled |
 
 If auto-paste fails, the recognized text remains on the clipboard so it can be pasted manually.
+
+### Config Management
+
+The settings dialog provides Export and Import buttons to back up or migrate your configuration:
+
+- **Export** saves your full config (including API keys) to a chosen JSON file
+- **Import** loads a config file, shows a preview of its contents, and warns if the file is empty/default before applying
+- Imported settings are loaded into the dialog but not saved until you click Save — you can review them first
 
 ## API Key Configuration
 
@@ -221,8 +247,9 @@ Any API that supports the OpenAI-compatible protocol can be used (DashScope, Vol
 4. Press `Right Alt` (tap once) to start recording (status bubble shows "录制中...")
 5. When finished speaking, press `Right Alt` (tap again) to stop recording
 6. Wait for processing — status bubble shows "润色中...", then refined text automatically appears at the cursor position
-7. To discard the current recording, press `Right Alt + C` to cancel (audio will be discarded)
-8. Click window X button to minimize to tray; use tray menu "Quit" to fully exit
+7. If processing fails (network error, rate limiting), use tray menu "Retry last" to re-process the same audio without re-recording
+8. To discard the current recording, press `Right Alt + C` to cancel (audio will be discarded)
+9. Click window X button to minimize to tray; use tray menu "Quit" to fully exit
 
 ## Project Structure
 
@@ -237,35 +264,47 @@ voice-type/
 │       ├── audio.py                 # Audio recording: sounddevice + soundfile OGG encoding
 │       ├── denoise.py               # Spectral-gate noise reduction (numpy-only)
 │       ├── asr.py                   # Speech recognition: OpenAI-compatible transcriptions API
+│       ├── streaming_asr.py         # Streaming real-time ASR: WebSocket (OpenAI Realtime protocol)
 │       ├── glossary.py              # User glossary term replacement after ASR
 │       ├── polisher.py              # Text refinement: LLM chat completions API
+│       ├── processing.py            # Processing pipeline orchestrator (STT + glossary + polish)
+│       ├── processing_controller.py  # Processing worker thread coordination
+│       ├── recording_controller.py   # Recording worker thread coordination
 │       ├── typer.py                 # Text output: clipboard + Ctrl+V paste
 │       ├── window_manager.py        # Windows foreground control: ctypes window/keyboard APIs
 │       ├── network.py               # Network detection: HTTP connectivity check
 │       ├── state.py                 # Application state enum (RecorderState)
 │       ├── i18n.py                  # Internationalization: Chinese/English translations
+│       ├── crypto.py                # Password-based config encryption (Fernet + PBKDF2)
 │       └── ui/
 │           ├── history_dialog.py    # Recent text history viewer/copy/re-paste dialog
 │           ├── main_window.py       # Floating recording window + pulsing dot + StatusBubble + Toast
 │           ├── settings_dialog.py   # Settings dialog (STT/Polish/Glossary/Output/Hotkeys)
 │           ├── system_tray.py       # System tray icon + pynput hotkey manager
+│           ├── theme.py             # Centralized theme: light/dark palettes, QSS, vector icons
 │           └── icon_utils.py        # Shared icon creation (circle + centered text)
-├── tests/                       # Unit tests (375, covering all modules)
+├── tests/                       # Unit tests (518, covering all modules)
 │   ├── conftest.py
 │   ├── test_audio.py
 │   ├── test_asr.py
 │   ├── test_config.py
+│   ├── test_controllers.py
 │   ├── test_denoise.py
 │   ├── test_main.py
 │   ├── test_network.py
 │   ├── test_glossary.py
 │   ├── test_i18n.py
 │   ├── test_polisher.py
+│   ├── test_streaming_asr.py
 │   ├── test_typer.py
+│   ├── test_crypto.py
 │   └── ui/
+│       ├── test_history_dialog.py
+│       ├── test_hotkey_recorder.py
 │       ├── test_main_window.py
 │       ├── test_settings_dialog.py
-│       └── test_system_tray.py
+│       ├── test_system_tray.py
+│       └── test_theme.py
 ├── build.bat                    # One-click build script
 ├── requirements.txt
 ├── pyproject.toml

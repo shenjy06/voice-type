@@ -8,6 +8,7 @@ from voicetype.config import (
     RecordingConfig,
     HotkeyConfig,
     OutputConfig,
+    WindowConfig,
     GlossaryEntry,
 )
 from voicetype.ui.settings_dialog import SettingsDialog
@@ -143,6 +144,7 @@ class TestSettingsDialogMicrophoneTest:
         monitor = mocker.MagicMock()
         monitor.start.return_value = True
         monitor.is_running = True
+        monitor.input_level = 0.0  # prevent timer callback from crashing
         mock_monitor_cls = mocker.patch(
             "voicetype.ui.settings_dialog.MicrophoneMonitor",
             return_value=monitor,
@@ -415,7 +417,7 @@ class TestSettingsDialogWrapHeights:
             dlg = SettingsDialog(AppConfig())
             qtbot.addWidget(dlg)
             dlg.show()
-            dlg._tabs.setCurrentIndex(1)  # STT tab
+            dlg._tabs.setCurrentIndex(0)  # General tab (recording settings)
             # _adjust_wrap_heights is deferred via QTimer.singleShot(0, ...);
             # the mic device name is fetched on a background thread and
             # delivered via a queued signal. Wait for both to settle.
@@ -446,7 +448,7 @@ class TestSettingsDialogWrapHeights:
             dlg = SettingsDialog(AppConfig())
             qtbot.addWidget(dlg)
             dlg.show()
-            dlg._tabs.setCurrentIndex(1)
+            dlg._tabs.setCurrentIndex(0)  # General tab
             qtbot.wait(200)
             for lbl in dlg._wrap_labels:
                 if lbl.width() <= 0 or not lbl.text():
@@ -551,10 +553,11 @@ class TestSettingsDialogModelFetch:
         mocker.patch("voicetype.ui.settings_dialog.Toast")
         dlg._model_before_fetch["asr"] = "pending"
         dlg._refresh_buttons["asr"].setEnabled(False)
-        dlg._refresh_buttons["asr"].setText("⏳")
         dlg._on_models_error("asr", "boom")
         assert dlg._refresh_buttons["asr"].isEnabled()
-        assert dlg._refresh_buttons["asr"].text() == "🔄"
+        # The button uses a vector icon, not text - just verify the icon is
+        # still present (it stays across refreshing/normal states).
+        assert not dlg._refresh_buttons["asr"].icon().isNull()
         assert "asr" not in dlg._model_before_fetch
 
     def test_fetch_disables_combo_and_shows_loading(self, qtbot, mocker):
@@ -599,3 +602,147 @@ class TestSettingsDialogModelFetch:
         dlg._restore_combo_on_fetch_failure("asr")
         assert dlg.stt_model_combo.count() == original_count
         assert dlg.stt_model_combo.currentText() == original_text
+
+
+class TestConfigPrivacyFeatures:
+    """Glossary CSV and named-profile UI controls."""
+
+    def test_glossary_csv_buttons_exist(self, qtbot):
+        dlg = SettingsDialog(AppConfig())
+        qtbot.addWidget(dlg)
+        assert dlg.glossary_export_csv_btn.text() == "Export Glossary CSV"
+        assert dlg.glossary_import_csv_btn.text() == "Import Glossary CSV"
+
+    def test_profile_controls_exist(self, qtbot):
+        dlg = SettingsDialog(AppConfig())
+        qtbot.addWidget(dlg)
+        assert dlg.profile_combo is not None
+        assert dlg.profile_save_btn.text() == "Save as New Profile"
+        assert dlg.profile_delete_btn.text() == "Delete Profile"
+
+    def test_export_glossary_csv_writes_file(self, qtbot, tmp_path, mocker):
+        dlg = SettingsDialog(AppConfig(glossary=[GlossaryEntry("派森", "Python")]))
+        qtbot.addWidget(dlg)
+        out = tmp_path / "g.csv"
+        mocker.patch.object(
+            dlg, "_collect_glossary_entries",
+            return_value=[GlossaryEntry("派森", "Python")],
+        )
+        mocker.patch(
+            "voicetype.ui.settings_dialog.QFileDialog.getSaveFileName",
+            return_value=(str(out), "CSV (*.csv)"),
+        )
+        mocker.patch("voicetype.ui.settings_dialog.Toast")
+        dlg._export_glossary_csv()
+        assert out.exists()
+        content = out.read_text(encoding="utf-8-sig")
+        assert "派森" in content and "Python" in content
+
+    def test_import_glossary_csv_appends_rows(self, qtbot, tmp_path, mocker):
+        dlg = SettingsDialog(AppConfig())
+        qtbot.addWidget(dlg)
+        csv_path = tmp_path / "g.csv"
+        csv_path.write_text(
+            "source,replacement\npai sen,Python\n", encoding="utf-8-sig",
+        )
+        mocker.patch(
+            "voicetype.ui.settings_dialog.QFileDialog.getOpenFileName",
+            return_value=(str(csv_path), "CSV (*.csv)"),
+        )
+        mocker.patch("voicetype.ui.settings_dialog.Toast")
+        dlg._import_glossary_csv()
+        # Header skipped; one valid row appended.
+        assert dlg.glossary_table.rowCount() == 1
+        assert dlg.glossary_table.item(0, 0).text() == "pai sen"
+        assert dlg.glossary_table.item(0, 1).text() == "Python"
+
+    def test_save_profile_as_creates_profile(self, qtbot, mocker):
+        from voicetype.config import list_profiles, get_active_profile
+        dlg = SettingsDialog(AppConfig(asr=AsrConfig(api_key="sk-x")))
+        qtbot.addWidget(dlg)
+        mocker.patch(
+            "voicetype.ui.settings_dialog.QInputDialog.getText",
+            return_value=("work", True),
+        )
+        mocker.patch("voicetype.ui.settings_dialog.Toast")
+        dlg._save_profile_as()
+        assert "work" in list_profiles()
+        assert get_active_profile() == "work"
+
+    def test_delete_profile_removes_profile(self, qtbot, mocker):
+        from voicetype.config import save_profile, list_profiles, get_active_profile
+        save_profile("work", AppConfig())
+        dlg = SettingsDialog(AppConfig())
+        qtbot.addWidget(dlg)
+        dlg._refresh_profile_combo()
+        idx = dlg.profile_combo.findText("work")
+        dlg.profile_combo.setCurrentIndex(idx)
+        import voicetype.ui.settings_dialog as sd
+        mocker.patch.object(sd.QMessageBox, "question", return_value=sd.QMessageBox.Yes)
+        mocker.patch("voicetype.ui.settings_dialog.Toast")
+        dlg._delete_profile()
+        assert "work" not in list_profiles()
+        assert get_active_profile() != "work"
+
+
+class TestSettingsDialogTheme:
+    """Light/dark/system theme switching from the General tab."""
+
+    def setup_method(self):
+        from voicetype.ui.theme import get_palette
+        self._saved_palette = get_palette()
+
+    def teardown_method(self):
+        from voicetype.ui.theme import set_active_palette
+        set_active_palette(self._saved_palette)
+
+    def test_theme_combo_populated(self, qtbot):
+        from voicetype.ui.theme import apply_theme_mode
+        apply_theme_mode("dark")
+        dlg = SettingsDialog(AppConfig())
+        qtbot.addWidget(dlg)
+        modes = [dlg.theme_combo.itemData(i) for i in range(dlg.theme_combo.count())]
+        assert modes == ["dark", "light", "system"]
+
+    def test_theme_combo_reflects_config(self, qtbot):
+        from voicetype.ui.theme import apply_theme_mode
+        apply_theme_mode("light")
+        cfg = AppConfig(window=WindowConfig(theme_mode="light"))
+        dlg = SettingsDialog(cfg)
+        qtbot.addWidget(dlg)
+        assert dlg.theme_combo.currentData() == "light"
+
+    def test_live_switch_changes_palette(self, qtbot):
+        from voicetype.ui.theme import apply_theme_mode, get_palette, LIGHT_PALETTE, DARK_PALETTE
+        apply_theme_mode("dark")
+        dlg = SettingsDialog(AppConfig())
+        qtbot.addWidget(dlg)
+        # Combo starts at dark (config default); switch to light for a live preview.
+        dlg.theme_combo.setCurrentIndex(dlg.theme_combo.findData("light"))
+        assert get_palette() is LIGHT_PALETTE
+        assert LIGHT_PALETTE.accent in dlg.styleSheet()
+        # Switch back to dark.
+        dlg.theme_combo.setCurrentIndex(dlg.theme_combo.findData("dark"))
+        assert get_palette() is DARK_PALETTE
+        assert DARK_PALETTE.accent in dlg.styleSheet()
+
+    def test_cancel_restores_initial_theme(self, qtbot):
+        from voicetype.ui.theme import apply_theme_mode, get_palette, DARK_PALETTE, LIGHT_PALETTE
+        apply_theme_mode("dark")
+        dlg = SettingsDialog(AppConfig())
+        qtbot.addWidget(dlg)
+        dlg.theme_combo.setCurrentIndex(dlg.theme_combo.findData("light"))  # preview
+        assert get_palette() is LIGHT_PALETTE
+        dlg.reject()  # cancel -> restore dark
+        assert get_palette() is DARK_PALETTE
+
+    def test_save_persists_theme_mode(self, qtbot, mocker):
+        from voicetype.ui.theme import apply_theme_mode
+        mocker.patch("voicetype.ui.settings_dialog.check_network_available", return_value=True)
+        apply_theme_mode("dark")
+        cfg = AppConfig(asr=AsrConfig(api_key="sk-test"))
+        dlg = SettingsDialog(cfg)
+        qtbot.addWidget(dlg)
+        dlg.theme_combo.setCurrentIndex(dlg.theme_combo.findData("light"))
+        dlg._save_and_close()
+        assert cfg.window.theme_mode == "light"

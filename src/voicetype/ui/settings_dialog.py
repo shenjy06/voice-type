@@ -1,43 +1,159 @@
 """Settings dialog — configure API, models, hotkey, etc."""
 
+import csv
+import copy
+import json
 import logging
 import threading
+from pathlib import Path
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QLabel, QLineEdit,
     QComboBox, QFormLayout, QGroupBox, QSpinBox, QCheckBox,
     QDialogButtonBox, QTabWidget, QWidget, QPushButton, QProgressBar,
     QHBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView,
-    QCompleter,
+    QCompleter, QFileDialog, QMessageBox, QInputDialog,
 )
 from PySide6.QtCore import Qt, Signal, QTimer
-from PySide6.QtGui import QIcon, QCursor
+from PySide6.QtGui import QIcon, QCursor, QAction, QColor
 from voicetype.api_client import fetch_models
 from voicetype.audio import MicrophoneMonitor, get_default_input_device_name
-from voicetype.config import AppConfig, DEFAULT_BASE_URL, GlossaryEntry
-from voicetype.constants import PASTE_MODES, ASR_LANGUAGES, DENOISE_STRENGTHS
+from voicetype.config import (
+    AppConfig, DEFAULT_BASE_URL, GlossaryEntry,
+    EncryptedConfigError, InvalidPasswordError,
+    list_profiles, save_profile, load_profile, delete_profile,
+    get_active_profile, set_active_profile,
+)
+from voicetype.constants import PASTE_MODES, ASR_LANGUAGES, DENOISE_STRENGTHS, THEME_MODES
 from voicetype.network import check_network_available
 from voicetype.ui.hotkey_recorder import HotkeyRecorder
+from voicetype.ui.icon_utils import make_circle_icon
 from voicetype.ui.main_window import Toast
+from voicetype.ui.theme import (
+    apply_dialog_theme, apply_theme_mode, get_palette,
+    refresh_icon, eye_icon, eye_off_icon,
+)
+from voicetype.i18n import t
 
 logger = logging.getLogger(__name__)
-from voicetype.ui.icon_utils import make_circle_icon
-from voicetype.i18n import t
+
+_MIC_POLL_INTERVAL_MS = 100
 
 _SETTINGS_ICON = None
 
 
 def _get_settings_icon() -> QIcon:
-    """Lazily create settings icon (requires QApplication to exist first)."""
+    """Lazily create settings icon (requires QApplication to exist first).
+
+    Uses the letter "S" on the active palette's accent circle, matching the
+    tray icon ("T") and history icon ("H") so all app surfaces share one
+    branded letter-mark style instead of font-dependent emoji glyphs. The
+    icon is rebuilt when the theme changes (see _refresh_dialog_theme).
+    """
     global _SETTINGS_ICON
     if _SETTINGS_ICON is None:
-        _SETTINGS_ICON = make_circle_icon("⚙", (99, 102, 241), font_size=14, font_family="Segoe UI")
+        accent_rgb = QColor(get_palette().accent).getRgb()[:3]
+        _SETTINGS_ICON = make_circle_icon("S", accent_rgb, font_size=14, font_family="Segoe UI")
     return _SETTINGS_ICON
+
+
+def _add_password_toggle(line_edit: QLineEdit, registry=None) -> QAction:
+    """Add a show/hide toggle action to a password-mode QLineEdit.
+
+    Uses a trailing eye/eye-off icon (CC Switch style) so the user can verify
+    a typed key without it staying exposed. Toggles echo mode in place.
+    Returns the action so callers (e.g. SettingsDialog) can re-set its icon
+    after a theme switch.
+
+    Args:
+        line_edit: The QLineEdit to add the toggle to
+        registry: Optional SettingsDialog to register the icon with for theme refreshes
+    """
+    action = QAction(line_edit)
+    action.setIcon(eye_icon())
+    action.setToolTip(t("settings.show_password"))
+
+    # Store current icon getter on the action for theme refresh
+    def _get_current_icon():
+        return eye_off_icon() if line_edit.echoMode() != QLineEdit.Password else eye_icon()
+
+    action._get_icon = _get_current_icon
+
+    def _toggle():
+        if line_edit.echoMode() == QLineEdit.Password:
+            line_edit.setEchoMode(QLineEdit.Normal)
+            action.setIcon(eye_off_icon())
+            action.setToolTip(t("settings.hide_password"))
+        else:
+            line_edit.setEchoMode(QLineEdit.Password)
+            action.setIcon(eye_icon())
+            action.setToolTip(t("settings.show_password"))
+
+    action.triggered.connect(_toggle)
+    line_edit.addAction(action, QLineEdit.TrailingPosition)
+
+    # Register with the theme registry if provided
+    if registry is not None:
+        registry._register_themed_icon(action, lambda: action._get_icon(), is_action=True)
+
+    return action
+
+
+class PasswordDialog(QDialog):
+    """Collect a password (optionally with a confirmation field) for export."""
+
+    def __init__(self, parent, title: str, prompt: str, confirm: bool = True):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        # Themed so it matches the rest of the app (inherits the active palette).
+        apply_dialog_theme(self)
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(prompt))
+        self._pw = QLineEdit()
+        self._pw.setEchoMode(QLineEdit.Password)
+        _add_password_toggle(self._pw)
+        layout.addWidget(self._pw)
+        self._pw2 = None
+        if confirm:
+            self._pw2 = QLineEdit()
+            self._pw2.setEchoMode(QLineEdit.Password)
+            _add_password_toggle(self._pw2)
+            layout.addWidget(self._pw2)
+        self._error_label = QLabel()
+        # Styled via objectName so the QSS (which tracks the active palette)
+        # handles the danger color - no inline hex to refresh on theme switch.
+        self._error_label.setObjectName("errorLabel")
+        self._error_label.setVisible(False)
+        layout.addWidget(self._error_label)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        )
+        buttons.accepted.connect(self._try_accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _try_accept(self):
+        """Validate before accepting - block OK if confirmation doesn't match."""
+        if self._pw2 is not None and self._pw.text() != self._pw2.text():
+            self._error_label.setText(t("settings.password_mismatch"))
+            self._error_label.setVisible(True)
+            return
+        self.accept()
+
+    def password(self) -> str:
+        return self._pw.text()
+
+    def matches(self) -> bool:
+        return self._pw2 is None or self._pw.text() == self._pw2.text()
 
 
 class SettingsDialog(QDialog):
 
     settings_saved = Signal()
+    # Emitted with the new theme mode ("dark"/"light"/"system") when the user
+    # changes the theme combo (live preview) or when Cancel restores the prior
+    # mode. Application connects this to re-skin the floating window + tray.
+    theme_changed = Signal(str)
     # Emitted (on the UI thread) when the background network check finishes;
     # carries True if the network is reachable.
     _network_check_done = Signal(bool)
@@ -74,20 +190,26 @@ class SettingsDialog(QDialog):
         self.setWindowTitle(t("settings.title"))
         self.setWindowIcon(_get_settings_icon())
         self.setModal(True)
-        self.setMinimumWidth(480)
+        self.setMinimumWidth(540)
         self.setWindowFlags(Qt.Dialog)
         self._mic_monitor = None
         self._mic_timer = QTimer(self)
-        self._mic_timer.setInterval(100)
+        self._mic_timer.setInterval(_MIC_POLL_INTERVAL_MS)
         self._mic_timer.timeout.connect(self._refresh_microphone_level)
         self._wrap_adjust_pending = False
+        self._toast = None  # managed by _show_dialog_toast
         # Refresh buttons by section ("asr"/"polish") — populated in _init_ui.
         # Must exist before _init_ui() runs because _make_model_row writes to it.
         self._refresh_buttons: dict[str, QPushButton] = {}
+        # Registry of icons that need refreshing when theme changes
+        # Keys are widget/action references, values are icon getter functions
+        self._themed_icons: dict = {}
         self._model_before_fetch: dict[str, str] = {}
         self._model_items_before_fetch: dict[str, list] = {}
         self._init_ui()
         self._load_config()
+        # Snapshot all live-preview state at dialog-open time so Cancel can restore it
+        self._initial_snapshot = self._snapshot_preview_state()
         # Word-wrapped labels placed as QFormLayout fields — their height must
         # be enforced because QFormLayout sizes field rows by sizeHint, not by
         # heightForWidth, so wrapped text gets clipped (see _adjust_wrap_heights).
@@ -95,6 +217,8 @@ class SettingsDialog(QDialog):
             self.mic_device_label,
             self.mic_status_label,
             self.denoise_hint_label,
+            self.vad_hint_label,
+            self.streaming_hint_label,
         ]
         self._tabs.currentChanged.connect(lambda _: self._schedule_adjust_wrap_heights())
         # Snapshot original API-related fields to detect changes on save
@@ -107,9 +231,56 @@ class SettingsDialog(QDialog):
         self._models_fetched.connect(self._on_models_fetched)
         self._models_error.connect(self._on_models_error)
 
+    def _register_themed_icon(self, obj, icon_getter, is_action=False):
+        """Register an object (QPushButton or QAction) that needs its icon refreshed on theme changes.
+
+        Args:
+            obj: The widget or action to update
+            icon_getter: Function that returns the correct QIcon for the current theme
+            is_action: True if obj is a QAction, False if it's a QPushButton
+        """
+        self._themed_icons[obj] = (icon_getter, is_action)
+
+    def _refresh_themed_icons(self):
+        """Refresh all registered themed icons to match the current palette."""
+        for obj, (icon_getter, _is_action) in self._themed_icons.items():
+            try:
+                obj.setIcon(icon_getter())
+            except RuntimeError:
+                # Object's C++ side may have been deleted (shiboken) -
+                # skip it rather than crashing. Other RuntimeErrors are
+                # unlikely here but are logged so they don't silently hide.
+                logger.debug("Themed icon refresh skipped (deleted C++ object)", exc_info=True)
+
+    def _snapshot_preview_state(self):
+        """Snapshot all live-preview settings that can be undone on Cancel.
+
+        Extend this when adding new live-preview settings to automatically
+        get undo support without writing new _initial_* tracking code.
+        """
+        return {
+            "theme_mode": self.config.window.theme_mode,
+            # Add future live-preview settings here
+        }
+
+    def _restore_preview_state(self, snapshot):
+        """Restore live-preview settings from a snapshot.
+
+        Called when Cancel is pressed to undo any live-preview changes.
+        """
+        if snapshot.get("theme_mode") != self.theme_combo.currentData():
+            apply_theme_mode(snapshot["theme_mode"])
+            self._refresh_dialog_theme()
+            self.theme_changed.emit(snapshot["theme_mode"])
+
     def _init_ui(self):
+        # Apply the CC Switch-inspired dark theme to the dialog and all
+        # child widgets / popups / sub-dialogs.
+        apply_dialog_theme(self)
+
         layout = QVBoxLayout(self)
-        layout.setSpacing(12)
+        layout.setSpacing(14)
+        layout.setContentsMargins(16, 16, 16, 16)
 
         def _make_model_row(combo: QComboBox, section: str) -> QWidget:
             """Wrap a model combo with a 'fetch models' refresh button.
@@ -136,13 +307,15 @@ class SettingsDialog(QDialog):
             row.setContentsMargins(0, 0, 0, 0)
             row.setSpacing(6)
             row.addWidget(combo, 1)
-            btn = QPushButton("🔄")
-            btn.setFixedWidth(32)
+            btn = QPushButton()
+            btn.setIcon(refresh_icon())
+            btn.setFixedWidth(34)
             btn.setToolTip(t("settings.refresh_models"))
             btn.setCursor(QCursor(Qt.PointingHandCursor))
             btn.clicked.connect(lambda checked=False, s=section: self._fetch_models(s))
             row.addWidget(btn)
             self._refresh_buttons[section] = btn
+            self._register_themed_icon(btn, refresh_icon, is_action=False)
             return container
 
         self._tabs = QTabWidget()
@@ -161,15 +334,132 @@ class SettingsDialog(QDialog):
         self.language_combo.addItem("中文", "zh")
         lang_layout.addRow(t("settings.ui_language"), self.language_combo)
 
+        # Theme mode - live-applies so the user sees the switch immediately.
+        # Cancel restores the mode saved at dialog-open (see reject).
+        self.theme_combo = QComboBox()
+        for label_key, value in THEME_MODES:
+            self.theme_combo.addItem(t(label_key), value)
+        self.theme_combo.currentIndexChanged.connect(self._on_theme_mode_changed)
+        lang_layout.addRow(t("settings.theme"), self.theme_combo)
+
         self.auto_start_check = QCheckBox(t("settings.auto_start"))
         lang_layout.addRow("", self.auto_start_check)
 
         lang_group.setLayout(lang_layout)
         general_layout.addWidget(lang_group)
+
+        # Config management — export/import the whole config as JSON. Lives
+        # on the General tab because it's a global (cross-section) operation,
+        # not tied to any single API or recording setting.
+        config_group = QGroupBox(t("settings.config_management"))
+        config_layout = QVBoxLayout()
+        config_row = QHBoxLayout()
+        self.export_btn = QPushButton(t("settings.export_config"))
+        self.import_btn = QPushButton(t("settings.import_config"))
+        self.export_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self.import_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self.export_btn.clicked.connect(self._export_config)
+        self.import_btn.clicked.connect(self._import_config)
+        config_row.addWidget(self.export_btn)
+        config_row.addWidget(self.import_btn)
+        config_row.addStretch()
+        config_layout.addLayout(config_row)
+
+        # Named profiles — switch between saved configurations.
+        profile_row = QHBoxLayout()
+        profile_row.addWidget(QLabel(t("settings.profile_label")))
+        self.profile_combo = QComboBox()
+        self.profile_combo.setCursor(QCursor(Qt.PointingHandCursor))
+        self.profile_combo.currentTextChanged.connect(self._on_profile_selected)
+        profile_row.addWidget(self.profile_combo)
+        self.profile_save_btn = QPushButton(t("settings.profile_save_new"))
+        self.profile_delete_btn = QPushButton(t("settings.profile_delete"))
+        self.profile_save_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self.profile_delete_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self.profile_delete_btn.setObjectName("dangerButton")
+        self.profile_save_btn.clicked.connect(self._save_profile_as)
+        self.profile_delete_btn.clicked.connect(self._delete_profile)
+        profile_row.addWidget(self.profile_save_btn)
+        profile_row.addWidget(self.profile_delete_btn)
+        profile_row.addStretch()
+        config_layout.addLayout(profile_row)
+
+        config_group.setLayout(config_layout)
+        general_layout.addWidget(config_group)
+        self._refresh_profile_combo()
+
         general_layout.addStretch()
         self._tabs.addTab(general_tab, t("settings.general"))
 
-        # === Tab 1: STT (Speech-to-Text) ===
+        # === Tab: Recording ===
+        recording_tab = QWidget()
+        recording_layout = QVBoxLayout(recording_tab)
+        recording_layout.setSpacing(12)
+
+        # Recording settings (sample rate, mic, denoise, VAD) are hardware/
+        # local concerns, grouped on their own tab between General and STT.
+        stt_misc_group = QGroupBox(t("settings.recording_group"))
+        stt_misc_layout = QFormLayout()
+
+        self.sample_rate_spin = QSpinBox()
+        self.sample_rate_spin.setRange(8000, 48000)
+        self.sample_rate_spin.setSingleStep(8000)
+        stt_misc_layout.addRow(t("settings.sample_rate"), self.sample_rate_spin)
+
+        self.mic_device_label = QLabel()
+        self.mic_device_label.setWordWrap(True)
+        stt_misc_layout.addRow(t("settings.mic_device"), self.mic_device_label)
+
+        self.mic_level_bar = QProgressBar()
+        self.mic_level_bar.setRange(0, 100)
+        self.mic_level_bar.setValue(0)
+        self.mic_level_bar.setTextVisible(False)
+        self.mic_level_bar.setFixedHeight(10)
+        stt_misc_layout.addRow(t("settings.mic_level"), self.mic_level_bar)
+
+        self.mic_status_label = QLabel(t("settings.mic_status_idle"))
+        self.mic_status_label.setWordWrap(True)
+        self.mic_status_label.setObjectName("hintLabel")
+        stt_misc_layout.addRow("", self.mic_status_label)
+
+        self.mic_test_btn = QPushButton(t("settings.mic_test_start"))
+        self.mic_test_btn.clicked.connect(self._toggle_microphone_monitor)
+        stt_misc_layout.addRow("", self.mic_test_btn)
+
+        self.denoise_check = QCheckBox(t("settings.denoise_enabled"))
+        self.denoise_check.toggled.connect(self._on_denoise_toggled)
+        stt_misc_layout.addRow("", self.denoise_check)
+
+        self.denoise_strength_combo = QComboBox()
+        for label_key, value in DENOISE_STRENGTHS:
+            self.denoise_strength_combo.addItem(t(label_key), value)
+        stt_misc_layout.addRow(t("settings.denoise_strength"), self.denoise_strength_combo)
+
+        self.denoise_hint_label = QLabel(t("settings.denoise_hint"))
+        self.denoise_hint_label.setWordWrap(True)
+        self.denoise_hint_label.setObjectName("hintLabel")
+        stt_misc_layout.addRow("", self.denoise_hint_label)
+
+        self.vad_check = QCheckBox(t("settings.vad_enabled"))
+        stt_misc_layout.addRow("", self.vad_check)
+
+        self.vad_silence_spin = QSpinBox()
+        self.vad_silence_spin.setRange(500, 5000)
+        self.vad_silence_spin.setSingleStep(100)
+        self.vad_silence_spin.setSuffix(" ms")
+        stt_misc_layout.addRow(t("settings.vad_silence_duration"), self.vad_silence_spin)
+
+        self.vad_hint_label = QLabel(t("settings.vad_hint"))
+        self.vad_hint_label.setWordWrap(True)
+        self.vad_hint_label.setObjectName("hintLabel")
+        stt_misc_layout.addRow("", self.vad_hint_label)
+
+        stt_misc_group.setLayout(stt_misc_layout)
+        recording_layout.addWidget(stt_misc_group)
+        recording_layout.addStretch()
+        self._tabs.addTab(recording_tab, t("settings.recording_tab"))
+
+        # === Tab: STT (Speech-to-Text) ===
         stt_tab = QWidget()
         stt_layout = QVBoxLayout(stt_tab)
         stt_layout.setSpacing(12)
@@ -180,6 +470,7 @@ class SettingsDialog(QDialog):
         self.stt_api_key_input = QLineEdit()
         self.stt_api_key_input.setEchoMode(QLineEdit.Password)
         self.stt_api_key_input.setPlaceholderText("sk-...")
+        _add_password_toggle(self.stt_api_key_input, registry=self)
         stt_api_layout.addRow(t("settings.api_key"), self.stt_api_key_input)
 
         self.stt_base_url_input = QLineEdit()
@@ -198,57 +489,17 @@ class SettingsDialog(QDialog):
             self.stt_lang_combo.addItem(label, code)
         stt_api_layout.addRow(t("settings.language"), self.stt_lang_combo)
 
+        self.streaming_check = QCheckBox(t("settings.streaming_enabled"))
+        self.streaming_check.toggled.connect(self._on_streaming_toggled)
+        stt_api_layout.addRow("", self.streaming_check)
+
+        self.streaming_hint_label = QLabel(t("settings.streaming_hint"))
+        self.streaming_hint_label.setWordWrap(True)
+        self.streaming_hint_label.setObjectName("hintLabel")
+        stt_api_layout.addRow("", self.streaming_hint_label)
+
         stt_api_group.setLayout(stt_api_layout)
         stt_layout.addWidget(stt_api_group)
-
-        stt_misc_group = QGroupBox(t("settings.recording_group"))
-        stt_misc_layout = QFormLayout()
-
-        self.sample_rate_spin = QSpinBox()
-        self.sample_rate_spin.setRange(8000, 48000)
-        self.sample_rate_spin.setSingleStep(8000)
-        stt_misc_layout.addRow(t("settings.sample_rate"), self.sample_rate_spin)
-
-        self.mic_device_label = QLabel()
-        self.mic_device_label.setWordWrap(True)
-        stt_misc_layout.addRow(t("settings.mic_device"), self.mic_device_label)
-
-        self.mic_level_bar = QProgressBar()
-        self.mic_level_bar.setRange(0, 100)
-        self.mic_level_bar.setValue(0)
-        self.mic_level_bar.setTextVisible(False)
-        self.mic_level_bar.setFixedHeight(10)
-        self.mic_level_bar.setStyleSheet(
-            "QProgressBar { background: #1f2937; border: 1px solid #4b5563; border-radius: 5px; }"
-            "QProgressBar::chunk { background: #22c55e; border-radius: 4px; }"
-        )
-        stt_misc_layout.addRow(t("settings.mic_level"), self.mic_level_bar)
-
-        self.mic_status_label = QLabel(t("settings.mic_status_idle"))
-        self.mic_status_label.setWordWrap(True)
-        self.mic_status_label.setStyleSheet("color: #9ca3af; font-size: 12px;")
-        stt_misc_layout.addRow("", self.mic_status_label)
-
-        self.mic_test_btn = QPushButton(t("settings.mic_test_start"))
-        self.mic_test_btn.clicked.connect(self._toggle_microphone_monitor)
-        stt_misc_layout.addRow("", self.mic_test_btn)
-
-        self.denoise_check = QCheckBox(t("settings.denoise_enabled"))
-        self.denoise_check.toggled.connect(self._on_denoise_toggled)
-        stt_misc_layout.addRow("", self.denoise_check)
-
-        self.denoise_strength_combo = QComboBox()
-        for label_key, value in DENOISE_STRENGTHS:
-            self.denoise_strength_combo.addItem(t(label_key), value)
-        stt_misc_layout.addRow(t("settings.denoise_strength"), self.denoise_strength_combo)
-
-        self.denoise_hint_label = QLabel(t("settings.denoise_hint"))
-        self.denoise_hint_label.setWordWrap(True)
-        self.denoise_hint_label.setStyleSheet("color: #9ca3af; font-size: 12px;")
-        stt_misc_layout.addRow("", self.denoise_hint_label)
-
-        stt_misc_group.setLayout(stt_misc_layout)
-        stt_layout.addWidget(stt_misc_group)
         stt_layout.addStretch()
         self._tabs.addTab(stt_tab, t("settings.stt_tab"))
 
@@ -263,6 +514,7 @@ class SettingsDialog(QDialog):
         self.polish_api_key_input = QLineEdit()
         self.polish_api_key_input.setEchoMode(QLineEdit.Password)
         self.polish_api_key_input.setPlaceholderText("sk-...")
+        _add_password_toggle(self.polish_api_key_input, registry=self)
         polish_api_layout.addRow(t("settings.api_key"), self.polish_api_key_input)
 
         self.polish_base_url_input = QLineEdit()
@@ -310,20 +562,31 @@ class SettingsDialog(QDialog):
         glossary_buttons = QHBoxLayout()
         self.glossary_add_btn = QPushButton(t("settings.glossary_add"))
         self.glossary_remove_btn = QPushButton(t("settings.glossary_remove"))
+        self.glossary_remove_btn.setObjectName("dangerButton")
         self.glossary_add_btn.clicked.connect(lambda: self._add_glossary_row())
         self.glossary_remove_btn.clicked.connect(self._remove_selected_glossary_rows)
         glossary_buttons.addWidget(self.glossary_add_btn)
         glossary_buttons.addWidget(self.glossary_remove_btn)
         glossary_buttons.addStretch()
+        self.glossary_import_csv_btn = QPushButton(t("settings.glossary_import_csv"))
+        self.glossary_export_csv_btn = QPushButton(t("settings.glossary_export_csv"))
+        self.glossary_import_csv_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self.glossary_export_csv_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self.glossary_import_csv_btn.clicked.connect(self._import_glossary_csv)
+        self.glossary_export_csv_btn.clicked.connect(self._export_glossary_csv)
+        glossary_buttons.addWidget(self.glossary_import_csv_btn)
+        glossary_buttons.addWidget(self.glossary_export_csv_btn)
         glossary_group_layout.addLayout(glossary_buttons)
 
         glossary_group.setLayout(glossary_group_layout)
         glossary_layout.addWidget(glossary_group)
         self._tabs.addTab(glossary_tab, t("settings.glossary_tab"))
 
-        layout.addWidget(self._tabs)
+        # === Tab: Output ===
+        output_tab = QWidget()
+        output_tab_layout = QVBoxLayout(output_tab)
+        output_tab_layout.setSpacing(12)
 
-        # === Output Settings (always visible below tabs) ===
         output_group = QGroupBox(t("settings.output"))
         output_layout = QFormLayout()
 
@@ -341,9 +604,15 @@ class SettingsDialog(QDialog):
         output_layout.addRow("", self.auto_paste_check)
 
         output_group.setLayout(output_layout)
-        layout.addWidget(output_group)
+        output_tab_layout.addWidget(output_group)
+        output_tab_layout.addStretch()
+        self._tabs.addTab(output_tab, t("settings.output"))
 
-        # === Hotkey Settings ===
+        # === Tab: Hotkeys ===
+        hotkey_tab = QWidget()
+        hotkey_tab_layout = QVBoxLayout(hotkey_tab)
+        hotkey_tab_layout.setSpacing(12)
+
         hotkey_group = QGroupBox(t("settings.hotkeys"))
         hotkey_layout = QVBoxLayout()
 
@@ -359,20 +628,25 @@ class SettingsDialog(QDialog):
 
         self._hint_label = QLabel(t("settings.hotkey_hint"))
         self._hint_label.setWordWrap(True)
-        self._hint_label.setStyleSheet("color: #9ca3af; font-size: 12px;")
+        self._hint_label.setObjectName("hintLabel")
         hotkey_layout.addWidget(self._hint_label)
 
         self._cancel_label = QLabel(t("settings.hotkey_cancel"))
         self._cancel_label.setWordWrap(True)
-        self._cancel_label.setStyleSheet("color: #9ca3af; font-size: 12px;")
+        self._cancel_label.setObjectName("hintLabel")
         hotkey_layout.addWidget(self._cancel_label)
 
         hotkey_group.setLayout(hotkey_layout)
-        layout.addWidget(hotkey_group)
+        hotkey_tab_layout.addWidget(hotkey_group)
+        hotkey_tab_layout.addStretch()
+        self._tabs.addTab(hotkey_tab, t("settings.hotkeys"))
+
+        layout.addWidget(self._tabs)
 
         # === Buttons ===
         button_box = QDialogButtonBox()
         self._save_btn = QPushButton(t("settings.save"))
+        self._save_btn.setObjectName("primaryButton")
         self._save_btn.setDefault(True)
         self._cancel_btn = QPushButton(t("settings.cancel"))
         button_box.addButton(self._save_btn, QDialogButtonBox.AcceptRole)
@@ -387,6 +661,14 @@ class SettingsDialog(QDialog):
         if idx >= 0:
             self.language_combo.setCurrentIndex(idx)
         self.auto_start_check.setChecked(self.config.window.auto_start)
+        # Theme combo: block signals so programmatic selection doesn't trigger
+        # the live-preview handler (the palette was already applied at startup
+        # by Application; we only want the combo to reflect the saved value).
+        self.theme_combo.blockSignals(True)
+        idx = self.theme_combo.findData(self.config.window.theme_mode)
+        if idx >= 0:
+            self.theme_combo.setCurrentIndex(idx)
+        self.theme_combo.blockSignals(False)
 
         # STT tab
         self.stt_api_key_input.setText(self.config.asr.api_key)
@@ -400,6 +682,8 @@ class SettingsDialog(QDialog):
         if idx < 0:
             idx = self.stt_lang_combo.findData("auto")
         self.stt_lang_combo.setCurrentIndex(idx)
+        self.streaming_check.setChecked(self.config.asr.streaming_enabled)
+        self._on_streaming_toggled(self.config.asr.streaming_enabled)
         self.sample_rate_spin.setValue(self.config.recording.sample_rate)
 
         self.denoise_check.setChecked(self.config.recording.denoise_enabled)
@@ -408,6 +692,9 @@ class SettingsDialog(QDialog):
             idx = self.denoise_strength_combo.findData("medium")
         self.denoise_strength_combo.setCurrentIndex(idx)
         self._on_denoise_toggled(self.denoise_check.isChecked())
+
+        self.vad_check.setChecked(self.config.recording.vad_enabled)
+        self.vad_silence_spin.setValue(self.config.recording.vad_silence_duration_ms)
 
         # Polish tab
         self.polish_api_key_input.setText(self.config.polish.api_key)
@@ -455,14 +742,25 @@ class SettingsDialog(QDialog):
         current = self._snapshot_api_state()
         return current != self._initial_api_state
 
+    def _show_dialog_toast(self, text: str) -> None:
+        """Show a toast, closing any previous one to prevent leaks."""
+        if self._toast is not None:
+            try:
+                self._toast.close()
+            except Exception:
+                pass
+            self._toast = None
+        toast = Toast(text, parent=self)
+        toast.show()
+        self._toast = toast
+
     def _save_and_close(self):
         # Validate keys synchronously first — no network needed for that.
         api_key = self.stt_api_key_input.text().strip()
         polish_key = self.polish_api_key_input.text().strip()
         if not api_key and not polish_key:
             logger.warning("Save rejected: no API key provided")
-            self._toast = Toast(t("settings.api_key_required"), parent=self)
-            self._toast.show()
+            self._show_dialog_toast(t("settings.api_key_required"))
             return
 
         # Only require network access if an API-related field actually changed.
@@ -478,7 +776,10 @@ class SettingsDialog(QDialog):
         self._set_checking_network(True)
 
         def _check():
-            ok = check_network_available()
+            try:
+                ok = check_network_available()
+            except Exception:
+                ok = False
             self._network_check_done.emit(ok)
 
         threading.Thread(target=_check, daemon=True).start()
@@ -487,8 +788,7 @@ class SettingsDialog(QDialog):
         self._set_checking_network(False)
         if not ok:
             logger.warning("Save rejected: network unavailable")
-            self._toast = Toast(t("settings.network_error"), parent=self)
-            self._toast.show()
+            self._show_dialog_toast(t("settings.network_error"))
             return
         self._apply_save()
 
@@ -547,7 +847,8 @@ class SettingsDialog(QDialog):
         if btn is None:
             return
         btn.setEnabled(not refreshing)
-        btn.setText("⏳" if refreshing else "🔄")
+        # The vector icon stays; Qt auto-dims it while disabled. The combo
+        # shows the "Loading models…" placeholder for explicit progress.
 
     def _restore_combo_on_fetch_failure(self, section: str) -> None:
         """Put back every item the combo held before the fetch started."""
@@ -575,11 +876,9 @@ class SettingsDialog(QDialog):
 
         if not model_ids:
             self._restore_combo_on_fetch_failure(section)
-            self._toast = Toast(
-                t("settings.models_fetch_failed").format(error=t("settings.models_loaded").format(count=0)),
-                parent=self,
+            self._show_dialog_toast(
+                t("settings.models_fetch_failed").format(error=t("settings.models_loaded").format(count=0))
             )
-            self._toast.show()
             logger.info("Fetched 0 models for section %s", section)
             return
 
@@ -597,10 +896,9 @@ class SettingsDialog(QDialog):
             idx = combo.findText(previous)
             if idx >= 0:
                 combo.setCurrentIndex(idx)
-        self._toast = Toast(
-            t("settings.models_loaded").format(count=len(model_ids)), parent=self
+        self._show_dialog_toast(
+            t("settings.models_loaded").format(count=len(model_ids))
         )
-        self._toast.show()
         logger.info("Fetched %d models for section %s", len(model_ids), section)
 
     def _on_models_error(self, section: str, error: str) -> None:
@@ -608,10 +906,9 @@ class SettingsDialog(QDialog):
         self._model_before_fetch.pop(section, None)
         self._restore_combo_on_fetch_failure(section)
         self._set_refreshing(section, False)
-        self._toast = Toast(
-            t("settings.models_fetch_failed").format(error=error), parent=self
+        self._show_dialog_toast(
+            t("settings.models_fetch_failed").format(error=error)
         )
-        self._toast.show()
         logger.warning("Model fetch failed for section %s: %s", section, error)
 
     def _apply_save(self):
@@ -621,15 +918,19 @@ class SettingsDialog(QDialog):
         # General — language
         self.config.language = self.language_combo.currentData()
         self.config.window.auto_start = self.auto_start_check.isChecked()
+        self.config.window.theme_mode = self.theme_combo.currentData()
 
         # STT
         self.config.asr.api_key = api_key
         self.config.asr.base_url = self.stt_base_url_input.text().strip()
         self.config.asr.model = self.stt_model_combo.currentText()
         self.config.asr.language = self.stt_lang_combo.currentData()
+        self.config.asr.streaming_enabled = self.streaming_check.isChecked()
         self.config.recording.sample_rate = self.sample_rate_spin.value()
         self.config.recording.denoise_enabled = self.denoise_check.isChecked()
         self.config.recording.denoise_strength = self.denoise_strength_combo.currentData()
+        self.config.recording.vad_enabled = self.vad_check.isChecked()
+        self.config.recording.vad_silence_duration_ms = self.vad_silence_spin.value()
 
         # Polish
         self.config.polish.api_key = self.polish_api_key_input.text().strip()
@@ -653,6 +954,297 @@ class SettingsDialog(QDialog):
         self.config.save()
         self.settings_saved.emit()
         self.accept()
+
+    # ---- config import / export -------------------------------------------
+
+    def _export_config(self):
+        """Export the current config to a JSON file chosen by the user.
+
+        Prompts for an optional password; if given, the file is encrypted so
+        API keys aren't stored in plaintext. An empty password exports the
+        file unencrypted (backward compatible).
+        """
+        path, _ = QFileDialog.getSaveFileName(
+            self, t("settings.export_config"),
+            "voice-type-config.json", "JSON (*.json)",
+        )
+        if not path:
+            return
+        dlg = PasswordDialog(
+            self, t("settings.export_encrypt_title"),
+            t("settings.export_encrypt_prompt"), confirm=True,
+        )
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        password = dlg.password()
+        try:
+            self.config.export_to(Path(path), password=password or None)
+        except OSError as e:
+            self._show_dialog_toast(t("settings.config_write_failed").format(error=e))
+            return
+        self._show_dialog_toast(f"{t('settings.export_success')} — {path}")
+
+    def _import_config(self):
+        """Load a config from a JSON file and refresh the dialog fields.
+
+        Only mutates ``self.config`` in place (via ``update_from``) so the
+        external reference held by Application stays valid. The user sees a
+        preview of the loaded values in the confirmation dialog and must
+        still click Save to persist — this keeps Import aligned with the
+        dialog's edit-then-save semantics.
+        """
+        path, _ = QFileDialog.getOpenFileName(
+            self, t("settings.import_config"), "", "JSON (*.json)",
+        )
+        if not path:
+            return
+        new_config = self._read_config_file(Path(path))
+        if new_config is None:
+            return
+
+        if new_config.is_default():
+            # Empty config: warn once, then apply directly. The summary
+            # preview would just show a wall of defaults, so skip it.
+            reply = QMessageBox.warning(
+                self, t("settings.import_empty_config_title"),
+                t("settings.import_empty_config_warning"),
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+            )
+            if reply != QMessageBox.Yes:
+                return
+            self._apply_config(new_config)
+            self._show_dialog_toast(f"{t('settings.import_success')} - {path}")
+            return
+
+        # Show a preview so the user sees what they're about to apply.
+        preview_text = t("settings.import_preview_text").format(
+            summary=new_config.summary(),
+        )
+        reply = QMessageBox.question(
+            self, t("settings.import_confirm_title"),
+            preview_text,
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        self._apply_config(new_config)
+        self._show_dialog_toast(f"{t('settings.import_success')} — {path}")
+
+    def _read_config_file(self, path: Path) -> "AppConfig | None":
+        """Read a config file, prompting for a password if it's encrypted.
+
+        Returns the loaded config, or None if the user cancels / the file is
+        unreadable / the password is wrong.
+        """
+        password = None
+        attempts = 0
+        while True:
+            try:
+                return AppConfig.import_from(path, password=password)
+            except EncryptedConfigError:
+                pass  # no password yet - fall through to the prompt
+            except InvalidPasswordError:
+                attempts += 1
+                if attempts >= 3:
+                    self._show_dialog_toast(t("settings.import_invalid_password"))
+                    return None
+                self._show_dialog_toast(t("settings.import_invalid_password"))
+            except (OSError, json.JSONDecodeError) as e:
+                self._show_dialog_toast(t("settings.import_failed").format(error=e))
+                return None
+            # Prompt for a password and retry (reached on Encrypted/Invalid).
+            ok, pw = self._ask_import_password()
+            if not ok:
+                return None
+            password = pw
+
+    def _ask_import_password(self) -> tuple[bool, str]:
+        """Prompt for the password to decrypt an imported file."""
+        return QInputDialog.getText(
+            self, t("settings.import_password_title"),
+            t("settings.import_password_prompt"), QLineEdit.Password,
+        )
+
+    def _apply_config(self, new_config: "AppConfig") -> None:
+        """Replace in-place the dialog's config with ``new_config``.
+
+        Snapshots first so a failure in ``_load_config`` can be rolled back,
+        keeping the dialog consistent. Resets the API-state snapshot so a
+        subsequent save won't trigger an unnecessary network check.
+        """
+        snapshot = copy.deepcopy(self.config)
+        try:
+            self.config.update_from(new_config)
+            self._load_config()
+        except Exception:
+            logger.exception("Failed to apply config; rolling back")
+            self.config.update_from(snapshot)
+            self._load_config()
+            self._show_dialog_toast(t("settings.import_failed").format(
+                error=t("settings.import_failed"),
+            ))
+            return
+        self._initial_api_state = self._snapshot_api_state()
+
+    # ---- glossary CSV ----------------------------------------------------
+
+    def _export_glossary_csv(self):
+        """Write the current glossary entries to a CSV file (UTF-8 BOM)."""
+        path, _ = QFileDialog.getSaveFileName(
+            self, t("settings.glossary_export_csv"),
+            "voice-type-glossary.csv", "CSV (*.csv)",
+        )
+        if not path:
+            return
+        entries = self._collect_glossary_entries()
+        try:
+            with open(path, "w", encoding="utf-8-sig", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["source", "replacement"])
+                for entry in entries:
+                    writer.writerow([entry.source, entry.replacement])
+        except OSError as e:
+            self._show_dialog_toast(t("settings.glossary_export_csv_failed").format(error=e))
+            return
+        self._show_dialog_toast(t("settings.glossary_export_csv_success"))
+
+    def _import_glossary_csv(self):
+        """Append glossary entries read from a CSV file to the table."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, t("settings.glossary_import_csv"), "", "CSV (*.csv)",
+        )
+        if not path:
+            return
+        try:
+            with open(path, encoding="utf-8-sig", newline="") as f:
+                rows = list(csv.reader(f))
+        except (OSError, csv.Error) as e:
+            self._show_dialog_toast(t("settings.glossary_import_csv_failed").format(error=e))
+            return
+        # Drop a leading header row if the first non-empty row looks like one.
+        data_rows = rows
+        for i, row in enumerate(rows):
+            if not row:
+                continue
+            is_header = (
+                len(row) > 1
+                and row[0].strip().lower() == "source"
+                and row[1].strip().lower() == "replacement"
+            )
+            data_rows = rows[i + 1:] if is_header else rows[i:]
+            break
+        imported = 0
+        for row in data_rows:
+            if len(row) >= 2 and row[0].strip() and row[1].strip():
+                self._add_glossary_row(row[0], row[1])
+                imported += 1
+        if imported:
+            self._show_dialog_toast(t("settings.glossary_import_csv_success"))
+        else:
+            self._show_dialog_toast(t("settings.glossary_import_csv_empty"))
+
+    # ---- named profiles --------------------------------------------------
+
+    def _refresh_profile_combo(self) -> None:
+        """Repopulate the profile combo and select the active profile."""
+        self.profile_combo.blockSignals(True)
+        self.profile_combo.clear()
+        active = get_active_profile()
+        profiles = list_profiles()
+        if active and active not in profiles:
+            # Active profile file vanished (e.g. deleted externally).
+            active = None
+        self.profile_combo.addItems(profiles)
+        if active:
+            idx = self.profile_combo.findText(active)
+            if idx >= 0:
+                self.profile_combo.setCurrentIndex(idx)
+        elif profiles:
+            self.profile_combo.setCurrentIndex(0)
+        self.profile_combo.blockSignals(False)
+
+    def _on_profile_selected(self, name: str) -> None:
+        """Switch to the chosen profile (with confirmation) when changed."""
+        name = name.strip()
+        if not name or name == get_active_profile():
+            return
+        reply = QMessageBox.question(
+            self, t("settings.import_confirm_title"),
+            t("settings.profile_switch_confirm_text"),
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            self._refresh_profile_combo()
+            return
+        try:
+            new_config = load_profile(name)
+        except ValueError:
+            self._show_dialog_toast(t("settings.profile_name_invalid"))
+            self._refresh_profile_combo()
+            return
+        except (OSError, json.JSONDecodeError) as e:
+            self._show_dialog_toast(t("settings.import_failed").format(error=e))
+            self._refresh_profile_combo()
+            return
+        self._apply_config(new_config)
+        set_active_profile(name)
+        self._refresh_profile_combo()
+        self._show_dialog_toast(t("settings.profile_loaded").format(name=name))
+
+    def _save_profile_as(self) -> None:
+        """Prompt for a name and save the current config as a new profile.
+
+        If the name already exists, ask before overwriting. Profiles are
+        stable snapshots, so updating one is an explicit action (the dialog
+        no longer auto-overwrites the active profile on Save).
+        """
+        name, ok = QInputDialog.getText(
+            self, t("settings.profile_save_new_title"),
+            t("settings.profile_save_new_prompt"),
+        )
+        name = name.strip()
+        if not ok or not name:
+            return
+        if name in list_profiles():
+            reply = QMessageBox.question(
+                self, t("settings.profile_overwrite_confirm_title"),
+                t("settings.profile_overwrite_confirm_text").format(name=name),
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+            )
+            if reply != QMessageBox.Yes:
+                return
+        try:
+            save_profile(name, self.config)
+        except ValueError:
+            self._show_dialog_toast(t("settings.profile_name_invalid"))
+            return
+        except OSError as e:
+            self._show_dialog_toast(t("settings.config_write_failed").format(error=e))
+            return
+        set_active_profile(name)
+        self._refresh_profile_combo()
+        self._show_dialog_toast(t("settings.profile_saved").format(name=name))
+
+    def _delete_profile(self) -> None:
+        """Delete the currently selected profile (with confirmation)."""
+        name = self.profile_combo.currentText().strip()
+        if not name:
+            return
+        reply = QMessageBox.question(
+            self, t("settings.profile_delete_confirm_title"),
+            t("settings.profile_delete_confirm_text").format(name=name),
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        try:
+            delete_profile(name)
+        except ValueError:
+            self._show_dialog_toast(t("settings.profile_name_invalid"))
+            return
+        self._refresh_profile_combo()
+        self._show_dialog_toast(t("settings.profile_deleted").format(name=name))
 
     def _add_glossary_row(self, source: str = "", replacement: str = ""):
         row = self.glossary_table.rowCount()
@@ -685,10 +1277,52 @@ class SettingsDialog(QDialog):
         self.hotkey_recorder.set_hotkey(hotkey)
         self.hotkey_recorder.stop_recording()
 
+    # ---- theme switching -------------------------------------------------
+
+    def _on_theme_mode_changed(self):
+        """Live-apply the newly selected theme mode for instant preview.
+
+        Switches the global active palette, re-skins this dialog, and emits
+        ``theme_changed`` so Application can refresh the floating window and
+        tray. Cancel (see :meth:`reject`) restores the mode saved at open.
+        """
+        mode = self.theme_combo.currentData()
+        apply_theme_mode(mode)
+        self._refresh_dialog_theme()
+        self.theme_changed.emit(mode)
+
+    def _refresh_dialog_theme(self):
+        """Re-apply the active palette to this dialog (QSS + vector icons).
+
+        Called after a theme switch so an already-visible dialog re-skins
+        without being recreated. The QSS handles all styled widgets; the
+        per-palette vector icons (refresh buttons, password toggles, window
+        icon) need explicit re-setting because QIcon is copied by value.
+        """
+        apply_dialog_theme(self)
+        self._refresh_themed_icons()
+        # Window icon is cached globally; clear it so the next _get_settings_icon
+        # rebuilds with the new accent.
+        global _SETTINGS_ICON
+        _SETTINGS_ICON = None
+        self.setWindowIcon(_get_settings_icon())
+        # Force the dialog background to repaint with the new palette.
+        self.update()
+
     def _on_denoise_toggled(self, enabled: bool):
         """Enable/disable the strength selector to match the checkbox."""
         self.denoise_strength_combo.setEnabled(enabled)
         self.denoise_hint_label.setEnabled(enabled)
+
+    def _on_streaming_toggled(self, enabled: bool):
+        """Hide the ASR model refresh button when streaming is enabled.
+
+        Streaming uses a WebSocket endpoint, not the REST ``/models`` API,
+        so fetching the model list is not applicable in streaming mode.
+        """
+        btn = self._refresh_buttons.get("asr")
+        if btn is not None:
+            btn.setVisible(not enabled)
 
     def _update_microphone_device_label(self):
         # sd.query_devices(kind="input") enumerates PortAudio devices, which
@@ -766,9 +1400,18 @@ class SettingsDialog(QDialog):
         minimum height to its heightForWidth value forces the layout to
         allocate the full wrapped height.
         """
+        # The adjust is deferred via QTimer.singleShot(0, ...); if the dialog
+        # was torn down (C++ deleted) before the timer fires - e.g. a test
+        # closing the dialog right after the mic-label signal lands - the
+        # Python wrapper is still alive but the underlying QLabel is gone.
+        # Bail out rather than crash on lbl.width().
+        from shiboken6 import isValid
+        if not isValid(self):
+            self._wrap_adjust_pending = False
+            return
         self._wrap_adjust_pending = False
         for lbl in self._wrap_labels:
-            if lbl.width() <= 0:
+            if not isValid(lbl) or lbl.width() <= 0:
                 continue
             # Reset first so the label can shrink back down when the dialog
             # widens and the text no longer wraps.
@@ -795,6 +1438,8 @@ class SettingsDialog(QDialog):
     def reject(self):
         self._stop_microphone_monitor()
         self.hotkey_recorder.stop_recording()
+        # Restore all live-preview settings to their dialog-open state
+        self._restore_preview_state(self._initial_snapshot)
         super().reject()
 
     def accept(self):

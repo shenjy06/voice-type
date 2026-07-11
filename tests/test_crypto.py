@@ -49,3 +49,37 @@ class TestCryptoHelpers:
         assert out.startswith("v0:")
         encoded = out[len("v0:"):]
         assert base64.b64decode(encoded).decode("utf-8") == secret
+
+
+class TestPasswordEncryption:
+    """Password-based (Fernet) encryption for exported config files."""
+
+    def test_encrypt_decrypt_round_trip(self):
+        secret = "sk-secret-key-12345"
+        envelope = crypto.encrypt_with_password(secret, "p@ssword")
+        assert crypto.is_encrypted_envelope(envelope)
+        assert envelope["kdf"] == "pbkdf2-sha256"
+        assert crypto.decrypt_with_password(envelope, "p@ssword") == secret
+
+    def test_wrong_password_returns_none(self):
+        envelope = crypto.encrypt_with_password("secret", "right")
+        assert crypto.decrypt_with_password(envelope, "wrong") is None
+
+    def test_empty_password_round_trip(self):
+        envelope = crypto.encrypt_with_password("secret", "")
+        assert crypto.decrypt_with_password(envelope, "") == "secret"
+
+    def test_tampered_ciphertext_returns_none(self):
+        envelope = crypto.encrypt_with_password("secret", "pw")
+        envelope = dict(envelope)
+        envelope["ciphertext"] = base64.b64encode(b"garbage").decode("ascii")
+        assert crypto.decrypt_with_password(envelope, "pw") is None
+
+    def test_is_encrypted_envelope_rejects_plaintext(self):
+        assert not crypto.is_encrypted_envelope({"polish": {}})
+        assert not crypto.is_encrypted_envelope("not a dict")
+        assert crypto.is_encrypted_envelope({"format": crypto.ENC_FORMAT})
+
+    def test_pbkdf2_iterations_meets_owasp_minimum(self):
+        # OWASP (2023+) recommends >= 600k iterations for PBKDF2-HMAC-SHA256.
+        assert crypto.PBKDF2_ITERATIONS >= 600_000

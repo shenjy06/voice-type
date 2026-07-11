@@ -57,7 +57,6 @@ Rules for context-aware polishing:
 7. If no context is provided, polish the text standalone as usual."""
 
 # Fixed wrapper fragments for context-aware mode — concatenated literally.
-_CONTEXT_USER_PREFIX = ""
 _CONTEXT_USER_INNER_PREFIX = """<new_text>
 """
 _CONTEXT_USER_INNER_SUFFIX = """
@@ -71,7 +70,7 @@ Remember: output ONLY the polished version of the text between <new_text> tags. 
 @lru_cache(maxsize=8)  # 4 styles × 2 context-booleans
 def _build_system_prompt(style: str, has_context: bool = False) -> str:
     override = STYLE_OVERRIDES.get(style, STYLE_OVERRIDES["default"])
-    prompt = f"{_BASE_PROMPT}"
+    prompt = _BASE_PROMPT
     if has_context:
         prompt += _CONTEXT_PROMPT
     prompt += f"\n\n## Style\n{override}"
@@ -79,6 +78,13 @@ def _build_system_prompt(style: str, has_context: bool = False) -> str:
 
 
 class TextPolisher:
+    """Refines ASR transcripts via an LLM chat-completions API.
+
+    Supports configurable styles (default, formal, casual, concise) and
+    optional cursor-context injection for context-aware polishing.  All
+    API calls are retried on transient errors via :func:`voicetype.retry.retry_call`.
+    """
+
     def __init__(self, config: AppConfig):
         self.config = config
         self._client = ApiClient(

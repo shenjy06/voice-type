@@ -42,3 +42,15 @@ DENOISE_STRENGTHS = (
     ("settings.denoise_strength_medium", DENOISE_STRENGTH_MEDIUM),
     ("settings.denoise_strength_high", DENOISE_STRENGTH_HIGH),
 )
+
+# UI theme modes
+THEME_MODE_DARK = "dark"
+THEME_MODE_LIGHT = "light"
+THEME_MODE_SYSTEM = "system"
+
+# (translation_key, mode_value) pairs for the theme selector
+THEME_MODES = (
+    ("settings.theme_dark", THEME_MODE_DARK),
+    ("settings.theme_light", THEME_MODE_LIGHT),
+    ("settings.theme_system", THEME_MODE_SYSTEM),
+)

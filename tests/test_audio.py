@@ -1,5 +1,7 @@
 """Tests for voice_type.audio — AudioRecorder."""
 
+import struct
+
 import numpy as np
 import pytest
 from pathlib import Path
@@ -259,30 +261,227 @@ class TestAudioRecorderCleanup:
         recorder.cleanup()
 
 
-class TestAudioRecorderCancel:
-    def test_cancel_stops_and_deletes(self, mocker):
-        """cancel() stops recording and deletes the audio file."""
-        mock_stream = mocker.MagicMock()
-        mocker.patch("voicetype.audio.sd", InputStream=mocker.MagicMock(return_value=mock_stream))
+class TestAudioRecorderTakeAudioPath:
+    def test_returns_temp_file_and_clears_reference(self, mocker):
+        """take_audio_path() returns _temp_file and clears the reference."""
         mock_path = mocker.MagicMock()
-        mock_path.exists.return_value = True
-
         recorder = AudioRecorder()
-        recorder.start()
         recorder._temp_file = mock_path
-        recorder.cancel()
 
-        assert recorder.is_recording is False
-        mock_path.unlink.assert_called_once()
+        result = recorder.take_audio_path()
+
+        assert result is mock_path
         assert recorder._temp_file is None
 
-    def test_cancel_without_recording(self, mocker):
-        """cancel() when not recording just clears state."""
+    def test_returns_none_when_no_file(self):
+        """take_audio_path() returns None when no temp file is set."""
         recorder = AudioRecorder()
         recorder._temp_file = None
-        recorder.cancel()
 
-        assert recorder._temp_file is None
+        assert recorder.take_audio_path() is None
+
+    def test_prevents_subsequent_cleanup_deletion(self, mocker):
+        """After take_audio_path(), cleanup() must not delete the file."""
+        mock_path = mocker.MagicMock()
+        recorder = AudioRecorder()
+        recorder._temp_file = mock_path
+
+        recorder.take_audio_path()
+        recorder.cleanup()
+
+        mock_path.unlink.assert_not_called()
+
+
+class TestAudioRecorderVAD:
+    """Voice Activity Detection — auto-stop on sustained silence."""
+
+    def test_disabled_never_triggers(self):
+        """VAD off → _update_vad always returns False."""
+        recorder = AudioRecorder()
+        recorder.on_silence = lambda: None
+        assert recorder._update_vad(0.5) is False
+        assert recorder._update_vad(0.0) is False
+
+    def test_no_silence_callback_no_trigger(self):
+        """on_silence None → VAD never triggers even when enabled."""
+        recorder = AudioRecorder(vad_enabled=True)
+        assert recorder._update_vad(0.5) is False
+        assert recorder._update_vad(0.0) is False
+
+    def test_silence_before_speech_does_not_trigger(self, mocker):
+        """Silence before first speech is ignored — no early stop."""
+        mocker.patch("voicetype.audio.time.monotonic", return_value=0.0)
+        recorder = AudioRecorder(vad_enabled=True, vad_silence_duration_ms=1000)
+        recorder.on_silence = lambda: None
+        assert recorder._update_vad(0.0) is False
+        assert recorder._vad_speech_detected is False
+
+    def test_speech_then_silence_below_duration_no_trigger(self, mocker):
+        """Silence shorter than the threshold does not trigger."""
+        t = mocker.patch("voicetype.audio.time.monotonic")
+        t.return_value = 0.0
+        recorder = AudioRecorder(vad_enabled=True, vad_silence_duration_ms=1500)
+        recorder.on_silence = lambda: None
+        assert recorder._update_vad(0.5) is False  # speech
+        t.return_value = 1.0
+        assert recorder._update_vad(0.0) is False  # silence begins
+        t.return_value = 2.0  # elapsed = 1000ms < 1500ms
+        assert recorder._update_vad(0.0) is False
+
+    def test_speech_then_silence_above_duration_triggers(self, mocker):
+        """Silence past the duration triggers exactly once."""
+        t = mocker.patch("voicetype.audio.time.monotonic")
+        t.return_value = 0.0
+        recorder = AudioRecorder(vad_enabled=True, vad_silence_duration_ms=1000)
+        recorder.on_silence = lambda: None
+        assert recorder._update_vad(0.5) is False  # speech
+        t.return_value = 1.0
+        assert recorder._update_vad(0.0) is False  # silence begins
+        t.return_value = 2.5  # elapsed = 1500ms >= 1000ms
+        assert recorder._update_vad(0.0) is True
+
+    def test_trigger_latches_no_repeat(self, mocker):
+        """After triggering, subsequent callbacks don't fire again."""
+        t = mocker.patch("voicetype.audio.time.monotonic")
+        t.return_value = 0.0
+        recorder = AudioRecorder(vad_enabled=True, vad_silence_duration_ms=1000)
+        recorder.on_silence = lambda: None
+        recorder._update_vad(0.5)  # speech
+        t.return_value = 1.0
+        recorder._update_vad(0.0)  # silence begins
+        t.return_value = 2.5
+        assert recorder._update_vad(0.0) is True  # trigger
+        t.return_value = 5.0
+        assert recorder._update_vad(0.0) is False  # latched
+
+    def test_speech_resets_silence_timer_then_triggers(self, mocker):
+        """After speech resets the timer, a fresh silence window must elapse."""
+        t = mocker.patch("voicetype.audio.time.monotonic")
+        t.return_value = 0.0
+        recorder = AudioRecorder(vad_enabled=True, vad_silence_duration_ms=1000)
+        recorder.on_silence = lambda: None
+        recorder._update_vad(0.5)        # speech
+        t.return_value = 1.0
+        recorder._update_vad(0.0)        # silence begins at 1.0
+        t.return_value = 1.2
+        recorder._update_vad(0.5)        # speech interrupts — resets
+        t.return_value = 1.3
+        assert recorder._update_vad(0.0) is False  # new silence begins at 1.3
+        t.return_value = 2.0             # 700ms < 1000ms
+        assert recorder._update_vad(0.0) is False
+        t.return_value = 2.5             # 1200ms >= 1000ms
+        assert recorder._update_vad(0.0) is True
+
+    def test_start_resets_vad_state(self, mocker):
+        """start() clears speech-detected + trigger latch + silence timer."""
+        mock_stream = mocker.MagicMock()
+        mocker.patch("voicetype.audio.sd", InputStream=mocker.MagicMock(return_value=mock_stream))
+        t = mocker.patch("voicetype.audio.time.monotonic")
+        t.return_value = 0.0
+        recorder = AudioRecorder(vad_enabled=True, vad_silence_duration_ms=1000)
+        recorder.on_silence = lambda: None
+        recorder._update_vad(0.5)  # speech
+        t.return_value = 1.0
+        recorder._update_vad(0.0)  # silence begins
+        t.return_value = 2.5
+        recorder._update_vad(0.0)  # trigger
+        assert recorder._vad_triggered is True
+        recorder.start()
+        assert recorder._vad_triggered is False
+        assert recorder._vad_speech_detected is False
+        assert recorder._vad_silence_start is None
+
+    def test_callback_fires_on_silence_outside_lock(self, mocker):
+        """_callback invokes on_silence when VAD triggers."""
+        mock_time = mocker.patch("voicetype.audio.time.monotonic")
+        mock_time.return_value = 0.0
+        recorder = AudioRecorder(vad_enabled=True, vad_silence_duration_ms=1000)
+        fired = []
+        recorder.on_silence = lambda: fired.append(True)
+        recorder._recording = True
+        # Speech
+        recorder._callback(np.array([[0.5]], dtype=np.float32), 1, None, None)
+        # Silence begins
+        mock_time.return_value = 1.0
+        recorder._callback(np.array([[0.0]], dtype=np.float32), 1, None, None)
+        # Silence past duration — triggers callback
+        mock_time.return_value = 2.5
+        recorder._callback(np.array([[0.0]], dtype=np.float32), 1, None, None)
+        assert fired == [True]
+
+    def test_callback_swallows_callback_exception(self, mocker):
+        """A raising on_silence must not propagate out of _callback."""
+        mock_time = mocker.patch("voicetype.audio.time.monotonic")
+        mock_time.return_value = 0.0
+        recorder = AudioRecorder(vad_enabled=True, vad_silence_duration_ms=1000)
+
+        def _raise_error() -> None:
+            raise RuntimeError("boom")
+
+        recorder.on_silence = _raise_error
+        recorder._recording = True
+        recorder._callback(np.array([[0.5]], dtype=np.float32), 1, None, None)
+        mock_time.return_value = 1.0
+        recorder._callback(np.array([[0.0]], dtype=np.float32), 1, None, None)
+        mock_time.return_value = 2.5
+        # Must not raise.
+        recorder._callback(np.array([[0.0]], dtype=np.float32), 1, None, None)
+
+
+class TestAudioRecorderStreaming:
+    """Streaming mode — pipes PCM to an ASR client instead of buffering."""
+
+    def test_streaming_disabled_by_default(self):
+        recorder = AudioRecorder()
+        assert recorder.streaming_enabled is False
+        assert recorder.on_audio_chunk is None
+
+    def test_streaming_accepted(self):
+        recorder = AudioRecorder(streaming_enabled=True)
+        assert recorder.streaming_enabled is True
+
+    def test_callback_does_not_store_frames_when_streaming(self):
+        """In streaming mode, frames are not buffered (audio is piped live)."""
+        recorder = AudioRecorder(streaming_enabled=True)
+        recorder._recording = True
+        data = np.array([[0.1]], dtype=np.float32)
+        recorder._callback(data, 1, None, None)
+        assert len(recorder._frames) == 0
+
+    def test_callback_stores_frames_when_not_streaming(self):
+        """In non-streaming mode, frames are buffered as usual."""
+        recorder = AudioRecorder(streaming_enabled=False)
+        recorder._recording = True
+        data = np.array([[0.1]], dtype=np.float32)
+        recorder._callback(data, 1, None, None)
+        assert len(recorder._frames) == 1
+
+    def test_callback_invokes_on_audio_chunk_with_pcm(self):
+        """on_audio_chunk is called with 16-bit PCM bytes when streaming."""
+        recorder = AudioRecorder(streaming_enabled=True)
+        recorder._recording = True
+        chunks = []
+        recorder.on_audio_chunk = chunks.append
+        # float32 input [-1, 1], shape (4, 1)
+        data = np.array([[0.0], [0.5], [-0.5], [1.0]], dtype=np.float32)
+        recorder._callback(data, 4, None, None)
+        assert len(chunks) == 1
+        pcm = chunks[0]
+        # 4 samples * 2 bytes = 8 bytes
+        assert len(pcm) == 8
+        values = struct.unpack("<4h", pcm)
+        assert values[0] == 0
+        assert 16000 < values[1] < 17000  # 0.5 * 32767 ≈ 16383
+        assert -17000 < values[2] < -16000
+        assert values[3] == 32767
+
+    def test_callback_no_on_audio_chunk_when_not_streaming(self):
+        """on_audio_chunk is not invoked in non-streaming mode."""
+        recorder = AudioRecorder(streaming_enabled=False)
+        recorder._recording = True
+        recorder.on_audio_chunk = lambda _: pytest.fail("should not be called")
+        data = np.array([[0.1]], dtype=np.float32)
+        recorder._callback(data, 1, None, None)  # must not call on_audio_chunk
 
 
 class TestMicrophoneMonitor:

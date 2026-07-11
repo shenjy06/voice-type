@@ -3,7 +3,7 @@
 import logging
 
 from PySide6.QtCore import QObject, Signal
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QColor
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 from pynput import keyboard
 
@@ -11,6 +11,7 @@ from voicetype.constants import PASTE_MODES, ASR_LANGUAGES, POLISH_STYLES
 from voicetype.hotkey_parser import HotkeyBinding
 from voicetype.i18n import t
 from voicetype.ui.icon_utils import make_circle_icon
+from voicetype.ui.theme import get_palette
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ class TrayIcon(QObject):
     history_requested = Signal()
     settings_requested = Signal()
     recording_toggled = Signal()
+    retry_requested = Signal()
     auto_paste_toggled = Signal(bool)
     polish_toggled = Signal(bool)
     polish_style_changed = Signal(str)
@@ -41,14 +43,30 @@ class TrayIcon(QObject):
         self._init_menu()
 
     def _init_icon(self):
-        """Create a simple microphone-style tray icon."""
-        self._icon = make_circle_icon("T", (37, 99, 235))
-        # Pre-build the recording icon once and reuse it instead of
-        # reallocating/painting a QPixmap every recording start.
-        self._recording_icon = make_circle_icon("S", (220, 38, 38))
+        """Create the tray icons from the active palette and wire the tray."""
+        self._build_icons()
         self._tray = QSystemTrayIcon(self._icon)
         self._tray.setToolTip(t("tray.tooltip"))
         self._tray.activated.connect(self._on_activated)
+
+    def _build_icons(self) -> None:
+        """(Re)build the resting + recording tray icons from the active palette.
+
+        Called on construction and after a light/dark theme switch.
+        """
+        pal = get_palette()
+        accent_rgb = QColor(pal.accent).getRgb()[:3]
+        danger_rgb = QColor(pal.danger).getRgb()[:3]
+        self._icon = make_circle_icon("T", accent_rgb)
+        # Pre-build the recording icon once and reuse it instead of
+        # reallocating/painting a QPixmap every recording start.
+        self._recording_icon = make_circle_icon("S", danger_rgb)
+
+    def apply_theme(self) -> None:
+        """Rebuild tray icons for the active palette and refresh the tray."""
+        was_recording = self._is_recording
+        self._build_icons()
+        self._tray.setIcon(self._recording_icon if was_recording else self._icon)
 
     def _init_menu(self):
         menu = QMenu()
@@ -62,6 +80,13 @@ class TrayIcon(QObject):
         self.record_action = QAction(t("tray.start_recording"), menu)
         self.record_action.triggered.connect(self.recording_toggled.emit)
         menu.addAction(self.record_action)
+
+        self._retry_action = QAction(t("tray.retry"), menu)
+        # Enabled only when a previous processing cycle failed and its audio
+        # file has been retained for retry.
+        self._retry_action.setEnabled(False)
+        self._retry_action.triggered.connect(self.retry_requested.emit)
+        menu.addAction(self._retry_action)
 
         menu.addSeparator()
 
@@ -150,6 +175,10 @@ class TrayIcon(QObject):
     def show(self):
         self._tray.show()
 
+    def set_retry_available(self, available: bool):
+        """Enable/disable the 'Retry last' menu item."""
+        self._retry_action.setEnabled(available)
+
     def set_recording(self, recording: bool):
         """Update tray menu based on recording state."""
         self._is_recording = recording
@@ -168,6 +197,7 @@ class TrayIcon(QObject):
         self.record_action.setText(
             t("tray.stop_recording") if self._is_recording else t("tray.start_recording")
         )
+        self._retry_action.setText(t("tray.retry"))
         self.auto_paste_action.setText(t("tray.auto_paste"))
         self.polish_action.setText(t("tray.polish"))
         self.polish_style_menu.setTitle(t("tray.polish_style"))
@@ -264,7 +294,7 @@ class HotkeyManager(QObject):
                 # own thread (e.g. hotkey triggers quit from within the
                 # callback). In that case the thread will exit naturally
                 # when the callback returns; skip the join.
-                pass
+                logger.debug("Skipping listener join from callback thread")
             self._listener = None
         logger.info("Hotkey listener stopped")
         self._toggle_key_pressed = False

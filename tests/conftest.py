@@ -28,6 +28,8 @@ def tmp_config_path(tmp_path, monkeypatch):
     config_dir = tmp_path / ".voice-type"
     monkeypatch.setattr(config_mod, "CONFIG_DIR", config_dir)
     monkeypatch.setattr(config_mod, "CONFIG_FILE", config_dir / "config.json")
+    monkeypatch.setattr(config_mod, "PROFILES_DIR", config_dir / "profiles")
+    monkeypatch.setattr(config_mod, "ACTIVE_PROFILE_FILE", config_dir / "active_profile")
     return config_dir
 
 

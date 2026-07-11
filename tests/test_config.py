@@ -1,6 +1,10 @@
 """Tests for voice_type.config — dataclasses, serialization, migration, persistence."""
 
 import json
+from pathlib import Path
+
+import pytest
+
 from voicetype.config import (
     AppConfig,
     AsrConfig,
@@ -11,6 +15,14 @@ from voicetype.config import (
     HotkeyConfig,
     GlossaryEntry,
     DEFAULT_BASE_URL,
+    EncryptedConfigError,
+    InvalidPasswordError,
+    list_profiles,
+    save_profile,
+    load_profile,
+    delete_profile,
+    get_active_profile,
+    set_active_profile,
 )
 
 
@@ -55,6 +67,17 @@ class TestDefaultConfigs:
         cfg = WindowConfig()
         assert cfg.show_on_start is True
         assert cfg.always_on_top is True
+        # Default theme is dark (preserves the pre-theme-switch look for
+        # existing users; "light"/"system" are opt-in via Settings).
+        assert cfg.theme_mode == "dark"
+
+    def test_window_config_theme_mode_loads_from_dict(self):
+        """theme_mode round-trips through from_dict (forward/backward compat)."""
+        cfg = AppConfig.from_dict({"window": {"theme_mode": "light"}})
+        assert cfg.window.theme_mode == "light"
+        # An old config without theme_mode defaults to dark.
+        cfg_old = AppConfig.from_dict({"window": {"always_on_top": False}})
+        assert cfg_old.window.theme_mode == "dark"
 
 
 class TestAppConfigDefaults:
@@ -66,10 +89,6 @@ class TestAppConfigDefaults:
         assert cfg.recording.denoise_enabled is False
         assert cfg.output.auto_paste is True
         assert cfg.window.show_on_start is True
-
-    def test_api_property_returns_polish(self):
-        cfg = AppConfig()
-        assert cfg.api is cfg.polish
 
     def test_is_configured_returns_false_for_defaults(self):
         cfg = AppConfig()
@@ -330,3 +349,262 @@ class TestAppConfigLoadSave:
 class TestDefaultBaseUrl:
     def test_default_base_url_value(self):
         assert DEFAULT_BASE_URL == "https://api.openai.com/v1"
+
+
+class TestExportImport:
+    """export_to / import_from / update_from — config file portability."""
+
+    def _sample_config(self) -> AppConfig:
+        return AppConfig(
+            language="zh",
+            polish=PolishApiConfig(api_key="sk-polish", model="gpt-4o-mini", enabled=False),
+            asr=AsrConfig(api_key="sk-asr", model="whisper-1", language="en"),
+            recording=RecordingConfig(sample_rate=48000, denoise_enabled=True),
+            output=OutputConfig(paste_delay_ms=300, auto_paste=False),
+            glossary=[GlossaryEntry(source="派森", replacement="Python")],
+            window=WindowConfig(show_on_start=False),
+            hotkey=HotkeyConfig(toggle_enabled=False, toggle_hotkey="f9"),
+        )
+
+    def test_export_to_writes_valid_json(self, tmp_path):
+        cfg = self._sample_config()
+        out = tmp_path / "exported.json"
+        cfg.export_to(out)
+        assert out.exists()
+        with open(out, encoding="utf-8") as f:
+            data = json.load(f)
+        assert data["polish"]["api_key"] == "sk-polish"
+        assert data["asr"]["language"] == "en"
+        assert data["glossary"] == [{"source": "派森", "replacement": "Python"}]
+
+    def test_export_to_creates_parent_dirs(self, tmp_path):
+        cfg = AppConfig()
+        out = tmp_path / "nested" / "deep" / "config.json"
+        cfg.export_to(out)
+        assert out.exists()
+
+    def test_import_from_round_trips_export_to(self, tmp_path):
+        cfg = self._sample_config()
+        out = tmp_path / "exported.json"
+        cfg.export_to(out)
+        loaded = AppConfig.import_from(out)
+        assert loaded.language == "zh"
+        assert loaded.polish.api_key == "sk-polish"
+        assert loaded.polish.model == "gpt-4o-mini"
+        assert loaded.polish.enabled is False
+        assert loaded.asr.language == "en"
+        assert loaded.recording.sample_rate == 48000
+        assert loaded.recording.denoise_enabled is True
+        assert loaded.output.auto_paste is False
+        assert loaded.glossary == [GlossaryEntry(source="派森", replacement="Python")]
+        assert loaded.window.show_on_start is False
+        assert loaded.hotkey.toggle_hotkey == "f9"
+
+    def test_import_from_accepts_legacy_config(self, tmp_path):
+        """An exported file from an older version (no streaming field) loads."""
+        out = tmp_path / "legacy.json"
+        out.write_text(
+            json.dumps({"asr": {"model": "whisper-1"}, "polish": {}}),
+            encoding="utf-8",
+        )
+        cfg = AppConfig.import_from(out)
+        assert cfg.asr.model == "whisper-1"
+
+    def test_import_from_raises_on_malformed_json(self, tmp_path):
+        out = tmp_path / "bad.json"
+        out.write_text("{not valid json", encoding="utf-8")
+        with pytest.raises(json.JSONDecodeError):
+            AppConfig.import_from(out)
+
+    def test_import_from_raises_on_missing_file(self, tmp_path):
+        with pytest.raises(OSError):
+            AppConfig.import_from(tmp_path / "nonexistent.json")
+
+    def test_update_from_preserves_identity(self):
+        """update_from mutates the existing object rather than replacing it."""
+        original = AppConfig()
+        target = original  # capture the reference
+        other = self._sample_config()
+        original.update_from(other)
+        # Same object — external references still valid
+        assert target is original
+        # Fields copied
+        assert original.language == "zh"
+        assert original.polish.api_key == "sk-polish"
+        assert original.recording.sample_rate == 48000
+        assert original.hotkey.toggle_hotkey == "f9"
+
+    def test_update_from_does_not_share_mutable_subobjects(self):
+        """update_from copies field values; mutating source shouldn't leak back."""
+        original = AppConfig()
+        other = AppConfig(glossary=[GlossaryEntry(source="x", replacement="y")])
+        original.update_from(other)
+        # Mutate the source's glossary after the update
+        other.glossary.append(GlossaryEntry(source="z", replacement="w"))
+        assert len(original.glossary) == 1  # no aliasing
+
+
+class TestIsDefault:
+    """AppConfig.is_default() — used to warn before importing an empty config."""
+
+    def test_default_config_is_default(self):
+        assert AppConfig().is_default()
+
+    def test_with_asr_key_is_not_default(self):
+        cfg = AppConfig(asr=AsrConfig(api_key="sk-test"))
+        assert not cfg.is_default()
+
+    def test_with_polish_key_is_not_default(self):
+        cfg = AppConfig(polish=PolishApiConfig(api_key="sk-test"))
+        assert not cfg.is_default()
+
+    def test_with_changed_model_is_not_default(self):
+        cfg = AppConfig(asr=AsrConfig(model="custom-model"))
+        assert not cfg.is_default()
+
+    def test_with_glossary_is_not_default(self):
+        cfg = AppConfig(glossary=[GlossaryEntry(source="x", replacement="y")])
+        assert not cfg.is_default()
+
+    def test_with_denoise_enabled_is_not_default(self):
+        cfg = AppConfig(recording=RecordingConfig(denoise_enabled=True))
+        assert not cfg.is_default()
+
+
+class TestSummary:
+    """AppConfig.summary() — generates a human-readable preview for the import dialog."""
+
+    def test_summary_default_config(self):
+        s = AppConfig().summary()
+        assert "STT:" in s
+        assert "Polish:" in s
+        assert "Output:" in s
+        assert "Window:" in s
+        # No glossary line for empty glossary
+        assert "Glossary:" not in s
+
+    def test_summary_with_glossary(self):
+        cfg = AppConfig(glossary=[GlossaryEntry(source="x", replacement="y")])
+        s = cfg.summary()
+        assert "Glossary: 1 terms" in s
+
+    def test_summary_with_streaming(self):
+        cfg = AppConfig(asr=AsrConfig(streaming_enabled=True))
+        s = cfg.summary()
+        assert "+streaming" in s
+
+    def test_summary_with_vad_and_denoise(self):
+        cfg = AppConfig(
+            recording=RecordingConfig(denoise_enabled=True, denoise_strength="high",
+                                      vad_enabled=True, vad_silence_duration_ms=2000),
+        )
+        s = cfg.summary()
+        assert "denoise(high)" in s
+        assert "VAD(2000ms)" in s
+
+    def test_summary_disabled_polish(self):
+        cfg = AppConfig(polish=PolishApiConfig(enabled=False))
+        s = cfg.summary()
+        assert "disabled" in s
+
+    def test_summary_does_not_leak_api_keys(self):
+        cfg = AppConfig(
+            asr=AsrConfig(api_key="sk-secret"),
+            polish=PolishApiConfig(api_key="sk-secret2"),
+        )
+        s = cfg.summary()
+        assert "sk-secret" not in s
+        assert "sk-secret2" not in s
+
+
+class TestEncryptedExportImport:
+    """Password-encrypted config export/import round-trips."""
+
+    def test_encrypted_export_import_round_trip(self, tmp_path):
+        cfg = AppConfig(asr=AsrConfig(api_key="sk-enc", model="whisper-1"))
+        out = tmp_path / "enc.json"
+        cfg.export_to(out, password="s3cret")
+        # The on-disk file must not contain the plaintext key.
+        raw = out.read_text(encoding="utf-8")
+        assert "sk-enc" not in raw
+        # Wrong password fails.
+        with pytest.raises(InvalidPasswordError):
+            AppConfig.import_from(out, password="wrong")
+        # Correct password round-trips.
+        loaded = AppConfig.import_from(out, password="s3cret")
+        assert loaded.asr.api_key == "sk-enc"
+
+    def test_encrypted_import_without_password_raises(self, tmp_path):
+        cfg = AppConfig(asr=AsrConfig(api_key="sk-enc"))
+        out = tmp_path / "enc.json"
+        cfg.export_to(out, password="s3cret")
+        with pytest.raises(EncryptedConfigError):
+            AppConfig.import_from(out)
+
+    def test_plaintext_export_still_works(self, tmp_path):
+        cfg = AppConfig(asr=AsrConfig(api_key="sk-plain"))
+        out = tmp_path / "plain.json"
+        cfg.export_to(out)  # no password -> plaintext
+        loaded = AppConfig.import_from(out)
+        assert loaded.asr.api_key == "sk-plain"
+
+
+class TestProfiles:
+    """Named config profiles — save/list/load/delete + active tracking."""
+
+    def _sample(self) -> AppConfig:
+        return AppConfig(
+            language="zh",
+            asr=AsrConfig(api_key="sk-p", model="whisper-1", language="en"),
+            polish=PolishApiConfig(enabled=False),
+        )
+
+    def test_save_and_list_profiles(self):
+        save_profile("work", self._sample())
+        save_profile("personal", AppConfig())
+        assert list_profiles() == ["personal", "work"]
+
+    def test_load_profile_round_trip(self):
+        save_profile("work", self._sample())
+        loaded = load_profile("work")
+        assert loaded.language == "zh"
+        assert loaded.asr.api_key == "sk-p"
+        assert loaded.polish.enabled is False
+
+    def test_delete_profile(self):
+        save_profile("work", self._sample())
+        delete_profile("work")
+        assert list_profiles() == []
+
+    def test_active_profile_get_set(self):
+        assert get_active_profile() is None
+        set_active_profile("work")
+        assert get_active_profile() == "work"
+        set_active_profile(None)
+        assert get_active_profile() is None
+
+    def test_active_profile_cleared_on_delete(self):
+        save_profile("work", self._sample())
+        set_active_profile("work")
+        delete_profile("work")
+        # Deleting the active profile clears the active marker.
+        assert get_active_profile() != "work"
+
+    def test_profile_file_is_plaintext(self, tmp_path):
+        save_profile("work", self._sample())
+        from voicetype import config as config_mod
+        raw = (config_mod.PROFILES_DIR / "work.json").read_text(encoding="utf-8")
+        assert "sk-p" in raw
+
+class TestProfileNameValidation:
+    """Profile names must not allow path traversal."""
+
+    @pytest.mark.parametrize("bad", ["", "..", ".", "a/b", "a\\b", " work ", "../config"])
+    def test_invalid_names_rejected(self, bad):
+        with pytest.raises(ValueError):
+            save_profile(bad, AppConfig())
+
+    @pytest.mark.parametrize("good", ["work", "个人", "work 2", "a.b", "profile_1"])
+    def test_valid_names_accepted(self, good):
+        save_profile(good, AppConfig())
+        assert good in list_profiles()

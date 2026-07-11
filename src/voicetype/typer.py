@@ -57,13 +57,29 @@ class TextTyper:
         time.sleep(self.config.output.paste_delay_ms / 1000.0)
 
         # Preserve the user's previous clipboard content so we can restore it.
+        # Save first (read-only, minimal risk), then copy (destructive). If the
+        # copy fails we try to restore the original immediately, otherwise the
+        # clipboard could be left in an undefined state (cleared but not set).
         try:
             with self._clipboard_lock:
                 original_clipboard = pyperclip.paste()
+        except Exception as e:
+            logger.warning("Failed to read clipboard: %s", e, exc_info=True)
+            original_clipboard = None
+
+        try:
+            with self._clipboard_lock:
                 pyperclip.copy(text)
         except Exception as e:
-            logger.warning("Clipboard operation failed: %s", e, exc_info=True)
-            original_clipboard = None
+            logger.warning("Clipboard copy failed: %s", e, exc_info=True)
+            # The clipboard may have been cleared before the copy failed.
+            # Try to restore the original immediately.
+            if original_clipboard is not None and original_clipboard != text:
+                try:
+                    pyperclip.copy(original_clipboard)
+                except Exception:
+                    pass
+            return False
 
         paste_mode = self.config.output.paste_mode
         if paste_mode == PASTE_MODE_CLIPBOARD:
