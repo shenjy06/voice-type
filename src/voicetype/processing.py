@@ -95,6 +95,8 @@ class ProcessingWorker(QObject):
         recorder,
         context_before: str = "",
         context_after: str = "",
+        audio_path: str | None = None,
+        streaming_transcriber=None,
     ):
         super().__init__()
         self.config = config
@@ -103,42 +105,56 @@ class ProcessingWorker(QObject):
         # polishing. Empty strings fall back to standalone polishing.
         self.context_before = context_before
         self.context_after = context_after
+        # When set, the worker reuses this existing audio file (retained from
+        # a previous failed run) instead of calling recorder.save(). Used by
+        # retry; in that case ``recorder`` is not touched.
+        self._reused_audio_path = audio_path
+        # When set, the worker is in streaming mode — audio was piped to
+        # this transcriber during recording; finalize() collects the text.
+        # Mutually exclusive with the other two modes.
+        self._streaming_transcriber = streaming_transcriber
 
     def run(self):
         audio_path = None
         pipeline_start = time.monotonic()
         try:
             self.started.emit()
-            # Encode the captured frames to a temp WAV file on this thread so
-            # the (potentially slow) Vorbis encoding never blocks the UI.
-            save_start = time.monotonic()
-            audio_path = str(self.recorder.save())
-            self.recorder = None  # release reference; buffer freed in save()
-            logger.debug("Processing pipeline started: %s", os.path.basename(audio_path))
-            logger.info("Audio saved in %.0fms", (time.monotonic() - save_start) * 1000)
-            transcriber = get_transcriber(self.config)
-            transcript = transcriber.transcribe(audio_path)
-
-            # Transcription is done — the temp WAV file is no longer
-            # needed. Delete it now so our recording doesn't sit on
-            # disk during the (potentially slow) polish phase. The
-            # ``finally`` block below is a safety net for error paths
-            # that never reach this point.
-            try:
-                os.remove(audio_path)
-                audio_path = None
-            except OSError:
-                pass
+            if self._streaming_transcriber is not None:
+                # Streaming mode: audio was piped to the ASR client during
+                # recording; finalize to collect the accumulated transcript.
+                # No file is saved in this mode.
+                transcript = self._streaming_transcriber.finalize()
+                logger.info("Streaming transcript finalized in %.1fs: %d chars",
+                            time.monotonic() - pipeline_start, len(transcript))
+            elif self._reused_audio_path is not None:
+                # Retry: reuse the audio file retained from a previous failed
+                # run instead of re-encoding from the recorder.
+                audio_path = self._reused_audio_path
+                logger.debug("Retrying with retained audio: %s", os.path.basename(audio_path))
+                transcriber = get_transcriber(self.config)
+                transcript = transcriber.transcribe(audio_path)
+            else:
+                # Encode the captured frames to a temp WAV file on this thread
+                # so the (potentially slow) encoding never blocks the UI.
+                save_start = time.monotonic()
+                audio_path = str(self.recorder.save())
+                self.recorder = None  # release reference; buffer freed in save()
+                logger.debug("Processing pipeline started: %s", os.path.basename(audio_path))
+                logger.info("Audio saved in %.0fms", (time.monotonic() - save_start) * 1000)
+                transcriber = get_transcriber(self.config)
+                transcript = transcriber.transcribe(audio_path)
 
             if not transcript:
                 logger.info("Transcription returned empty — pipeline finished in %.1fs",
                             time.monotonic() - pipeline_start)
+                self._cleanup_audio(audio_path)
                 self.finished.emit("")
                 return
             transcript = apply_glossary(transcript, self.config.glossary)
             if not self.config.polish.enabled:
                 logger.info("Polishing disabled — emitting transcript directly (pipeline %.1fs)",
                             time.monotonic() - pipeline_start)
+                self._cleanup_audio(audio_path)
                 self.finished.emit(transcript)
                 return
             polisher = get_polisher(self.config)
@@ -148,15 +164,27 @@ class ProcessingWorker(QObject):
                 context_after=self.context_after,
             )
             logger.info("Processing pipeline finished in %.1fs", time.monotonic() - pipeline_start)
+            self._cleanup_audio(audio_path)
             self.finished.emit(refined)
         except Exception as e:
             logger.error("Processing pipeline failed: %s", e, exc_info=True)
+            # Retain audio_path on failure so the caller can retry without
+            # re-recording. The file is NOT deleted here — the caller owns
+            # cleanup via the retry-state lifecycle (abandon on new recording
+            # / quit; delete on retry success).
             self.error.emit(str(e))
-        finally:
-            # Delete the temporary audio file regardless of success or failure
-            # so failed runs never leak WAV files in the temp directory.
-            if audio_path is not None:
-                try:
-                    os.remove(audio_path)
-                except OSError:
-                    pass
+
+    @staticmethod
+    def _cleanup_audio(audio_path: str | None) -> None:
+        """Delete the temp audio file once the pipeline has succeeded.
+
+        Called only on success paths (empty transcript, polish disabled, or
+        full success) — never on the exception path, where the file is kept
+        for retry.
+        """
+        if audio_path is None:
+            return
+        try:
+            os.remove(audio_path)
+        except OSError:
+            pass

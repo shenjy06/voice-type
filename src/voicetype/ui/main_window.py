@@ -1,4 +1,4 @@
-"""Floating recording window — compact widget with record button."""
+"""Floating recording window - compact widget with record button."""
 
 import collections
 import logging
@@ -11,17 +11,9 @@ from PySide6.QtCore import Qt, QTimer, Signal, QPropertyAnimation, QEasingCurve,
 from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QCursor, QCloseEvent
 from voicetype.state import RecorderState
 from voicetype.i18n import t
+from voicetype.ui.theme import get_palette, gear_icon, close_icon
 
-# Shared color constants
-_COLOR_BG = QColor(31, 41, 55)
-_COLOR_BORDER_WINDOW = QColor(55, 65, 81)
-_COLOR_BORDER_BUBBLE = QColor(75, 85, 99)
-_COLOR_TEXT = QColor(229, 231, 235)
-_COLOR_DOT = QColor(239, 68, 68)
-_COLOR_WAVE_ACTIVE = QColor(34, 197, 94)
-_COLOR_WAVE_IDLE = QColor(75, 85, 99)
-
-# Default font family — fall back to a platform-appropriate list if unavailable
+# Default font family - fall back to a platform-appropriate list if unavailable
 _DEFAULT_FONT_FAMILIES = ("Segoe UI", "Microsoft YaHei", "Helvetica", "Arial")
 
 logger = logging.getLogger(__name__)
@@ -39,21 +31,31 @@ def _default_font(size: int) -> QFont:
     return QFont("", size)
 
 
-# Button style descriptors keyed by RecorderState
-_BUTTON_STYLES = {
-    RecorderState.RECORDING: (
-        "QPushButton { background: #dc2626; color: white; "
-        "border: none; border-radius: 8px; font-size: 14px; font-weight: bold; }"
-        "QPushButton:hover { background: #ef4444; }"
-        "QPushButton:pressed { background: #b91c1c; }"
-    ),
-    RecorderState.PROCESSING: (
-        "QPushButton { background: #d97706; color: white; "
-        "border: none; border-radius: 8px; font-size: 14px; font-weight: bold; }"
-        "QPushButton:hover { background: #f59e0b; }"
-        "QPushButton:pressed { background: #b45309; }"
-    ),
-}
+# Record button style per state. The button cycles indigo (idle CTA) ->
+# red (recording = stop) -> amber (processing = busy), matching the semantic
+# state colors used everywhere else in the app. Reads the active palette so a
+# theme switch takes effect on the next _update_record_button() call.
+def _button_style(state: RecorderState, p) -> str | None:
+    """Return the record-button stylesheet for *state*, or None for idle.
+
+    Idle falls back to the accent stylesheet applied by _update_record_button.
+    """
+    if state == RecorderState.RECORDING:
+        return (
+            f"QPushButton {{ background: {p.danger}; color: white; "
+            f"border: none; border-radius: 8px; font-size: 14px; font-weight: 600; }}"
+            f"QPushButton:hover {{ background: {p.danger_hover}; }}"
+            f"QPushButton:pressed {{ background: {p.danger}; opacity: 0.8; }}"
+        )
+    if state == RecorderState.PROCESSING:
+        return (
+            f"QPushButton {{ background: {p.warning}; color: white; "
+            f"border: none; border-radius: 8px; font-size: 14px; font-weight: 600; }}"
+            f"QPushButton:hover {{ background: {p.warning_hover}; }}"
+            f"QPushButton:pressed {{ background: {p.warning_pressed}; }}"
+        )
+    return None
+
 
 _BUTTON_TEXT_KEYS = {
     RecorderState.RECORDING: "btn.recording",
@@ -108,7 +110,7 @@ class PulsingDot(QWidget):
             return
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        color = QColor(_COLOR_DOT)
+        color = QColor(get_palette().danger)
         color.setAlphaF(self._opacity)
         painter.setBrush(color)
         painter.setPen(Qt.NoPen)
@@ -125,14 +127,15 @@ class MicrophoneIcon(QWidget):
         self.setFixedSize(self._SIZE, self._SIZE)
 
     def paintEvent(self, event):
+        p = get_palette()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(96, 165, 250))
+        painter.setBrush(QColor(p.accent))
         painter.drawRoundedRect(5, 1, 6, 9, 3, 3)
 
         painter.setBrush(Qt.NoBrush)
-        painter.setPen(QColor(147, 197, 253))
+        painter.setPen(QColor(p.accent_hover))
         painter.drawArc(3, 5, 10, 7, 180 * 16, 180 * 16)
         painter.drawLine(8, 12, 8, 14)
         painter.drawLine(5, 14, 11, 14)
@@ -157,7 +160,7 @@ class AudioLevelWaveform(QWidget):
 
     def add_level(self, level: float):
         level = max(0.0, min(1.0, float(level)))
-        # Skip repaint when level is unchanged — avoids unconditional
+        # Skip repaint when level is unchanged - avoids unconditional
         # QPainter redraw of all 18 bars on every 100ms tick.
         if level == self._levels[-1]:
             self._levels.append(level)
@@ -171,6 +174,12 @@ class AudioLevelWaveform(QWidget):
         if not self._levels:
             return
 
+        p = get_palette()
+        active = QColor(p.success)
+        # border_hover is visible in both themes (plain border is too pale on
+        # white in light mode); low alpha keeps idle bars subtle.
+        idle = QColor(p.border_hover)
+
         gap = 3
         width = self.width()
         height = self.height()
@@ -180,7 +189,7 @@ class AudioLevelWaveform(QWidget):
             bar_h = self._MIN_BAR_HEIGHT + level * (height - self._MIN_BAR_HEIGHT)
             x = int(index * (bar_w + gap))
             y = int((height - bar_h) / 2)
-            color = QColor(_COLOR_WAVE_ACTIVE if level > 0.02 else _COLOR_WAVE_IDLE)
+            color = QColor(active if level > 0.02 else idle)
             color.setAlphaF(0.35 + min(0.65, level))
             painter.setBrush(color)
             painter.setPen(Qt.NoPen)
@@ -211,8 +220,8 @@ class FloatingRecordingWindow(QWidget):
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_QuitOnClose, False)
-        self.setMinimumSize(260, 152)
-        self.resize(260, 152)
+        self.setMinimumSize(260, 156)
+        self.resize(260, 156)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 12, 16, 16)
@@ -225,33 +234,27 @@ class FloatingRecordingWindow(QWidget):
         self.app_icon = MicrophoneIcon(self)
         top_row.addWidget(self.app_icon)
         self.app_name_label = QLabel(t("app.name"))
-        self.app_name_label.setStyleSheet("color: #e5e7eb; font-size: 12px; font-weight: 700;")
         top_row.addWidget(self.app_name_label)
         top_row.addStretch()
 
-        # Settings button
-        settings_btn = QPushButton("⚙")
-        settings_btn.setFixedSize(22, 22)
-        settings_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        settings_btn.setStyleSheet(
-            "QPushButton { background: transparent; color: #9ca3af; "
-            "border: none; font-size: 13px; border-radius: 4px; }"
-            "QPushButton:hover { background: rgba(255,255,255,0.1); color: #e5e7eb; }"
-        )
-        settings_btn.clicked.connect(self.settings_requested.emit)
-        top_row.addWidget(settings_btn)
+        # Settings button - vector gear icon. Emoji glyphs (⚙) are
+        # font-dependent and render inconsistently across platforms, so we
+        # use the themed vector icon from theme.py (no-emoji-icons rule).
+        self._settings_btn = QPushButton()
+        self._settings_btn.setIcon(gear_icon())
+        self._settings_btn.setFixedSize(26, 26)
+        self._settings_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self._settings_btn.clicked.connect(self.settings_requested.emit)
+        top_row.addWidget(self._settings_btn)
 
-        # Quit button
-        quit_btn = QPushButton("✕")
-        quit_btn.setFixedSize(22, 22)
-        quit_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        quit_btn.setStyleSheet(
-            "QPushButton { background: transparent; color: #9ca3af; "
-            "border: none; font-size: 13px; border-radius: 4px; }"
-            "QPushButton:hover { background: rgba(239,68,68,0.3); color: #f87171; }"
-        )
-        quit_btn.clicked.connect(self.hide_requested.emit)
-        top_row.addWidget(quit_btn)
+        # Quit (hide) button - vector close icon; a red tint on hover
+        # signals the dismiss intent without changing the icon glyph.
+        self._quit_btn = QPushButton()
+        self._quit_btn.setIcon(close_icon())
+        self._quit_btn.setFixedSize(26, 26)
+        self._quit_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self._quit_btn.clicked.connect(self.hide_requested.emit)
+        top_row.addWidget(self._quit_btn)
 
         layout.addLayout(top_row)
 
@@ -260,7 +263,6 @@ class FloatingRecordingWindow(QWidget):
         self.dot = PulsingDot(self)
         self.duration_label = QLabel("00:00")
         self.duration_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.duration_label.setStyleSheet("color: #9ca3af; font-size: 12px;")
         status_row.addWidget(self.dot)
         status_row.addStretch()
         status_row.addWidget(self.duration_label)
@@ -277,8 +279,32 @@ class FloatingRecordingWindow(QWidget):
         self.record_btn.clicked.connect(self._toggle_recording)
         layout.addWidget(self.record_btn)
 
+        # Apply the initial palette-derived stylesheets now that all widgets
+        # exist (also used by apply_theme() on a theme switch).
+        self.apply_theme()
+
+    def _settings_btn_stylesheet(self, p) -> str:
+        return (
+            f"QPushButton {{ background: transparent; border: none; border-radius: 6px; }}"
+            f"QPushButton:hover {{ background: {p.bg_hover}; }}"
+            f"QPushButton:pressed {{ background: {p.border}; }}"
+        )
+
+    def _quit_btn_stylesheet(self, p) -> str:
+        # Convert hex to RGB components for rgba
+        # Parse p.danger which is like "#ef4444"
+        r = int(p.danger[1:3], 16)
+        g = int(p.danger[3:5], 16)
+        b = int(p.danger[5:7], 16)
+        return (
+            f"QPushButton {{ background: transparent; border: none; border-radius: 6px; }}"
+            f"QPushButton:hover {{ background: rgba({r}, {g}, {b}, 0.18); }}"
+            f"QPushButton:pressed {{ background: rgba({r}, {g}, {b}, 0.30); }}"
+        )
+
     def _update_record_button(self):
-        style = _BUTTON_STYLES.get(self._state)
+        p = get_palette()
+        style = _button_style(self._state, p)
         text = t(_BUTTON_TEXT_KEYS.get(self._state, "btn.record"))
         enabled = self._state != RecorderState.PROCESSING
 
@@ -286,21 +312,45 @@ class FloatingRecordingWindow(QWidget):
             self.record_btn.setStyleSheet(style)
         else:
             self.record_btn.setStyleSheet(
-                "QPushButton { background: #2563eb; color: white; "
-                "border: none; border-radius: 8px; font-size: 14px; font-weight: bold; }"
-                "QPushButton:hover { background: #3b82f6; }"
-                "QPushButton:pressed { background: #1d4ed8; }"
+                f"QPushButton {{ background: {p.accent}; color: white; "
+                f"border: none; border-radius: 8px; font-size: 14px; font-weight: 600; }}"
+                f"QPushButton:hover {{ background: {p.accent_hover}; }}"
+                f"QPushButton:pressed {{ background: {p.accent_pressed}; }}"
             )
         self.record_btn.setText(text)
         self.record_btn.setEnabled(enabled)
 
+    def apply_theme(self) -> None:
+        """Re-apply the active palette to all inline stylesheets and repaint.
+
+        Called on construction and after a light/dark theme switch. QPainter
+        widgets (PulsingDot, waveform, MicrophoneIcon, the window, Toast,
+        StatusBubble) read :func:`get_palette` inside paintEvent, so a
+        ``self.update()`` repaint picks up the new colors; only the
+        stylesheet-driven widgets (labels, header buttons, record button)
+        need an explicit re-set here.
+        """
+        p = get_palette()
+        self.app_name_label.setStyleSheet(
+            f"color: {p.text_primary}; font-size: 12px; font-weight: 700;"
+        )
+        self.duration_label.setStyleSheet(
+            f"color: {p.text_secondary}; font-size: 12px;"
+        )
+        self._settings_btn.setStyleSheet(self._settings_btn_stylesheet(p))
+        self._settings_btn.setIcon(gear_icon())  # fresh icon for new palette
+        self._quit_btn.setStyleSheet(self._quit_btn_stylesheet(p))
+        self._quit_btn.setIcon(close_icon())
+        self._update_record_button()
+        self.update()
+
     def _set_state(self, new_state: RecorderState) -> None:
-        """Centralized state setter — updates the state and refreshes the button."""
+        """Centralized state setter - updates the state and refreshes the button."""
         self._state = new_state
         self._update_record_button()
 
     def _transition_to(self, new_state: RecorderState):
-        """Centralized state transition — updates button, indicators, and emits signals."""
+        """Centralized state transition - updates button, indicators, and emits signals."""
         old_state = self._state
         if old_state != new_state:
             logger.debug("State transition: %s -> %s", old_state.name, new_state.name)
@@ -327,8 +377,8 @@ class FloatingRecordingWindow(QWidget):
 
     def refresh_recording_indicators(self, level: float):
         """Update duration + waveform from the latest mic level.
-        
-        Called by Application's single audio-level sync timer — do not
+
+        Called by Application's single audio-level sync timer - do not
         call directly from UI code.
         """
         if self._state != RecorderState.RECORDING:
@@ -347,10 +397,11 @@ class FloatingRecordingWindow(QWidget):
             self._transition_to(RecorderState.RECORDING)
 
     def paintEvent(self, event):
+        p = get_palette()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.setBrush(_COLOR_BG)
-        painter.setPen(_COLOR_BORDER_WINDOW)
+        painter.setBrush(QColor(p.bg_card))
+        painter.setPen(QColor(p.border))
         painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 12, 12)
 
     def mousePressEvent(self, event):
@@ -383,8 +434,13 @@ class FloatingRecordingWindow(QWidget):
     def set_done(self):
         self._transition_to(RecorderState.DONE)
 
-    def set_error(self, msg: str = "Error"):
-        # The error message is optional UI context; state machine is what matters.
+    def set_error(self, msg: str = ""):
+        """Transition to ERROR state.
+
+        ``msg`` is reserved for future UI use (e.g. showing the error text
+        in a tooltip).  Currently only the state transition is needed.
+        """
+        _ = msg  # reserved, not yet displayed
         self._transition_to(RecorderState.ERROR)
 
     def closeEvent(self, event: QCloseEvent):
@@ -401,7 +457,7 @@ class FloatingRecordingWindow(QWidget):
 
     def set_audio_level(self, level: float):
         """Receive latest microphone level from the recorder (no-op).
-        
+
         Kept for backwards compatibility; the actual UI updates happen in
         ``refresh_recording_indicators`` which is driven by the Application
         timer and reads the level directly.
@@ -458,12 +514,13 @@ class StatusBubble(QWidget):
         self.hide()
 
     def paintEvent(self, event):
+        p = get_palette()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.setBrush(_COLOR_BG)
-        painter.setPen(_COLOR_BORDER_BUBBLE)
+        painter.setBrush(QColor(p.bg_card))
+        painter.setPen(QColor(p.border))
         painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 8, 8)
-        painter.setPen(_COLOR_TEXT)
+        painter.setPen(QColor(p.text_primary))
         painter.setFont(self._font)
         painter.drawText(self.rect(), Qt.AlignCenter, self._text)
 
@@ -529,11 +586,12 @@ class Toast(QWidget):
         self._fade_out = anim
 
     def paintEvent(self, event):
+        p = get_palette()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.setBrush(_COLOR_BG)
-        painter.setPen(_COLOR_BORDER_BUBBLE)
+        painter.setBrush(QColor(p.bg_card))
+        painter.setPen(QColor(p.border))
         painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 8, 8)
-        painter.setPen(_COLOR_TEXT)
+        painter.setPen(QColor(p.text_primary))
         painter.setFont(self._font)
         painter.drawText(self.rect(), Qt.AlignCenter, self._text)

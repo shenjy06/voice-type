@@ -39,7 +39,7 @@ The app follows a pipeline architecture with a central `Application` orchestrato
 | `src/voicetype/__main__.py` | `Application` class — wires all components together, manages Qt event loop, background processing thread, hotkey lifecycle |
 | `src/voicetype/api_client.py` | `ApiClient` — wraps OpenAI client creation with common defaults |
 | `src/voicetype/config.py` | Dataclass-based config with JSON persistence (`AppConfig`, `AsrConfig`, `PolishApiConfig`, `RecordingConfig`, `OutputConfig`, `GlossaryEntry`, `WindowConfig`) |
-| `src/voicetype/audio.py` | `AudioRecorder` — sounddevice-based async recording, saves to temp OGG via soundfile |
+| `src/voicetype/audio.py` | `AudioRecorder` — sounddevice-based async recording, saves to temp WAV via soundfile. Optional VAD auto-stop fires `on_silence` from the audio thread (marshaled to the UI thread via `_SilenceBridge` in `__main__.py`) |
 | `src/voicetype/denoise.py` | `denoise()` — numpy-only spectral-gate noise reduction applied before ASR (no scipy dependency) |
 | `src/voicetype/asr.py` | `Transcriber` — OpenAI SDK `audio.transcriptions.create()` for STT |
 | `src/voicetype/glossary.py` | `apply_glossary()` — user-defined term replacements applied after STT and before polishing |
@@ -58,7 +58,8 @@ The app follows a pipeline architecture with a central `Application` orchestrato
 |--------|---------------|
 | `src/voicetype/ui/main_window.py` | `FloatingRecordingWindow` — frameless, draggable, always-on-top window with pulsing dot animation and state machine. `Toast` — auto-dismissing notification |
 | `src/voicetype/ui/system_tray.py` | `TrayIcon` — system tray with context menu. `HotkeyManager` — pynput keyboard listener for global hotkeys |
-| `src/voicetype/ui/settings_dialog.py` | `SettingsDialog` — tabbed dialog (STT/Polish/Glossary/Output/Hotkeys) with config load/save |
+| `src/voicetype/ui/settings_dialog.py` | `SettingsDialog` — tabbed dialog (STT/Polish/Glossary/Output/Hotkeys) with config load/save, theme switching, live preview |
+| `src/voicetype/ui/theme.py` | Centralized theme: `Palette` dataclass with DARK/LIGHT variants, `settings_qss()` QSS stylesheet, `apply_dialog_theme()`, vector icons (gear/close/refresh/eye/chevron) |
 | `src/voicetype/ui/icon_utils.py` | `make_circle_icon()` — shared circular icon creation with centered text |
 
 ### Threading Model

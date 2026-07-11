@@ -183,7 +183,8 @@ class TestRecordingController:
         rc, d, _ = _make_controller()
         rc.cancel_during_processing("api timeout")
         d.bubble.dismiss.assert_called_once()
-        d.recorder.cleanup.assert_called_once()
+        # Audio file is NOT cleaned up on failure — retained for retry.
+        d.recorder.cleanup.assert_not_called()
         d.ui.set_error.assert_called_once_with("api timeout")
         d.ui.set_done.assert_called_once()
 

@@ -191,5 +191,5 @@ def denoise(audio: np.ndarray, sample_rate: int, strength: str = "medium") -> np
             return audio
         return result
     except Exception as e:
-        logger.warning("Denoise failed (%s) — using original audio", e)
+        logger.warning("Denoise failed (%s: %s) — using original audio", type(e).__name__, e)
         return np.asarray(audio, dtype=np.float32)

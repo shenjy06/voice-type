@@ -15,6 +15,14 @@ _AUTO_DETECT_PROMPT = "以下是普通话和English混合的句子。"
 
 
 class Transcriber:
+    """Speech-to-text via an OpenAI-compatible ``audio.transcriptions.create`` API.
+
+    Retries transient failures (connection drops, 429, 5xx) via
+    :func:`voicetype.retry.retry_call`.  The audio file is reopened per
+    attempt so a partially-read stream from a failed request does not
+    corrupt the retry.
+    """
+
     def __init__(self, config: AppConfig):
         self.config = config
         self._client = ApiClient(

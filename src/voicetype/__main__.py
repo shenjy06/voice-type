@@ -42,15 +42,28 @@ from voicetype.hotkey_parser import HotkeyBinding
 from voicetype.history import HistoryStore
 from voicetype.processing_controller import ProcessingController
 from voicetype.recording_controller import RecordingController
+from voicetype.streaming_asr import StreamingTranscriber
 from voicetype.typer import TextTyper
 from voicetype.ui.history_dialog import HistoryDialog
 from voicetype.ui.main_window import FloatingRecordingWindow, StatusBubble, Toast
 from voicetype.ui.settings_dialog import SettingsDialog
 from voicetype.ui.system_tray import HotkeyManager, TrayIcon
-from voicetype.window_manager import get_foreground_window
+from voicetype.ui.theme import apply_theme_mode
 from voicetype.i18n import init_language, t
+from voicetype.window_manager import get_foreground_window
 
 logger = logging.getLogger(__name__)
+
+
+class _SafeFormatMap(dict):
+    """A dict subclass that returns the key placeholder on missing lookups.
+
+    Used with ``str.format_map()`` so that a format-string with a missing
+    key doesn't crash with ``KeyError`` — the placeholder is left in the
+    output literally instead.
+    """
+    def __missing__(self, key):
+        return f"{{{key}}}"
 
 
 class _PasteBridge(QObject):
@@ -66,8 +79,39 @@ class _PasteBridge(QObject):
     paste_failed = Signal()
 
 
+class _SilenceBridge(QObject):
+    """Marshals the VAD silence event from the audio thread to the UI thread.
+
+    ``AudioRecorder.on_silence`` is invoked on sounddevice's audio callback
+    thread; emitting this signal from there delivers it queued to this
+    object's thread (the UI thread), where stopping the recording is safe.
+    Same pattern as :class:`_PasteBridge`.
+    """
+
+    silence_detected = Signal()
+
+
+class _StreamingTextBridge(QObject):
+    """Marshals streaming transcript text from the WebSocket recv thread to the UI thread.
+
+    ``StreamingTranscriber`` invokes ``on_text_update`` / ``on_error`` on its
+    background recv thread; emitting these signals delivers them queued to the
+    UI thread so we can update the status bubble safely.
+    """
+
+    text_updated = Signal(str)
+    stream_error = Signal(str)
+
+
 class Application:
-    """Top-level orchestrator. Delegates stateful work to controllers."""
+    """Top-level orchestrator — owns the Qt event loop, wires UI components to
+    controllers, and manages the lifecycle of audio recording, ASR/polish
+    processing, text output, hotkeys, and system tray integration.
+
+    Public attributes (also used by tests):
+        config, audio_recorder, window, tray, typer, history_store,
+        hotkey_manager
+    """
 
     def __init__(self):
         self.app = QApplication(sys.argv)
@@ -81,10 +125,19 @@ class Application:
 
         self.config = AppConfig.load()
         init_language(self.config.language)
+        # Apply the configured UI theme (dark/light/system) before any window
+        # or dialog is constructed so they pick up the right palette at build
+        # time. FloatingRecordingWindow/Toast/StatusBubble read the palette in
+        # paintEvent, so they re-skin on the next repaint after a switch.
+        apply_theme_mode(self.config.window.theme_mode)
         self.audio_recorder = AudioRecorder(
             self.config.recording.sample_rate,
             denoise_enabled=self.config.recording.denoise_enabled,
             denoise_strength=self.config.recording.denoise_strength,
+            vad_enabled=self.config.recording.vad_enabled,
+            vad_silence_duration_ms=self.config.recording.vad_silence_duration_ms,
+            vad_threshold=self.config.recording.vad_threshold,
+            streaming_enabled=self.config.asr.streaming_enabled,
         )
         self.typer = TextTyper(self.config)
         self.history_store = HistoryStore()
@@ -92,6 +145,12 @@ class Application:
         # Track paste threads so we can join them at quit, preventing
         # ctypes calls from daemon threads after Qt objects are destroyed.
         self._paste_threads: list[threading.Thread] = []
+        # Retry state: when a processing cycle fails, the audio file path +
+        # cursor context are retained here so the user can retry from the
+        # tray menu without re-recording. Cleared on new recording / retry
+        # success / quit.
+        self._retry_audio_path: str | None = None
+        self._retry_context: tuple[str, str] = ("", "")
         logger.info("Application initialized (configured=%s)", self.config.is_configured())
 
         # Audio-level sync timer — owned at Application level so it can be
@@ -108,6 +167,23 @@ class Application:
         # thread (created here so it lives on the UI/main thread).
         self._paste_bridge = _PasteBridge()
         self._paste_bridge.paste_failed.connect(self._on_paste_failed)
+
+        # Bridge for marshaling VAD silence detection from the audio thread to
+        # the UI thread. The recorder invokes ``on_silence`` on its callback
+        # thread; the signal is delivered queued here so we can stop the
+        # recording on the UI thread (same path as the user pressing stop).
+        self._silence_bridge = _SilenceBridge()
+        self._silence_bridge.silence_detected.connect(self._on_silence_detected)
+        self.audio_recorder.on_silence = self._silence_bridge.silence_detected.emit
+
+        # Bridge for marshaling streaming transcript text from the WebSocket
+        # recv thread to the UI thread (so the status bubble can update live).
+        self._streaming_bridge = _StreamingTextBridge()
+        self._streaming_bridge.text_updated.connect(self._on_streaming_text)
+        self._streaming_bridge.stream_error.connect(self._on_streaming_error)
+        # Active streaming transcriber for the current recording cycle, or
+        # None when streaming is disabled / not yet started / already finished.
+        self._streaming_transcriber: StreamingTranscriber | None = None
 
         self._init_ui()
         self._init_controllers()
@@ -131,7 +207,10 @@ class Application:
         from voicetype.processing import get_transcriber, get_polisher
 
         def _warmup():
-            if self.config.asr.api_key:
+            # Skip ASR warmup when the base URL is a WebSocket endpoint — the
+            # openai SDK's models.list() is a REST call that 404s on wss://.
+            asr_url = self.config.asr.base_url
+            if self.config.asr.api_key and not asr_url.startswith(("ws://", "wss://")):
                 try:
                     get_transcriber(self.config).warmup()
                 except Exception:
@@ -160,6 +239,7 @@ class Application:
         self.tray.history_requested.connect(self._show_history)
         self.tray.settings_requested.connect(self._show_settings)
         self.tray.recording_toggled.connect(self._toggle_recording)
+        self.tray.retry_requested.connect(self._retry_processing)
         self.tray.auto_paste_toggled.connect(self._set_auto_paste)
         self.tray.polish_toggled.connect(self._set_polish_enabled)
         self.tray.paste_mode_changed.connect(self._set_paste_mode)
@@ -217,7 +297,23 @@ class Application:
 
     def _on_recording_started(self):
         logger.debug("Recording started event received")
+        # Starting fresh — abandon any retained retry audio from a previous
+        # failed cycle so its file doesn't leak.
+        self._abandon_retry_state()
+        # Sync streaming flag from config and start the streaming ASR client
+        # before the recorder begins capturing, so no PCM chunks are lost.
+        streaming = self.config.asr.streaming_enabled
+        self.audio_recorder.streaming_enabled = streaming
+        if streaming:
+            if not self._start_streaming():
+                # Streaming start failed — degrade to non-streaming so the
+                # recording still works (frames are saved, transcribed later).
+                self.audio_recorder.streaming_enabled = False
+                self._show_toast(t("msg.streaming_fallback"))
         self._recording_controller.on_recording_started()
+        # Override the bubble text to indicate live transcription.
+        if self._streaming_transcriber is not None:
+            self._status_bubble.show_status(t("status.streaming"))
 
     def _on_recording_stopped(self):
         if not self._recording_controller.stop_recording_event():
@@ -228,9 +324,18 @@ class Application:
             len(context_before),
             len(context_after),
         )
-        self._processing_controller.start(
-            self.audio_recorder, context_before, context_after
-        )
+        if self._streaming_transcriber is not None:
+            # Streaming mode: hand the transcriber to the worker, which will
+            # finalize() it to collect the transcript. No recorder needed.
+            self._processing_controller.start(
+                context_before=context_before,
+                context_after=context_after,
+                streaming_transcriber=self._streaming_transcriber,
+            )
+        else:
+            self._processing_controller.start(
+                self.audio_recorder, context_before, context_after
+            )
 
     def _capture_cursor_context(self, hwnd: int = 0) -> tuple[str, str]:
         """Capture text around the cursor for context-aware polishing.
@@ -250,6 +355,13 @@ class Application:
 
     def _on_processing_done(self, refined_text: str):
         self._recording_controller.reset_after_processing()
+        self._cleanup_streaming()
+        # Success — the worker has already deleted the audio file. Clear
+        # retry state and disable the tray menu entry.
+        if self._retry_audio_path is not None:
+            self._retry_audio_path = None
+            self._retry_context = ("", "")
+            self.tray.set_retry_available(False)
 
         if refined_text:
             logger.info("Processing done: %d chars", len(refined_text))
@@ -295,10 +407,136 @@ class Application:
         """Show the paste-failed toast (invoked on the UI thread via signal)."""
         self._show_toast(t("msg.paste_failed_copied"))
 
+    def _on_silence_detected(self):
+        """Handle VAD auto-stop (invoked on the UI thread via signal).
+
+        Equivalent to the user pressing the toggle hotkey to stop: drives the
+        UI through stop_recording, which emits recording_stopped and starts
+        processing. Guarded so a stale signal that arrives after the user
+        already stopped manually is a no-op.
+        """
+        if not self._recording_controller.is_recording:
+            return
+        logger.debug("VAD silence detected — auto-stopping recording")
+        self._recording_controller.stop()
+
     def _on_processing_error(self, error_msg: str):
         logger.error("Processing error: %s", error_msg)
+        self._cleanup_streaming()
+        # Retain the audio file for retry. On a normal-flow failure the
+        # recorder still holds the path — take ownership so it survives
+        # (cancel_during_processing no longer calls recorder.cleanup()).
+        # On a retry-flow failure the recorder has nothing to take (the
+        # path is already in _retry_audio_path); take returns None and the
+        # existing retry state is preserved unchanged. On a streaming-flow
+        # failure there is no audio file at all (streaming doesn't save).
+        audio_path = self.audio_recorder.take_audio_path()
+        if audio_path is not None:
+            self._retry_audio_path = str(audio_path)
+            self._retry_context = self._recording_controller.cursor_context
         self._recording_controller.cancel_during_processing(error_msg)
-        self.tray.show_message(t("app.name"), t("msg.error_format").format(msg=error_msg))
+        retryable = self._retry_audio_path is not None
+        self.tray.set_retry_available(retryable)
+        hint = t("msg.error_retry_hint") if retryable else t("msg.error_format")
+        # Use format_map with a __missing__ fallback so a translated string
+        # that accidentally omits the ``{msg}`` placeholder doesn't crash the
+        # error handler with a KeyError.
+        formatted = hint.format_map(_SafeFormatMap(msg=error_msg))
+        self.tray.show_message(t("app.name"), formatted)
+
+    def _retry_processing(self):
+        """Re-run the last failed processing cycle using its retained audio.
+
+        Reuses the saved audio file + cursor context so the user doesn't
+        have to re-record. No-op if no retry state exists, or if a cycle is
+        already running, or if a new recording is in progress.
+        """
+        if self._retry_audio_path is None:
+            return
+        if not os.path.exists(self._retry_audio_path):
+            logger.warning("Retained audio file no longer exists: %s", self._retry_audio_path)
+            self._abandon_retry_state()
+            self._show_toast(t("msg.retry_unavailable"))
+            return
+        if self._processing_controller.is_running():
+            return
+        if self._recording_controller.is_recording:
+            return
+        logger.info("Retrying processing with retained audio: %s", self._retry_audio_path)
+        context_before, context_after = self._retry_context
+        # Drive the UI into PROCESSING — mirrors the transition the normal
+        # stop path performs so the bubble + window reflect the retry.
+        self.window.set_processing()
+        self._status_bubble.show_status(t("status.polishing"))
+        self.tray.set_retry_available(False)
+        self._processing_controller.start(
+            audio_path=self._retry_audio_path,
+            context_before=context_before,
+            context_after=context_after,
+        )
+
+    def _abandon_retry_state(self):
+        """Delete the retained retry audio file (if any) and clear the state.
+
+        Called when the user starts a new recording (the old failed audio is
+        no longer wanted) and at application quit (don't leak the file).
+        """
+        if self._retry_audio_path is None:
+            return
+        try:
+            os.remove(self._retry_audio_path)
+        except OSError:
+            pass
+        self._retry_audio_path = None
+        self._retry_context = ("", "")
+        self.tray.set_retry_available(False)
+
+    # ---- streaming ASR -----------------------------------------------------
+
+    def _start_streaming(self) -> bool:
+        """Create and start a StreamingTranscriber for this recording cycle.
+
+        Returns True on success. On failure the caller falls back to
+        non-streaming mode.
+        """
+        asr = self.config.asr
+        self._streaming_transcriber = StreamingTranscriber(
+            api_key=asr.api_key,
+            model=asr.model,
+            base_url=asr.base_url,
+            language=asr.language,
+            sample_rate=self.config.recording.sample_rate,
+            on_text_update=self._streaming_bridge.text_updated.emit,
+            on_error=self._streaming_bridge.stream_error.emit,
+        )
+        if not self._streaming_transcriber.start():
+            self._streaming_transcriber = None
+            return False
+        self.audio_recorder.on_audio_chunk = self._streaming_transcriber.send_audio
+        return True
+
+    def _on_streaming_text(self, text: str):
+        """Update the status bubble with the live streaming transcript."""
+        if not text:
+            return
+        logger.debug("Streaming text -> bubble: %d chars: %r", len(text), text[:50])
+        # Truncate to keep the bubble on one line.
+        display = text if len(text) <= 40 else text[:39] + "…"
+        self._status_bubble.show_status(display)
+
+    def _on_streaming_error(self, msg: str):
+        """Log a streaming error (finalize will surface the empty result)."""
+        logger.error("Streaming ASR error: %s", msg)
+
+    def _cleanup_streaming(self):
+        """Clear streaming state after a cycle completes (success or failure).
+
+        The WebSocket itself is closed by ``StreamingTranscriber.finalize()``
+        on the worker thread; here we just drop our references so the next
+        cycle starts clean.
+        """
+        self._streaming_transcriber = None
+        self.audio_recorder.on_audio_chunk = None
 
     # ---- dialogs & toast ---------------------------------------------------
 
@@ -306,7 +544,22 @@ class Application:
         if self._settings_dialog is None:
             self._settings_dialog = SettingsDialog(self.config, self.window)
             self._settings_dialog.settings_saved.connect(self._on_settings_saved)
+            # Live theme preview: when the user changes the theme combo (or
+            # Cancel restores it), re-skin the floating window + tray to match.
+            self._settings_dialog.theme_changed.connect(self._on_theme_changed)
         self._settings_dialog.exec()
+
+    def _on_theme_changed(self, mode: str):
+        """Re-apply the active palette to the floating window and tray.
+
+        The SettingsDialog already switched the global palette and re-skinned
+        itself; this refreshes the persistent surfaces (floating window, tray,
+        cached history dialog) which read the palette at paint/icon-build time.
+        """
+        self.window.apply_theme()
+        self.tray.apply_theme()
+        if self._history_dialog is not None:
+            self._history_dialog.apply_theme()
 
     def _show_history(self):
         # Capture the target window BEFORE the (modal) dialog takes the
@@ -358,6 +611,10 @@ class Application:
         self.audio_recorder.sample_rate = self.config.recording.sample_rate
         self.audio_recorder.denoise_enabled = self.config.recording.denoise_enabled
         self.audio_recorder.denoise_strength = self.config.recording.denoise_strength
+        self.audio_recorder.vad_enabled = self.config.recording.vad_enabled
+        self.audio_recorder.vad_silence_duration_ms = self.config.recording.vad_silence_duration_ms
+        self.audio_recorder.vad_threshold = self.config.recording.vad_threshold
+        self.audio_recorder.streaming_enabled = self.config.asr.streaming_enabled
         self.window.retranslate()
         self.tray.retranslate()
         self.tray.apply_config(self.config)
@@ -394,6 +651,7 @@ class Application:
         for t in self._paste_threads:
             t.join(timeout=3.0)
         self._flush_config_save()
+        self._abandon_retry_state()
         self.audio_recorder.stop()
         self.audio_recorder.cleanup()
         self._processing_controller.shutdown()
@@ -500,8 +758,6 @@ def _start_show_window_watcher(callback) -> None:
     rather than ``QTimer.singleShot``, which is thread-affine and would not
     fire from a thread without a running event loop.
     """
-    import threading
-
     event_name = "Global\\VoiceType_ShowWindow"
     kernel32 = ctypes.windll.kernel32
     # Create an event the second instance can signal.

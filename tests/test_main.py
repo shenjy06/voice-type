@@ -1,5 +1,6 @@
 """Tests for voice_type.__main__ — ProcessingWorker and Application."""
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 
@@ -61,6 +62,80 @@ class TestProcessingWorker:
         mock_transcriber.return_value.transcribe.assert_called_once_with(
             "/tmp/saved.wav"
         )
+
+    def test_retry_skips_save_and_reuses_audio_path(self, qtbot, mocker):
+        """When audio_path is provided (retry), recorder.save() is skipped."""
+        from voicetype.processing import ProcessingWorker
+
+        mock_transcriber = mocker.patch("voicetype.processing.Transcriber")
+        mock_transcriber.return_value.transcribe.return_value = "text"
+        mocker.patch("voicetype.processing.TextPolisher")
+        mocker.patch("voicetype.processing.os.remove")
+
+        cfg = mocker.MagicMock()
+        cfg.polish.enabled = False
+        recorder = _make_recorder()  # save() should NOT be called
+        worker = ProcessingWorker(cfg, recorder, audio_path="/tmp/retained.wav")
+
+        worker.finished.connect(lambda t: None)
+        worker.run()
+
+        recorder.save.assert_not_called()
+        mock_transcriber.return_value.transcribe.assert_called_once_with(
+            "/tmp/retained.wav"
+        )
+
+    def test_failure_retains_audio_for_retry(self, qtbot, mocker):
+        """On failure the audio file is NOT deleted (retained for retry)."""
+        from voicetype.processing import ProcessingWorker
+
+        mock_transcriber = mocker.patch("voicetype.processing.Transcriber")
+        mock_transcriber.return_value.transcribe.side_effect = RuntimeError("API timeout")
+        mock_remove = mocker.patch("voicetype.processing.os.remove")
+
+        cfg = mocker.MagicMock()
+        worker = ProcessingWorker(cfg, _make_recorder("/tmp/failed.wav"))
+
+        error_msg = None
+
+        def on_error(msg):
+            nonlocal error_msg
+            error_msg = msg
+
+        worker.error.connect(on_error)
+        worker.run()
+
+        assert "API timeout" in error_msg
+        # Audio file must NOT be deleted on failure — retained for retry.
+        mock_remove.assert_not_called()
+
+    def test_streaming_mode_finalizes_transcriber(self, qtbot, mocker):
+        """Streaming mode: worker calls finalize() and skips save/transcribe."""
+        from voicetype.processing import ProcessingWorker
+
+        mock_streaming = mocker.MagicMock()
+        mock_streaming.finalize.return_value = "streamed text"
+        mock_polisher = mocker.patch("voicetype.processing.TextPolisher")
+        mock_polisher.return_value.polish.return_value = "refined"
+        mocker.patch("voicetype.processing.os.remove")
+
+        cfg = mocker.MagicMock()
+        cfg.polish.enabled = True
+        recorder = _make_recorder()  # save() should NOT be called
+        worker = ProcessingWorker(
+            cfg, recorder, streaming_transcriber=mock_streaming,
+        )
+
+        results = []
+        worker.finished.connect(lambda t: results.append(t))
+        worker.run()
+
+        mock_streaming.finalize.assert_called_once()
+        recorder.save.assert_not_called()
+        mock_polisher.return_value.polish.assert_called_once_with(
+            "streamed text", context_before="", context_after=""
+        )
+        assert results == ["refined"]
 
     def test_save_failure_emits_error(self, qtbot, mocker):
         """A save failure (e.g. no audio data) surfaces as a processing error."""
@@ -411,13 +486,67 @@ class TestApplication:
 
     def test_on_processing_error(self, qtbot, mocker):
         app = self._make_application(qtbot, mocker)
-        app.audio_recorder.cleanup = mocker.MagicMock()
+        app.audio_recorder.take_audio_path = mocker.MagicMock(return_value=None)
 
         app._on_processing_error("API failed")
 
+        app.audio_recorder.take_audio_path.assert_called_once()
         app.window.set_error.assert_called_once()
         app.tray.show_message.assert_called_once()
-        app.audio_recorder.cleanup.assert_called_once()
+        app.tray.set_retry_available.assert_called_once_with(False)
+
+    def test_on_processing_error_retains_audio_for_retry(self, qtbot, mocker):
+        """On failure the audio path is retained and retry is enabled."""
+        app = self._make_application(qtbot, mocker)
+        app.audio_recorder.take_audio_path = mocker.MagicMock(
+            return_value=Path("/tmp/failed.wav")
+        )
+
+        app._on_processing_error("API failed")
+
+        assert app._retry_audio_path == str(Path("/tmp/failed.wav"))
+        app.tray.set_retry_available.assert_called_once_with(True)
+
+    def test_retry_processing_reuses_retained_audio(self, qtbot, mocker):
+        """Retry hands the retained audio path + context to the worker."""
+        app = self._make_application(qtbot, mocker)
+        app._retry_audio_path = "/tmp/failed.wav"
+        app._retry_context = ("hi ", " bye")
+        app._processing_controller.is_running = mocker.MagicMock(return_value=False)
+        # is_recording is a read-only property that delegates to ui.is_recording()
+        app.window.is_recording.return_value = False
+        # _retry_processing checks if the retained file still exists before
+        # starting the retry cycle.
+        mocker.patch("os.path.exists", return_value=True)
+
+        app._retry_processing()
+
+        app.window.set_processing.assert_called_once()
+        app._status_bubble.show_status.assert_called_once()
+        app._processing_controller.start.assert_called_once_with(
+            audio_path="/tmp/failed.wav",
+            context_before="hi ",
+            context_after=" bye",
+        )
+
+    def test_retry_processing_noop_without_retry_state(self, qtbot, mocker):
+        app = self._make_application(qtbot, mocker)
+        app._retry_audio_path = None
+
+        app._retry_processing()
+
+        app._processing_controller.start.assert_not_called()
+
+    def test_abandon_retry_state_deletes_file(self, qtbot, mocker):
+        app = self._make_application(qtbot, mocker)
+        app._retry_audio_path = "/tmp/failed.wav"
+        mock_remove = mocker.patch("voicetype.__main__.os.remove")
+
+        app._abandon_retry_state()
+
+        mock_remove.assert_called_once_with("/tmp/failed.wav")
+        assert app._retry_audio_path is None
+        app.tray.set_retry_available.assert_called_once_with(False)
 
     def test_show_settings_lazy_loads_dialog(self, qtbot, mocker):
         app = self._make_application(qtbot, mocker)
