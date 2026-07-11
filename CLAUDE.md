@@ -58,7 +58,8 @@ The app follows a pipeline architecture with a central `Application` orchestrato
 |--------|---------------|
 | `src/voicetype/ui/main_window.py` | `FloatingRecordingWindow` — frameless, draggable, always-on-top window with pulsing dot animation and state machine. `Toast` — auto-dismissing notification |
 | `src/voicetype/ui/system_tray.py` | `TrayIcon` — system tray with context menu. `HotkeyManager` — pynput keyboard listener for global hotkeys |
-| `src/voicetype/ui/settings_dialog.py` | `SettingsDialog` — tabbed dialog (STT/Polish/Glossary/Output/Hotkeys) with config load/save |
+| `src/voicetype/ui/settings_dialog.py` | `SettingsDialog` — tabbed dialog (STT/Polish/Glossary/Output/Hotkeys) with config load/save, theme switching, live preview |
+| `src/voicetype/ui/theme.py` | Centralized theme: `Palette` dataclass with DARK/LIGHT variants, `settings_qss()` QSS stylesheet, `apply_dialog_theme()`, vector icons (gear/close/refresh/eye/chevron) |
 | `src/voicetype/ui/icon_utils.py` | `make_circle_icon()` — shared circular icon creation with centered text |
 
 ### Threading Model

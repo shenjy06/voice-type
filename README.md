@@ -26,7 +26,10 @@ Licensed under [GPL-3.0](LICENSE).
 - **Config Import/Export**: Export and import full configuration as JSON for backup or migration; previews imported settings before applying and warns on empty files
 - **Startup Check**: Automatically detects API configuration on first launch and shows setup wizard if unconfigured
 - **Bilingual UI**: Supports Chinese and English interface, switchable in settings (requires restart)
-- **Model Discovery**: Click the 🔄 button in settings to fetch all available models from your API provider — no need to copy model IDs manually
+- **Light/Dark/System Theme**: Three theme modes selectable in settings — dark, light, or follow the Windows system theme. All UI surfaces (dialog, floating window, tray, toast, history) share one unified palette with indigo accent and vector icons.
+- **Model Discovery**: Click the refresh button in settings to fetch all available models from your API provider — no need to copy model IDs manually
+- **Named Profiles**: Save and switch between multiple named configurations (work, personal, etc.) from the settings General tab
+- **Encrypted Config Export**: Export config files with password protection to keep API keys secure when sharing or migrating
 
 ## Tech Stack
 
@@ -112,13 +115,21 @@ The generated `dist/VoiceType.exe` is a standalone executable — no Python envi
 
 Click the gear icon in the upper-right corner of the floating window, or access settings via the system tray menu. The settings dialog has tabs: General, Recording, STT, Polish, Glossary, Output, and Hotkeys.
 
+### General
+
+| Field | Description | Default |
+|-------|-------------|---------|
+| UI Language | Interface language | Auto (System) |
+| Theme | Light, dark, or follow the Windows system theme | Dark |
+| Auto-start | Start with Windows | Off |
+
 ### STT (Speech-to-Text) Configuration
 
 | Field | Description | Example |
 |-------|-------------|---------|
 | API Key | Authentication key for STT service | `sk-...` |
 | Base URL | API address of STT service | `https://api.siliconflow.cn/v1` |
-| Model | Speech recognition model (click 🔄 to fetch provider's full model list) | `FunAudioLLM/SenseVoiceSmall` |
+| Model | Speech recognition model (click the refresh button to fetch the provider's full model list) | `FunAudioLLM/SenseVoiceSmall` |
 | Language | Recognition language | `zh` / `en` / `auto` |
 | Sample Rate | Recording sample rate | `16000` Hz |
 | Noise Reduction | Enable spectral-gate denoising before recognition | `Off` / `On` |
@@ -133,7 +144,7 @@ Click the gear icon in the upper-right corner of the floating window, or access 
 |-------|-------------|---------|
 | API Key | Authentication key for LLM service | `sk-...` |
 | Base URL | API address of LLM service | `https://api.siliconflow.cn/v1` |
-| Model | Text refinement model (click 🔄 to fetch provider's full model list) | `gpt-4o` / `deepseek-chat` / `qwen-plus` |
+| Model | Text refinement model (click the refresh button to fetch the provider's full model list) | `gpt-4o` / `deepseek-chat` / `qwen-plus` |
 
 ### Glossary Configuration
 
@@ -264,13 +275,15 @@ voice-type/
 │       ├── network.py               # Network detection: HTTP connectivity check
 │       ├── state.py                 # Application state enum (RecorderState)
 │       ├── i18n.py                  # Internationalization: Chinese/English translations
+│       ├── crypto.py                # Password-based config encryption (Fernet + PBKDF2)
 │       └── ui/
 │           ├── history_dialog.py    # Recent text history viewer/copy/re-paste dialog
 │           ├── main_window.py       # Floating recording window + pulsing dot + StatusBubble + Toast
 │           ├── settings_dialog.py   # Settings dialog (STT/Polish/Glossary/Output/Hotkeys)
 │           ├── system_tray.py       # System tray icon + pynput hotkey manager
+│           ├── theme.py             # Centralized theme: light/dark palettes, QSS, vector icons
 │           └── icon_utils.py        # Shared icon creation (circle + centered text)
-├── tests/                       # Unit tests (456, covering all modules)
+├── tests/                       # Unit tests (518, covering all modules)
 │   ├── conftest.py
 │   ├── test_audio.py
 │   ├── test_asr.py
@@ -284,10 +297,14 @@ voice-type/
 │   ├── test_polisher.py
 │   ├── test_streaming_asr.py
 │   ├── test_typer.py
+│   ├── test_crypto.py
 │   └── ui/
+│       ├── test_history_dialog.py
+│       ├── test_hotkey_recorder.py
 │       ├── test_main_window.py
 │       ├── test_settings_dialog.py
-│       └── test_system_tray.py
+│       ├── test_system_tray.py
+│       └── test_theme.py
 ├── build.bat                    # One-click build script
 ├── requirements.txt
 ├── pyproject.toml

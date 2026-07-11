@@ -26,7 +26,10 @@ Windows 语音转文字速记工具。录制语音 → 语音识别 → 文本�
 - **配置导入导出**: 将完整配置（含 API 密钥）导出为 JSON 文件，可备份或在多台机器间迁移；导入时显示配置预览，空配置文件会触发警告
 - **启动检查**: 首次启动时自动检测 API 配置，未配置时弹出设置引导
 - **中英文界面**: 支持中文/英文双语 UI，可在设置中切换语言，重启生效
-- **模型自动发现**: 设置中点击 🔄 按钮可自动获取提供商的全部可用模型，无需手动复制模型名
+- **明暗主题切换**: 支持深色、浅色、跟随系统三种主题模式，在设置中切换即实时预览。所有界面（对话框、浮动窗口、托盘、气泡、历史记录）统一配色，靛蓝强调色 + 矢量图标
+- **模型自动发现**: 设置中点击刷新按钮可自动获取提供商的全部可用模型，无需手动复制模型名
+- **命名配置档案**: 保存和切换多个命名配置方案（工作、个人等），在设置通用标签页管理
+- **加密配置导出**: 支持密码加密导出配置文件，保护 API 密钥安全
 
 ## 技术栈
 
@@ -108,7 +111,15 @@ pyinstaller --clean --noconfirm VoiceType.spec
 
 ## 设置
 
-点击浮动窗口右上角的齿轮图标打开设置页面，或通过系统托盘菜单进入设置。设置页面分为以下标签页：通用、录音、STT、Polish、Glossary、输出、热键。
+点击浮动窗口右上角的齿轮图标打开设置页面，或通过系统托盘菜单进入设置。设置页面分为以下标签页：通用、录音、STT、润色、词库、输出、热键。
+
+### 通用设置
+
+| 字段 | 说明 | 默认值 |
+|------|------|--------|
+| 界面语言 | 界面显示语言 | 自动（跟随系统） |
+| 主题 | 深色、浅色或跟随 Windows 系统主题 | 深色 |
+| 开机自启动 | 是否随系统启动 | 关闭 |
 
 ### STT（语音识别）配置
 
@@ -116,7 +127,7 @@ pyinstaller --clean --noconfirm VoiceType.spec
 |------|------|------|
 | API Key | STT 服务的认证密钥 | `sk-...` |
 | Base URL | STT 服务的 API 地址 | `https://api.siliconflow.cn/v1` |
-| Model | 语音识别模型（点击 🔄 可获取提供商全部模型列表） | `FunAudioLLM/SenseVoiceSmall` |
+| Model | 语音识别模型（点击刷新按钮可获取提供商全部模型列表） | `FunAudioLLM/SenseVoiceSmall` |
 | Language | 识别语言 | `zh` / `en` / `auto` |
 | Sample Rate | 录制采样率 | `16000` Hz |
 | Noise Reduction | 识别前是否启用谱门降噪 | `Off` / `On` |
@@ -131,7 +142,7 @@ pyinstaller --clean --noconfirm VoiceType.spec
 |------|------|------|
 | API Key | LLM 服务的认证密钥 | `sk-...` |
 | Base URL | LLM 服务的 API 地址 | `https://api.siliconflow.cn/v1` |
-| Model | 文本润色模型（点击 🔄 可获取提供商全部模型列表） | `gpt-4o` / `deepseek-chat` / `qwen-plus` |
+| Model | 文本润色模型（点击刷新按钮可获取提供商全部模型列表） | `gpt-4o` / `deepseek-chat` / `qwen-plus` |
 
 ### Glossary（词库）配置
 
@@ -259,13 +270,15 @@ voice-type/
 │       ├── network.py               # 网络检测：HTTP 连通性检查
 │       ├── state.py                 # 应用状态枚举 (RecorderState)
 │       ├── i18n.py                  # 国际化：中英文翻译
+│       ├── crypto.py                # 密码加密配置导出 (Fernet + PBKDF2)
 │       └── ui/
 │           ├── history_dialog.py    # 最近文本历史查看/复制/重新粘贴
 │           ├── main_window.py       # 浮动录制窗口 + 脉冲红点动画 + 状态气泡 + Toast
-│           ├── settings_dialog.py   # 设置对话框（STT/Polish/Glossary/Output/Hotkeys）
+│           ├── settings_dialog.py   # 设置对话框（STT/润色/词库/输出/热键）
 │           ├── system_tray.py       # 系统托盘 + 全局热键管理
+│           ├── theme.py             # 主题管理：明暗调色板、QSS、矢量图标
 │           └── icon_utils.py        # 共享图标创建（圆形 + 居中文字）
-├── tests/                       # 单元测试（456 项，覆盖全部模块）
+├── tests/                       # 单元测试（518 项，覆盖全部模块）
 │   ├── conftest.py
 │   ├── test_audio.py
 │   ├── test_asr.py
@@ -279,10 +292,14 @@ voice-type/
 │   ├── test_polisher.py
 │   ├── test_streaming_asr.py
 │   ├── test_typer.py
+│   ├── test_crypto.py
 │   └── ui/
+│       ├── test_history_dialog.py
+│       ├── test_hotkey_recorder.py
 │       ├── test_main_window.py
 │       ├── test_settings_dialog.py
-│       └── test_system_tray.py
+│       ├── test_system_tray.py
+│       └── test_theme.py
 ├── build.bat                    # 一键构建脚本
 ├── requirements.txt
 ├── pyproject.toml
