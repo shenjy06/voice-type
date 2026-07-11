@@ -44,8 +44,8 @@ def _button_style(state: RecorderState, p) -> str | None:
         return (
             f"QPushButton {{ background: {p.danger}; color: white; "
             f"border: none; border-radius: 8px; font-size: 14px; font-weight: 600; }}"
-            f"QPushButton:hover {{ background: #f87171; }}"
-            f"QPushButton:pressed {{ background: {p.danger_hover}; }}"
+            f"QPushButton:hover {{ background: {p.danger_hover}; }}"
+            f"QPushButton:pressed {{ background: {p.danger}; opacity: 0.8; }}"
         )
     if state == RecorderState.PROCESSING:
         return (
@@ -291,10 +291,15 @@ class FloatingRecordingWindow(QWidget):
         )
 
     def _quit_btn_stylesheet(self, p) -> str:
+        # Convert hex to RGB components for rgba
+        # Parse p.danger which is like "#ef4444"
+        r = int(p.danger[1:3], 16)
+        g = int(p.danger[3:5], 16)
+        b = int(p.danger[5:7], 16)
         return (
             f"QPushButton {{ background: transparent; border: none; border-radius: 6px; }}"
-            f"QPushButton:hover {{ background: rgba(239, 68, 68, 0.18); }}"
-            f"QPushButton:pressed {{ background: rgba(239, 68, 68, 0.30); }}"
+            f"QPushButton:hover {{ background: rgba({r}, {g}, {b}, 0.18); }}"
+            f"QPushButton:pressed {{ background: rgba({r}, {g}, {b}, 0.30); }}"
         )
 
     def _update_record_button(self):

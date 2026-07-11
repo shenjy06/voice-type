@@ -16,6 +16,7 @@ inside its paint/refresh path rather than capturing a constant at import.
 from __future__ import annotations
 
 import math
+import os
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -58,6 +59,7 @@ class Palette:
     # Semantic state
     danger: str
     danger_hover: str
+    danger_light: str   # lighter hover variant for recording-stop button
     success: str
     warning: str
     warning_hover: str
@@ -81,6 +83,7 @@ DARK_PALETTE = Palette(
     accent_pressed="#6366f1",
     danger="#ef4444",
     danger_hover="#dc2626",
+    danger_light="#f87171",
     success="#22c55e",
     warning="#f59e0b",
     warning_hover="#fbbf24",
@@ -104,6 +107,7 @@ LIGHT_PALETTE = Palette(
     accent_pressed="#4338ca",   # indigo-800
     danger="#ef4444",
     danger_hover="#dc2626",
+    danger_light="#f87171",
     success="#16a34a",          # green-600 (darker for light-bg contrast)
     warning="#d97706",          # amber-600 (#f59e0b is too pale on white)
     warning_hover="#b45309",    # amber-700
@@ -177,14 +181,9 @@ def apply_theme_mode(mode: str) -> Palette:
 # time (paint events, stylesheet rebuilds) sees theme switches automatically.
 # NOTE: ``from theme import ACCENT`` captures a snapshot at import - callers
 # that must react to switches should use ``get_palette()`` instead.
-_CONST_NAMES = frozenset({
-    "BG_DIALOG", "BG_CARD", "BG_INPUT", "BG_HOVER",
-    "BORDER", "BORDER_HOVER", "BORDER_FOCUS",
-    "TEXT_PRIMARY", "TEXT_SECONDARY", "TEXT_DISABLED", "TEXT_TITLE",
-    "ACCENT", "ACCENT_HOVER", "ACCENT_PRESSED",
-    "DANGER", "DANGER_HOVER", "SUCCESS",
-    "WARNING", "WARNING_HOVER", "WARNING_PRESSED",
-})
+#
+# _CONST_NAMES is automatically derived from Palette fields to avoid manual sync.
+_CONST_NAMES = frozenset(field.name.upper() for field in Palette.__dataclass_fields__.values())
 
 
 def __getattr__(name: str):
@@ -235,7 +234,8 @@ def _checkmark_image_path() -> str:
     painter.drawPath(path)
     painter.end()
 
-    path_str = tempfile.mktemp(suffix=".png", prefix="vt_check_")
+    fd, path_str = tempfile.mkstemp(suffix=".png", prefix="vt_check_")
+    os.close(fd)
     pm.save(path_str, "PNG")
     _checkmark_path = path_str
     return path_str
@@ -461,7 +461,8 @@ def _arrow_image_path(direction: str, color_hex: str) -> str:
     if path and Path(path).exists():
         return path
     pm = _draw_chevron_pixmap(direction, QColor(color_hex))
-    path_str = tempfile.mktemp(suffix=f"_arrow_{direction}.png", prefix="vt_")
+    fd, path_str = tempfile.mkstemp(suffix=f"_arrow_{direction}.png", prefix="vt_")
+    os.close(fd)
     pm.save(path_str, "PNG")
     _arrow_paths[key] = path_str
     return path_str

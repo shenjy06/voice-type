@@ -57,17 +57,27 @@ def _get_settings_icon() -> QIcon:
     return _SETTINGS_ICON
 
 
-def _add_password_toggle(line_edit: QLineEdit) -> QAction:
+def _add_password_toggle(line_edit: QLineEdit, registry=None) -> QAction:
     """Add a show/hide toggle action to a password-mode QLineEdit.
 
     Uses a trailing eye/eye-off icon (CC Switch style) so the user can verify
     a typed key without it staying exposed. Toggles echo mode in place.
     Returns the action so callers (e.g. SettingsDialog) can re-set its icon
     after a theme switch.
+
+    Args:
+        line_edit: The QLineEdit to add the toggle to
+        registry: Optional SettingsDialog to register the icon with for theme refreshes
     """
     action = QAction(line_edit)
     action.setIcon(eye_icon())
     action.setToolTip(t("settings.show_password"))
+
+    # Store current icon getter on the action for theme refresh
+    def _get_current_icon():
+        return eye_off_icon() if line_edit.echoMode() != QLineEdit.Password else eye_icon()
+
+    action._get_icon = _get_current_icon
 
     def _toggle():
         if line_edit.echoMode() == QLineEdit.Password:
@@ -81,6 +91,11 @@ def _add_password_toggle(line_edit: QLineEdit) -> QAction:
 
     action.triggered.connect(_toggle)
     line_edit.addAction(action, QLineEdit.TrailingPosition)
+
+    # Register with the theme registry if provided
+    if registry is not None:
+        registry._register_themed_icon(action, lambda: action._get_icon(), is_action=True)
+
     return action
 
 
@@ -186,16 +201,15 @@ class SettingsDialog(QDialog):
         # Refresh buttons by section ("asr"/"polish") — populated in _init_ui.
         # Must exist before _init_ui() runs because _make_model_row writes to it.
         self._refresh_buttons: dict[str, QPushButton] = {}
-        # (action, line_edit) pairs for password toggles - tracked so we can
-        # re-set their icons after a theme switch (icons are cached per-palette).
-        self._password_toggles: list = []
+        # Registry of icons that need refreshing when theme changes
+        # Keys are widget/action references, values are icon getter functions
+        self._themed_icons: dict = {}
         self._model_before_fetch: dict[str, str] = {}
         self._model_items_before_fetch: dict[str, list] = {}
         self._init_ui()
         self._load_config()
-        # Snapshot the theme mode at dialog-open time so Cancel can restore it
-        # (the combo live-applies for preview; see _on_theme_mode_changed).
-        self._initial_theme_mode = self.config.window.theme_mode
+        # Snapshot all live-preview state at dialog-open time so Cancel can restore it
+        self._initial_snapshot = self._snapshot_preview_state()
         # Word-wrapped labels placed as QFormLayout fields — their height must
         # be enforced because QFormLayout sizes field rows by sizeHint, not by
         # heightForWidth, so wrapped text gets clipped (see _adjust_wrap_heights).
@@ -216,6 +230,48 @@ class SettingsDialog(QDialog):
         # Route background model-list fetch results back to the UI thread.
         self._models_fetched.connect(self._on_models_fetched)
         self._models_error.connect(self._on_models_error)
+
+    def _register_themed_icon(self, obj, icon_getter, is_action=False):
+        """Register an object (QPushButton or QAction) that needs its icon refreshed on theme changes.
+
+        Args:
+            obj: The widget or action to update
+            icon_getter: Function that returns the correct QIcon for the current theme
+            is_action: True if obj is a QAction, False if it's a QPushButton
+        """
+        self._themed_icons[obj] = (icon_getter, is_action)
+
+    def _refresh_themed_icons(self):
+        """Refresh all registered themed icons to match the current palette."""
+        for obj, (icon_getter, _is_action) in self._themed_icons.items():
+            try:
+                obj.setIcon(icon_getter())
+            except RuntimeError:
+                # Object's C++ side may have been deleted (shiboken) -
+                # skip it rather than crashing. Other RuntimeErrors are
+                # unlikely here but are logged so they don't silently hide.
+                logger.debug("Themed icon refresh skipped (deleted C++ object)", exc_info=True)
+
+    def _snapshot_preview_state(self):
+        """Snapshot all live-preview settings that can be undone on Cancel.
+
+        Extend this when adding new live-preview settings to automatically
+        get undo support without writing new _initial_* tracking code.
+        """
+        return {
+            "theme_mode": self.config.window.theme_mode,
+            # Add future live-preview settings here
+        }
+
+    def _restore_preview_state(self, snapshot):
+        """Restore live-preview settings from a snapshot.
+
+        Called when Cancel is pressed to undo any live-preview changes.
+        """
+        if snapshot.get("theme_mode") != self.theme_combo.currentData():
+            apply_theme_mode(snapshot["theme_mode"])
+            self._refresh_dialog_theme()
+            self.theme_changed.emit(snapshot["theme_mode"])
 
     def _init_ui(self):
         # Apply the CC Switch-inspired dark theme to the dialog and all
@@ -259,6 +315,7 @@ class SettingsDialog(QDialog):
             btn.clicked.connect(lambda checked=False, s=section: self._fetch_models(s))
             row.addWidget(btn)
             self._refresh_buttons[section] = btn
+            self._register_themed_icon(btn, refresh_icon, is_action=False)
             return container
 
         self._tabs = QTabWidget()
@@ -413,9 +470,7 @@ class SettingsDialog(QDialog):
         self.stt_api_key_input = QLineEdit()
         self.stt_api_key_input.setEchoMode(QLineEdit.Password)
         self.stt_api_key_input.setPlaceholderText("sk-...")
-        self._password_toggles.append(
-            (_add_password_toggle(self.stt_api_key_input), self.stt_api_key_input)
-        )
+        _add_password_toggle(self.stt_api_key_input, registry=self)
         stt_api_layout.addRow(t("settings.api_key"), self.stt_api_key_input)
 
         self.stt_base_url_input = QLineEdit()
@@ -459,9 +514,7 @@ class SettingsDialog(QDialog):
         self.polish_api_key_input = QLineEdit()
         self.polish_api_key_input.setEchoMode(QLineEdit.Password)
         self.polish_api_key_input.setPlaceholderText("sk-...")
-        self._password_toggles.append(
-            (_add_password_toggle(self.polish_api_key_input), self.polish_api_key_input)
-        )
+        _add_password_toggle(self.polish_api_key_input, registry=self)
         polish_api_layout.addRow(t("settings.api_key"), self.polish_api_key_input)
 
         self.polish_base_url_input = QLineEdit()
@@ -1247,11 +1300,7 @@ class SettingsDialog(QDialog):
         icon) need explicit re-setting because QIcon is copied by value.
         """
         apply_dialog_theme(self)
-        for btn in self._refresh_buttons.values():
-            btn.setIcon(refresh_icon())
-        for action, line_edit in self._password_toggles:
-            action.setIcon(eye_off_icon() if line_edit.echoMode() != QLineEdit.Password
-                           else eye_icon())
+        self._refresh_themed_icons()
         # Window icon is cached globally; clear it so the next _get_settings_icon
         # rebuilds with the new accent.
         global _SETTINGS_ICON
@@ -1389,15 +1438,8 @@ class SettingsDialog(QDialog):
     def reject(self):
         self._stop_microphone_monitor()
         self.hotkey_recorder.stop_recording()
-        # The theme combo live-applies for preview. On Cancel, undo any
-        # preview switch the user made so the app reverts to the mode that
-        # was active when the dialog opened. Emit theme_changed so
-        # Application refreshes the floating window + tray to match.
-        current = self.theme_combo.currentData()
-        if current != self._initial_theme_mode:
-            apply_theme_mode(self._initial_theme_mode)
-            self._refresh_dialog_theme()
-            self.theme_changed.emit(self._initial_theme_mode)
+        # Restore all live-preview settings to their dialog-open state
+        self._restore_preview_state(self._initial_snapshot)
         super().reject()
 
     def accept(self):
