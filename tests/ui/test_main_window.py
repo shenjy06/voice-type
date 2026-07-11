@@ -2,13 +2,17 @@
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QCloseEvent
+from PySide6.QtWidgets import QPushButton
 from voicetype.ui.main_window import (
     AudioLevelWaveform,
     FloatingRecordingWindow,
     MicrophoneIcon,
     PulsingDot,
     Toast,
+    _button_style,
 )
+from voicetype.ui import theme
+from voicetype.ui.theme import DARK_PALETTE, LIGHT_PALETTE, apply_theme_mode, get_palette, set_active_palette
 from voicetype.state import RecorderState
 
 
@@ -237,3 +241,74 @@ class TestToast:
         qtbot.addWidget(toast_short)
         qtbot.addWidget(toast_long)
         assert toast_long.width() > toast_short.width()
+
+
+class TestThemeIntegration:
+    """The floating window sources every color from the active theme palette.
+
+    Colors are read from :func:`get_palette` at paint/stylesheet-build time,
+    so a light/dark switch takes effect on the next repaint. These tests pin
+    the palette wiring (not pixel values) so they hold under both themes.
+    """
+
+    def setup_method(self):
+        self._saved_palette = get_palette()
+
+    def teardown_method(self):
+        set_active_palette(self._saved_palette)
+
+    def test_recording_button_uses_palette_danger(self):
+        style = _button_style(RecorderState.RECORDING, DARK_PALETTE)
+        assert DARK_PALETTE.danger in style
+        assert "#dc2626" not in style or DARK_PALETTE.danger_hover in style
+
+    def test_processing_button_uses_palette_warning(self):
+        style = _button_style(RecorderState.PROCESSING, DARK_PALETTE)
+        assert DARK_PALETTE.warning in style
+
+    def test_idle_button_style_is_none(self):
+        """Idle has no dedicated style - _update_record_button applies accent."""
+        assert _button_style(RecorderState.IDLE, DARK_PALETTE) is None
+
+    def test_idle_record_button_uses_active_accent(self, qtbot):
+        apply_theme_mode("dark")
+        win = FloatingRecordingWindow()
+        qtbot.addWidget(win)
+        assert DARK_PALETTE.accent in win.record_btn.styleSheet()
+
+    def test_header_buttons_use_vector_icons_not_emoji(self, qtbot):
+        apply_theme_mode("dark")
+        win = FloatingRecordingWindow()
+        qtbot.addWidget(win)
+        buttons = win.findChildren(QPushButton)
+        icon_buttons = [b for b in buttons if not b.icon().isNull()]
+        # Two header buttons (gear + close) have icons; the record button is text-only.
+        assert len(icon_buttons) >= 2
+        for b in buttons:
+            assert b.text() not in ("⚙", "✕"), "emoji/symbol text glyph left over"
+
+    def test_apply_theme_switches_record_button_accent(self, qtbot):
+        """apply_theme() re-styles the record button for the active palette."""
+        apply_theme_mode("dark")
+        win = FloatingRecordingWindow()
+        qtbot.addWidget(win)
+        assert DARK_PALETTE.accent in win.record_btn.styleSheet()
+        apply_theme_mode("light")
+        win.apply_theme()
+        assert LIGHT_PALETTE.accent in win.record_btn.styleSheet()
+        assert DARK_PALETTE.accent not in win.record_btn.styleSheet()
+
+    def test_apply_theme_refreshes_header_icons(self, qtbot):
+        """apply_theme() re-sets the gear/close icons for the new palette."""
+        apply_theme_mode("dark")
+        win = FloatingRecordingWindow()
+        qtbot.addWidget(win)
+        dark_gear = win._settings_btn.icon()
+        apply_theme_mode("light")
+        win.apply_theme()
+        # QIcon has no value equality, but a re-set icon for a different palette
+        # is a fresh instance from the per-color cache.
+        light_gear = win._settings_btn.icon()
+        assert not light_gear.isNull()
+
+

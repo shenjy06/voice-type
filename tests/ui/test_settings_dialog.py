@@ -8,6 +8,7 @@ from voicetype.config import (
     RecordingConfig,
     HotkeyConfig,
     OutputConfig,
+    WindowConfig,
     GlossaryEntry,
 )
 from voicetype.ui.settings_dialog import SettingsDialog
@@ -552,10 +553,11 @@ class TestSettingsDialogModelFetch:
         mocker.patch("voicetype.ui.settings_dialog.Toast")
         dlg._model_before_fetch["asr"] = "pending"
         dlg._refresh_buttons["asr"].setEnabled(False)
-        dlg._refresh_buttons["asr"].setText("⏳")
         dlg._on_models_error("asr", "boom")
         assert dlg._refresh_buttons["asr"].isEnabled()
-        assert dlg._refresh_buttons["asr"].text() == "🔄"
+        # The button uses a vector icon, not text - just verify the icon is
+        # still present (it stays across refreshing/normal states).
+        assert not dlg._refresh_buttons["asr"].icon().isNull()
         assert "asr" not in dlg._model_before_fetch
 
     def test_fetch_disables_combo_and_shows_loading(self, qtbot, mocker):
@@ -681,3 +683,66 @@ class TestConfigPrivacyFeatures:
         dlg._delete_profile()
         assert "work" not in list_profiles()
         assert get_active_profile() != "work"
+
+
+class TestSettingsDialogTheme:
+    """Light/dark/system theme switching from the General tab."""
+
+    def setup_method(self):
+        from voicetype.ui.theme import get_palette
+        self._saved_palette = get_palette()
+
+    def teardown_method(self):
+        from voicetype.ui.theme import set_active_palette
+        set_active_palette(self._saved_palette)
+
+    def test_theme_combo_populated(self, qtbot):
+        from voicetype.ui.theme import apply_theme_mode
+        apply_theme_mode("dark")
+        dlg = SettingsDialog(AppConfig())
+        qtbot.addWidget(dlg)
+        modes = [dlg.theme_combo.itemData(i) for i in range(dlg.theme_combo.count())]
+        assert modes == ["dark", "light", "system"]
+
+    def test_theme_combo_reflects_config(self, qtbot):
+        from voicetype.ui.theme import apply_theme_mode
+        apply_theme_mode("light")
+        cfg = AppConfig(window=WindowConfig(theme_mode="light"))
+        dlg = SettingsDialog(cfg)
+        qtbot.addWidget(dlg)
+        assert dlg.theme_combo.currentData() == "light"
+
+    def test_live_switch_changes_palette(self, qtbot):
+        from voicetype.ui.theme import apply_theme_mode, get_palette, LIGHT_PALETTE, DARK_PALETTE
+        apply_theme_mode("dark")
+        dlg = SettingsDialog(AppConfig())
+        qtbot.addWidget(dlg)
+        # Combo starts at dark (config default); switch to light for a live preview.
+        dlg.theme_combo.setCurrentIndex(dlg.theme_combo.findData("light"))
+        assert get_palette() is LIGHT_PALETTE
+        assert LIGHT_PALETTE.accent in dlg.styleSheet()
+        # Switch back to dark.
+        dlg.theme_combo.setCurrentIndex(dlg.theme_combo.findData("dark"))
+        assert get_palette() is DARK_PALETTE
+        assert DARK_PALETTE.accent in dlg.styleSheet()
+
+    def test_cancel_restores_initial_theme(self, qtbot):
+        from voicetype.ui.theme import apply_theme_mode, get_palette, DARK_PALETTE, LIGHT_PALETTE
+        apply_theme_mode("dark")
+        dlg = SettingsDialog(AppConfig())
+        qtbot.addWidget(dlg)
+        dlg.theme_combo.setCurrentIndex(dlg.theme_combo.findData("light"))  # preview
+        assert get_palette() is LIGHT_PALETTE
+        dlg.reject()  # cancel -> restore dark
+        assert get_palette() is DARK_PALETTE
+
+    def test_save_persists_theme_mode(self, qtbot, mocker):
+        from voicetype.ui.theme import apply_theme_mode
+        mocker.patch("voicetype.ui.settings_dialog.check_network_available", return_value=True)
+        apply_theme_mode("dark")
+        cfg = AppConfig(asr=AsrConfig(api_key="sk-test"))
+        dlg = SettingsDialog(cfg)
+        qtbot.addWidget(dlg)
+        dlg.theme_combo.setCurrentIndex(dlg.theme_combo.findData("light"))
+        dlg._save_and_close()
+        assert cfg.window.theme_mode == "light"

@@ -3,7 +3,7 @@
 import logging
 
 from PySide6.QtCore import QObject, Signal
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QColor
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 from pynput import keyboard
 
@@ -11,6 +11,7 @@ from voicetype.constants import PASTE_MODES, ASR_LANGUAGES, POLISH_STYLES
 from voicetype.hotkey_parser import HotkeyBinding
 from voicetype.i18n import t
 from voicetype.ui.icon_utils import make_circle_icon
+from voicetype.ui.theme import get_palette
 
 logger = logging.getLogger(__name__)
 
@@ -42,14 +43,30 @@ class TrayIcon(QObject):
         self._init_menu()
 
     def _init_icon(self):
-        """Create a simple microphone-style tray icon."""
-        self._icon = make_circle_icon("T", (37, 99, 235))
-        # Pre-build the recording icon once and reuse it instead of
-        # reallocating/painting a QPixmap every recording start.
-        self._recording_icon = make_circle_icon("S", (220, 38, 38))
+        """Create the tray icons from the active palette and wire the tray."""
+        self._build_icons()
         self._tray = QSystemTrayIcon(self._icon)
         self._tray.setToolTip(t("tray.tooltip"))
         self._tray.activated.connect(self._on_activated)
+
+    def _build_icons(self) -> None:
+        """(Re)build the resting + recording tray icons from the active palette.
+
+        Called on construction and after a light/dark theme switch.
+        """
+        pal = get_palette()
+        accent_rgb = QColor(pal.accent).getRgb()[:3]
+        danger_rgb = QColor(pal.danger).getRgb()[:3]
+        self._icon = make_circle_icon("T", accent_rgb)
+        # Pre-build the recording icon once and reuse it instead of
+        # reallocating/painting a QPixmap every recording start.
+        self._recording_icon = make_circle_icon("S", danger_rgb)
+
+    def apply_theme(self) -> None:
+        """Rebuild tray icons for the active palette and refresh the tray."""
+        was_recording = self._is_recording
+        self._build_icons()
+        self._tray.setIcon(self._recording_icon if was_recording else self._icon)
 
     def _init_menu(self):
         menu = QMenu()

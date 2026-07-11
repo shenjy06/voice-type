@@ -102,6 +102,9 @@ class WindowConfig:
     show_on_start: bool = True
     always_on_top: bool = True
     auto_start: bool = False
+    # UI theme mode: "dark" | "light" | "system" (follows OS).
+    # Default "dark" preserves the pre-theme-switch look for existing users.
+    theme_mode: str = "dark"
 
 
 @dataclass

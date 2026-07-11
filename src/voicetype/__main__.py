@@ -48,6 +48,7 @@ from voicetype.ui.history_dialog import HistoryDialog
 from voicetype.ui.main_window import FloatingRecordingWindow, StatusBubble, Toast
 from voicetype.ui.settings_dialog import SettingsDialog
 from voicetype.ui.system_tray import HotkeyManager, TrayIcon
+from voicetype.ui.theme import apply_theme_mode
 from voicetype.i18n import init_language, t
 from voicetype.window_manager import get_foreground_window
 
@@ -124,6 +125,11 @@ class Application:
 
         self.config = AppConfig.load()
         init_language(self.config.language)
+        # Apply the configured UI theme (dark/light/system) before any window
+        # or dialog is constructed so they pick up the right palette at build
+        # time. FloatingRecordingWindow/Toast/StatusBubble read the palette in
+        # paintEvent, so they re-skin on the next repaint after a switch.
+        apply_theme_mode(self.config.window.theme_mode)
         self.audio_recorder = AudioRecorder(
             self.config.recording.sample_rate,
             denoise_enabled=self.config.recording.denoise_enabled,
@@ -538,7 +544,22 @@ class Application:
         if self._settings_dialog is None:
             self._settings_dialog = SettingsDialog(self.config, self.window)
             self._settings_dialog.settings_saved.connect(self._on_settings_saved)
+            # Live theme preview: when the user changes the theme combo (or
+            # Cancel restores it), re-skin the floating window + tray to match.
+            self._settings_dialog.theme_changed.connect(self._on_theme_changed)
         self._settings_dialog.exec()
+
+    def _on_theme_changed(self, mode: str):
+        """Re-apply the active palette to the floating window and tray.
+
+        The SettingsDialog already switched the global palette and re-skinned
+        itself; this refreshes the persistent surfaces (floating window, tray,
+        cached history dialog) which read the palette at paint/icon-build time.
+        """
+        self.window.apply_theme()
+        self.tray.apply_theme()
+        if self._history_dialog is not None:
+            self._history_dialog.apply_theme()
 
     def _show_history(self):
         # Capture the target window BEFORE the (modal) dialog takes the

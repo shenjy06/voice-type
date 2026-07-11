@@ -67,6 +67,17 @@ class TestDefaultConfigs:
         cfg = WindowConfig()
         assert cfg.show_on_start is True
         assert cfg.always_on_top is True
+        # Default theme is dark (preserves the pre-theme-switch look for
+        # existing users; "light"/"system" are opt-in via Settings).
+        assert cfg.theme_mode == "dark"
+
+    def test_window_config_theme_mode_loads_from_dict(self):
+        """theme_mode round-trips through from_dict (forward/backward compat)."""
+        cfg = AppConfig.from_dict({"window": {"theme_mode": "light"}})
+        assert cfg.window.theme_mode == "light"
+        # An old config without theme_mode defaults to dark.
+        cfg_old = AppConfig.from_dict({"window": {"always_on_top": False}})
+        assert cfg_old.window.theme_mode == "dark"
 
 
 class TestAppConfigDefaults:

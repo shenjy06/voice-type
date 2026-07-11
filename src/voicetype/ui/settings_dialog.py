@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QCompleter, QFileDialog, QMessageBox, QInputDialog,
 )
 from PySide6.QtCore import Qt, Signal, QTimer
-from PySide6.QtGui import QIcon, QCursor
+from PySide6.QtGui import QIcon, QCursor, QAction, QColor
 from voicetype.api_client import fetch_models
 from voicetype.audio import MicrophoneMonitor, get_default_input_device_name
 from voicetype.config import (
@@ -24,28 +24,64 @@ from voicetype.config import (
     list_profiles, save_profile, load_profile, delete_profile,
     get_active_profile, set_active_profile,
 )
-from voicetype.constants import PASTE_MODES, ASR_LANGUAGES, DENOISE_STRENGTHS
+from voicetype.constants import PASTE_MODES, ASR_LANGUAGES, DENOISE_STRENGTHS, THEME_MODES
 from voicetype.network import check_network_available
 from voicetype.ui.hotkey_recorder import HotkeyRecorder
 from voicetype.ui.icon_utils import make_circle_icon
 from voicetype.ui.main_window import Toast
+from voicetype.ui.theme import (
+    apply_dialog_theme, apply_theme_mode, get_palette,
+    refresh_icon, eye_icon, eye_off_icon,
+)
 from voicetype.i18n import t
 
 logger = logging.getLogger(__name__)
 
-# Shared hint-label stylesheet to avoid repetition (6 occurrences).
-_HINT_STYLESHEET = "color: #9ca3af; font-size: 12px;"
 _MIC_POLL_INTERVAL_MS = 100
 
 _SETTINGS_ICON = None
 
 
 def _get_settings_icon() -> QIcon:
-    """Lazily create settings icon (requires QApplication to exist first)."""
+    """Lazily create settings icon (requires QApplication to exist first).
+
+    Uses the letter "S" on the active palette's accent circle, matching the
+    tray icon ("T") and history icon ("H") so all app surfaces share one
+    branded letter-mark style instead of font-dependent emoji glyphs. The
+    icon is rebuilt when the theme changes (see _refresh_dialog_theme).
+    """
     global _SETTINGS_ICON
     if _SETTINGS_ICON is None:
-        _SETTINGS_ICON = make_circle_icon("⚙", (99, 102, 241), font_size=14, font_family="Segoe UI")
+        accent_rgb = QColor(get_palette().accent).getRgb()[:3]
+        _SETTINGS_ICON = make_circle_icon("S", accent_rgb, font_size=14, font_family="Segoe UI")
     return _SETTINGS_ICON
+
+
+def _add_password_toggle(line_edit: QLineEdit) -> QAction:
+    """Add a show/hide toggle action to a password-mode QLineEdit.
+
+    Uses a trailing eye/eye-off icon (CC Switch style) so the user can verify
+    a typed key without it staying exposed. Toggles echo mode in place.
+    Returns the action so callers (e.g. SettingsDialog) can re-set its icon
+    after a theme switch.
+    """
+    action = QAction(line_edit)
+    action.setIcon(eye_icon())
+    action.setToolTip(t("settings.show_password"))
+
+    def _toggle():
+        if line_edit.echoMode() == QLineEdit.Password:
+            line_edit.setEchoMode(QLineEdit.Normal)
+            action.setIcon(eye_off_icon())
+            action.setToolTip(t("settings.hide_password"))
+        else:
+            line_edit.setEchoMode(QLineEdit.Password)
+            action.setIcon(eye_icon())
+            action.setToolTip(t("settings.show_password"))
+
+    action.triggered.connect(_toggle)
+    line_edit.addAction(action, QLineEdit.TrailingPosition)
+    return action
 
 
 class PasswordDialog(QDialog):
@@ -54,18 +90,24 @@ class PasswordDialog(QDialog):
     def __init__(self, parent, title: str, prompt: str, confirm: bool = True):
         super().__init__(parent)
         self.setWindowTitle(title)
+        # Themed so it matches the rest of the app (inherits the active palette).
+        apply_dialog_theme(self)
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel(prompt))
         self._pw = QLineEdit()
         self._pw.setEchoMode(QLineEdit.Password)
+        _add_password_toggle(self._pw)
         layout.addWidget(self._pw)
         self._pw2 = None
         if confirm:
             self._pw2 = QLineEdit()
             self._pw2.setEchoMode(QLineEdit.Password)
+            _add_password_toggle(self._pw2)
             layout.addWidget(self._pw2)
         self._error_label = QLabel()
-        self._error_label.setStyleSheet("color: #ef4444; font-size: 12px;")
+        # Styled via objectName so the QSS (which tracks the active palette)
+        # handles the danger color - no inline hex to refresh on theme switch.
+        self._error_label.setObjectName("errorLabel")
         self._error_label.setVisible(False)
         layout.addWidget(self._error_label)
         buttons = QDialogButtonBox(
@@ -93,6 +135,10 @@ class PasswordDialog(QDialog):
 class SettingsDialog(QDialog):
 
     settings_saved = Signal()
+    # Emitted with the new theme mode ("dark"/"light"/"system") when the user
+    # changes the theme combo (live preview) or when Cancel restores the prior
+    # mode. Application connects this to re-skin the floating window + tray.
+    theme_changed = Signal(str)
     # Emitted (on the UI thread) when the background network check finishes;
     # carries True if the network is reachable.
     _network_check_done = Signal(bool)
@@ -129,7 +175,7 @@ class SettingsDialog(QDialog):
         self.setWindowTitle(t("settings.title"))
         self.setWindowIcon(_get_settings_icon())
         self.setModal(True)
-        self.setMinimumWidth(480)
+        self.setMinimumWidth(540)
         self.setWindowFlags(Qt.Dialog)
         self._mic_monitor = None
         self._mic_timer = QTimer(self)
@@ -140,10 +186,16 @@ class SettingsDialog(QDialog):
         # Refresh buttons by section ("asr"/"polish") — populated in _init_ui.
         # Must exist before _init_ui() runs because _make_model_row writes to it.
         self._refresh_buttons: dict[str, QPushButton] = {}
+        # (action, line_edit) pairs for password toggles - tracked so we can
+        # re-set their icons after a theme switch (icons are cached per-palette).
+        self._password_toggles: list = []
         self._model_before_fetch: dict[str, str] = {}
         self._model_items_before_fetch: dict[str, list] = {}
         self._init_ui()
         self._load_config()
+        # Snapshot the theme mode at dialog-open time so Cancel can restore it
+        # (the combo live-applies for preview; see _on_theme_mode_changed).
+        self._initial_theme_mode = self.config.window.theme_mode
         # Word-wrapped labels placed as QFormLayout fields — their height must
         # be enforced because QFormLayout sizes field rows by sizeHint, not by
         # heightForWidth, so wrapped text gets clipped (see _adjust_wrap_heights).
@@ -166,8 +218,13 @@ class SettingsDialog(QDialog):
         self._models_error.connect(self._on_models_error)
 
     def _init_ui(self):
+        # Apply the CC Switch-inspired dark theme to the dialog and all
+        # child widgets / popups / sub-dialogs.
+        apply_dialog_theme(self)
+
         layout = QVBoxLayout(self)
-        layout.setSpacing(12)
+        layout.setSpacing(14)
+        layout.setContentsMargins(16, 16, 16, 16)
 
         def _make_model_row(combo: QComboBox, section: str) -> QWidget:
             """Wrap a model combo with a 'fetch models' refresh button.
@@ -194,8 +251,9 @@ class SettingsDialog(QDialog):
             row.setContentsMargins(0, 0, 0, 0)
             row.setSpacing(6)
             row.addWidget(combo, 1)
-            btn = QPushButton("🔄")
-            btn.setFixedWidth(32)
+            btn = QPushButton()
+            btn.setIcon(refresh_icon())
+            btn.setFixedWidth(34)
             btn.setToolTip(t("settings.refresh_models"))
             btn.setCursor(QCursor(Qt.PointingHandCursor))
             btn.clicked.connect(lambda checked=False, s=section: self._fetch_models(s))
@@ -218,6 +276,14 @@ class SettingsDialog(QDialog):
         self.language_combo.addItem("English", "en")
         self.language_combo.addItem("中文", "zh")
         lang_layout.addRow(t("settings.ui_language"), self.language_combo)
+
+        # Theme mode - live-applies so the user sees the switch immediately.
+        # Cancel restores the mode saved at dialog-open (see reject).
+        self.theme_combo = QComboBox()
+        for label_key, value in THEME_MODES:
+            self.theme_combo.addItem(t(label_key), value)
+        self.theme_combo.currentIndexChanged.connect(self._on_theme_mode_changed)
+        lang_layout.addRow(t("settings.theme"), self.theme_combo)
 
         self.auto_start_check = QCheckBox(t("settings.auto_start"))
         lang_layout.addRow("", self.auto_start_check)
@@ -253,6 +319,7 @@ class SettingsDialog(QDialog):
         self.profile_delete_btn = QPushButton(t("settings.profile_delete"))
         self.profile_save_btn.setCursor(QCursor(Qt.PointingHandCursor))
         self.profile_delete_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self.profile_delete_btn.setObjectName("dangerButton")
         self.profile_save_btn.clicked.connect(self._save_profile_as)
         self.profile_delete_btn.clicked.connect(self._delete_profile)
         profile_row.addWidget(self.profile_save_btn)
@@ -291,15 +358,11 @@ class SettingsDialog(QDialog):
         self.mic_level_bar.setValue(0)
         self.mic_level_bar.setTextVisible(False)
         self.mic_level_bar.setFixedHeight(10)
-        self.mic_level_bar.setStyleSheet(
-            "QProgressBar { background: #1f2937; border: 1px solid #4b5563; border-radius: 5px; }"
-            "QProgressBar::chunk { background: #22c55e; border-radius: 4px; }"
-        )
         stt_misc_layout.addRow(t("settings.mic_level"), self.mic_level_bar)
 
         self.mic_status_label = QLabel(t("settings.mic_status_idle"))
         self.mic_status_label.setWordWrap(True)
-        self.mic_status_label.setStyleSheet(_HINT_STYLESHEET)
+        self.mic_status_label.setObjectName("hintLabel")
         stt_misc_layout.addRow("", self.mic_status_label)
 
         self.mic_test_btn = QPushButton(t("settings.mic_test_start"))
@@ -317,7 +380,7 @@ class SettingsDialog(QDialog):
 
         self.denoise_hint_label = QLabel(t("settings.denoise_hint"))
         self.denoise_hint_label.setWordWrap(True)
-        self.denoise_hint_label.setStyleSheet(_HINT_STYLESHEET)
+        self.denoise_hint_label.setObjectName("hintLabel")
         stt_misc_layout.addRow("", self.denoise_hint_label)
 
         self.vad_check = QCheckBox(t("settings.vad_enabled"))
@@ -331,7 +394,7 @@ class SettingsDialog(QDialog):
 
         self.vad_hint_label = QLabel(t("settings.vad_hint"))
         self.vad_hint_label.setWordWrap(True)
-        self.vad_hint_label.setStyleSheet(_HINT_STYLESHEET)
+        self.vad_hint_label.setObjectName("hintLabel")
         stt_misc_layout.addRow("", self.vad_hint_label)
 
         stt_misc_group.setLayout(stt_misc_layout)
@@ -350,6 +413,9 @@ class SettingsDialog(QDialog):
         self.stt_api_key_input = QLineEdit()
         self.stt_api_key_input.setEchoMode(QLineEdit.Password)
         self.stt_api_key_input.setPlaceholderText("sk-...")
+        self._password_toggles.append(
+            (_add_password_toggle(self.stt_api_key_input), self.stt_api_key_input)
+        )
         stt_api_layout.addRow(t("settings.api_key"), self.stt_api_key_input)
 
         self.stt_base_url_input = QLineEdit()
@@ -374,7 +440,7 @@ class SettingsDialog(QDialog):
 
         self.streaming_hint_label = QLabel(t("settings.streaming_hint"))
         self.streaming_hint_label.setWordWrap(True)
-        self.streaming_hint_label.setStyleSheet(_HINT_STYLESHEET)
+        self.streaming_hint_label.setObjectName("hintLabel")
         stt_api_layout.addRow("", self.streaming_hint_label)
 
         stt_api_group.setLayout(stt_api_layout)
@@ -393,6 +459,9 @@ class SettingsDialog(QDialog):
         self.polish_api_key_input = QLineEdit()
         self.polish_api_key_input.setEchoMode(QLineEdit.Password)
         self.polish_api_key_input.setPlaceholderText("sk-...")
+        self._password_toggles.append(
+            (_add_password_toggle(self.polish_api_key_input), self.polish_api_key_input)
+        )
         polish_api_layout.addRow(t("settings.api_key"), self.polish_api_key_input)
 
         self.polish_base_url_input = QLineEdit()
@@ -440,6 +509,7 @@ class SettingsDialog(QDialog):
         glossary_buttons = QHBoxLayout()
         self.glossary_add_btn = QPushButton(t("settings.glossary_add"))
         self.glossary_remove_btn = QPushButton(t("settings.glossary_remove"))
+        self.glossary_remove_btn.setObjectName("dangerButton")
         self.glossary_add_btn.clicked.connect(lambda: self._add_glossary_row())
         self.glossary_remove_btn.clicked.connect(self._remove_selected_glossary_rows)
         glossary_buttons.addWidget(self.glossary_add_btn)
@@ -459,9 +529,11 @@ class SettingsDialog(QDialog):
         glossary_layout.addWidget(glossary_group)
         self._tabs.addTab(glossary_tab, t("settings.glossary_tab"))
 
-        layout.addWidget(self._tabs)
+        # === Tab: Output ===
+        output_tab = QWidget()
+        output_tab_layout = QVBoxLayout(output_tab)
+        output_tab_layout.setSpacing(12)
 
-        # === Output Settings (always visible below tabs) ===
         output_group = QGroupBox(t("settings.output"))
         output_layout = QFormLayout()
 
@@ -479,9 +551,15 @@ class SettingsDialog(QDialog):
         output_layout.addRow("", self.auto_paste_check)
 
         output_group.setLayout(output_layout)
-        layout.addWidget(output_group)
+        output_tab_layout.addWidget(output_group)
+        output_tab_layout.addStretch()
+        self._tabs.addTab(output_tab, t("settings.output"))
 
-        # === Hotkey Settings ===
+        # === Tab: Hotkeys ===
+        hotkey_tab = QWidget()
+        hotkey_tab_layout = QVBoxLayout(hotkey_tab)
+        hotkey_tab_layout.setSpacing(12)
+
         hotkey_group = QGroupBox(t("settings.hotkeys"))
         hotkey_layout = QVBoxLayout()
 
@@ -497,20 +575,25 @@ class SettingsDialog(QDialog):
 
         self._hint_label = QLabel(t("settings.hotkey_hint"))
         self._hint_label.setWordWrap(True)
-        self._hint_label.setStyleSheet(_HINT_STYLESHEET)
+        self._hint_label.setObjectName("hintLabel")
         hotkey_layout.addWidget(self._hint_label)
 
         self._cancel_label = QLabel(t("settings.hotkey_cancel"))
         self._cancel_label.setWordWrap(True)
-        self._cancel_label.setStyleSheet(_HINT_STYLESHEET)
+        self._cancel_label.setObjectName("hintLabel")
         hotkey_layout.addWidget(self._cancel_label)
 
         hotkey_group.setLayout(hotkey_layout)
-        layout.addWidget(hotkey_group)
+        hotkey_tab_layout.addWidget(hotkey_group)
+        hotkey_tab_layout.addStretch()
+        self._tabs.addTab(hotkey_tab, t("settings.hotkeys"))
+
+        layout.addWidget(self._tabs)
 
         # === Buttons ===
         button_box = QDialogButtonBox()
         self._save_btn = QPushButton(t("settings.save"))
+        self._save_btn.setObjectName("primaryButton")
         self._save_btn.setDefault(True)
         self._cancel_btn = QPushButton(t("settings.cancel"))
         button_box.addButton(self._save_btn, QDialogButtonBox.AcceptRole)
@@ -525,6 +608,14 @@ class SettingsDialog(QDialog):
         if idx >= 0:
             self.language_combo.setCurrentIndex(idx)
         self.auto_start_check.setChecked(self.config.window.auto_start)
+        # Theme combo: block signals so programmatic selection doesn't trigger
+        # the live-preview handler (the palette was already applied at startup
+        # by Application; we only want the combo to reflect the saved value).
+        self.theme_combo.blockSignals(True)
+        idx = self.theme_combo.findData(self.config.window.theme_mode)
+        if idx >= 0:
+            self.theme_combo.setCurrentIndex(idx)
+        self.theme_combo.blockSignals(False)
 
         # STT tab
         self.stt_api_key_input.setText(self.config.asr.api_key)
@@ -703,7 +794,8 @@ class SettingsDialog(QDialog):
         if btn is None:
             return
         btn.setEnabled(not refreshing)
-        btn.setText("⏳" if refreshing else "🔄")
+        # The vector icon stays; Qt auto-dims it while disabled. The combo
+        # shows the "Loading models…" placeholder for explicit progress.
 
     def _restore_combo_on_fetch_failure(self, section: str) -> None:
         """Put back every item the combo held before the fetch started."""
@@ -773,6 +865,7 @@ class SettingsDialog(QDialog):
         # General — language
         self.config.language = self.language_combo.currentData()
         self.config.window.auto_start = self.auto_start_check.isChecked()
+        self.config.window.theme_mode = self.theme_combo.currentData()
 
         # STT
         self.config.asr.api_key = api_key
@@ -1131,6 +1224,42 @@ class SettingsDialog(QDialog):
         self.hotkey_recorder.set_hotkey(hotkey)
         self.hotkey_recorder.stop_recording()
 
+    # ---- theme switching -------------------------------------------------
+
+    def _on_theme_mode_changed(self):
+        """Live-apply the newly selected theme mode for instant preview.
+
+        Switches the global active palette, re-skins this dialog, and emits
+        ``theme_changed`` so Application can refresh the floating window and
+        tray. Cancel (see :meth:`reject`) restores the mode saved at open.
+        """
+        mode = self.theme_combo.currentData()
+        apply_theme_mode(mode)
+        self._refresh_dialog_theme()
+        self.theme_changed.emit(mode)
+
+    def _refresh_dialog_theme(self):
+        """Re-apply the active palette to this dialog (QSS + vector icons).
+
+        Called after a theme switch so an already-visible dialog re-skins
+        without being recreated. The QSS handles all styled widgets; the
+        per-palette vector icons (refresh buttons, password toggles, window
+        icon) need explicit re-setting because QIcon is copied by value.
+        """
+        apply_dialog_theme(self)
+        for btn in self._refresh_buttons.values():
+            btn.setIcon(refresh_icon())
+        for action, line_edit in self._password_toggles:
+            action.setIcon(eye_off_icon() if line_edit.echoMode() != QLineEdit.Password
+                           else eye_icon())
+        # Window icon is cached globally; clear it so the next _get_settings_icon
+        # rebuilds with the new accent.
+        global _SETTINGS_ICON
+        _SETTINGS_ICON = None
+        self.setWindowIcon(_get_settings_icon())
+        # Force the dialog background to repaint with the new palette.
+        self.update()
+
     def _on_denoise_toggled(self, enabled: bool):
         """Enable/disable the strength selector to match the checkbox."""
         self.denoise_strength_combo.setEnabled(enabled)
@@ -1222,9 +1351,18 @@ class SettingsDialog(QDialog):
         minimum height to its heightForWidth value forces the layout to
         allocate the full wrapped height.
         """
+        # The adjust is deferred via QTimer.singleShot(0, ...); if the dialog
+        # was torn down (C++ deleted) before the timer fires - e.g. a test
+        # closing the dialog right after the mic-label signal lands - the
+        # Python wrapper is still alive but the underlying QLabel is gone.
+        # Bail out rather than crash on lbl.width().
+        from shiboken6 import isValid
+        if not isValid(self):
+            self._wrap_adjust_pending = False
+            return
         self._wrap_adjust_pending = False
         for lbl in self._wrap_labels:
-            if lbl.width() <= 0:
+            if not isValid(lbl) or lbl.width() <= 0:
                 continue
             # Reset first so the label can shrink back down when the dialog
             # widens and the text no longer wraps.
@@ -1251,6 +1389,15 @@ class SettingsDialog(QDialog):
     def reject(self):
         self._stop_microphone_monitor()
         self.hotkey_recorder.stop_recording()
+        # The theme combo live-applies for preview. On Cancel, undo any
+        # preview switch the user made so the app reverts to the mode that
+        # was active when the dialog opened. Emit theme_changed so
+        # Application refreshes the floating window + tray to match.
+        current = self.theme_combo.currentData()
+        if current != self._initial_theme_mode:
+            apply_theme_mode(self._initial_theme_mode)
+            self._refresh_dialog_theme()
+            self.theme_changed.emit(self._initial_theme_mode)
         super().reject()
 
     def accept(self):

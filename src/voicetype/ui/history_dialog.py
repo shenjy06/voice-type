@@ -13,10 +13,11 @@ from PySide6.QtWidgets import (
     QTextEdit,
     QVBoxLayout,
 )
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QIcon, QColor
 
 from voicetype.history import HistoryEntry, HistoryStore
 from voicetype.ui.icon_utils import make_circle_icon
+from voicetype.ui.theme import ACCENT, apply_dialog_theme
 from voicetype.i18n import t
 
 _HISTORY_ICON = None
@@ -26,7 +27,7 @@ def _get_history_icon() -> QIcon:
     """Lazily create history icon (requires QApplication to exist first)."""
     global _HISTORY_ICON
     if _HISTORY_ICON is None:
-        _HISTORY_ICON = make_circle_icon("H", (16, 185, 129), font_size=14)
+        _HISTORY_ICON = make_circle_icon("H", QColor(ACCENT).getRgb()[:3], font_size=14)
     return _HISTORY_ICON
 
 
@@ -44,6 +45,9 @@ class HistoryDialog(QDialog):
         self.setWindowIcon(_get_history_icon())
         self.setModal(True)
         self.setMinimumSize(640, 420)
+        # Apply the same dark indigo theme used by SettingsDialog so the two
+        # dialogs share one look.
+        apply_dialog_theme(self)
         self._copy_feedback_timer = QTimer(self)
         self._copy_feedback_timer.setSingleShot(True)
         self._copy_feedback_timer.timeout.connect(self._restore_copy_label)
@@ -71,6 +75,9 @@ class HistoryDialog(QDialog):
         self.copy_btn.setToolTip(t("history.copy"))
         self.paste_btn = QPushButton(t("history.paste"))
         self.clear_btn = QPushButton(t("history.clear"))
+        # Clearing all history is destructive - style it as a danger button
+        # so it reads as distinct from the safe copy/paste actions.
+        self.clear_btn.setObjectName("dangerButton")
         self.copy_btn.clicked.connect(self._copy_current)
         self.paste_btn.clicked.connect(self._paste_current)
         self.clear_btn.clicked.connect(self._clear_history)
@@ -157,3 +164,14 @@ class HistoryDialog(QDialog):
         self.paste_btn.setText(t("history.paste"))
         self.clear_btn.setText(t("history.clear"))
         self.empty_label.setText(t("history.empty"))
+
+    def apply_theme(self):
+        """Re-skin the dialog after a light/dark theme switch.
+
+        Re-applies the QSS (which tracks the active palette) and rebuilds the
+        window icon so its accent circle matches the new theme.
+        """
+        apply_dialog_theme(self)
+        global _HISTORY_ICON
+        _HISTORY_ICON = None
+        self.setWindowIcon(_get_history_icon())
