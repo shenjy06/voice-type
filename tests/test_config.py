@@ -57,6 +57,7 @@ class TestDefaultConfigs:
         assert cfg.paste_delay_ms == 120
         assert cfg.auto_paste is True
         assert cfg.paste_mode == "auto"
+        assert cfg.continuous_mode is False
 
     def test_glossary_entry_defaults(self):
         cfg = GlossaryEntry()
@@ -309,6 +310,16 @@ class TestAppConfigFromDict:
         assert cfg.output.auto_paste is False
         assert cfg.window.show_on_start is True
         assert cfg.hotkey.toggle_hotkey == "right_shift"
+
+    def test_from_dict_continuous_mode(self):
+        """continuous_mode round-trips through from_dict."""
+        cfg = AppConfig.from_dict({"output": {"continuous_mode": True}})
+        assert cfg.output.continuous_mode is True
+
+    def test_from_dict_missing_continuous_mode_uses_default(self):
+        """Old configs without continuous_mode get the safe default (off)."""
+        cfg = AppConfig.from_dict({"output": {"auto_paste": True}})
+        assert cfg.output.continuous_mode is False
 
 
 class TestAppConfigLoadSave:

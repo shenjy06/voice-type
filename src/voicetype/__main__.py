@@ -67,16 +67,17 @@ class _SafeFormatMap(dict):
 
 
 class _PasteBridge(QObject):
-    """Marshals a background-thread paste failure to the UI thread.
+    """Marshals a background-thread paste/copy result to the UI thread.
 
     Qt signals are the correct cross-thread mechanism here: a signal emitted
-    from the paste worker thread is delivered to this object's thread (the UI
-    thread) via a queued connection. ``QTimer.singleShot`` cannot be used from
-    a worker thread because timers are thread-affine and the worker has no
-    event loop.
+    from the output worker thread is delivered to this object's thread (the
+    UI thread) via a queued connection. ``QTimer.singleShot`` cannot be used
+    from a worker thread because timers are thread-affine and the worker has
+    no event loop.
     """
 
-    paste_failed = Signal()
+    paste_finished = Signal(bool)  # True = pasted/copied OK, False = failed
+    paste_continue_ready = Signal(bool)  # per-operation: only connected for continuous sessions
 
 
 class _SilenceBridge(QObject):
@@ -151,6 +152,13 @@ class Application:
         # success / quit.
         self._retry_audio_path: str | None = None
         self._retry_context: tuple[str, str] = ("", "")
+        # Continuous dictation session state. ``_continuous_active`` is True
+        # while a continuous session is in progress (between the first
+        # recording and a cancel/error/quit). The per-operation continue
+        # signal (paste_continue_ready) avoids the shared-state bug where
+        # a history paste completing before a processing-done paste could
+        # mistakenly restart recording.
+        self._continuous_active = False
         logger.info("Application initialized (configured=%s)", self.config.is_configured())
 
         # Audio-level sync timer — owned at Application level so it can be
@@ -166,7 +174,8 @@ class Application:
         # Bridge for marshaling background-thread paste failures to the UI
         # thread (created here so it lives on the UI/main thread).
         self._paste_bridge = _PasteBridge()
-        self._paste_bridge.paste_failed.connect(self._on_paste_failed)
+        self._paste_bridge.paste_finished.connect(self._on_paste_finished)
+        self._paste_bridge.paste_continue_ready.connect(self._on_continue_ready)
 
         # Bridge for marshaling VAD silence detection from the audio thread to
         # the UI thread. The recorder invokes ``on_silence`` on its callback
@@ -244,6 +253,7 @@ class Application:
         self.tray.polish_toggled.connect(self._set_polish_enabled)
         self.tray.paste_mode_changed.connect(self._set_paste_mode)
         self.tray.asr_language_changed.connect(self._set_asr_language)
+        self.tray.continuous_mode_toggled.connect(self._set_continuous_mode)
         self.tray.quit_requested.connect(self._quit)
         self.tray.apply_config(self.config)
         self.tray.show()
@@ -293,6 +303,9 @@ class Application:
         self._recording_controller.toggle()
 
     def _cancel_recording(self):
+        # Cancel ends any active continuous session — the user explicitly
+        # wants to stop, so don't auto-restart after the current cycle.
+        self._continuous_active = False
         self._recording_controller.cancel()
 
     def _on_recording_started(self):
@@ -300,6 +313,11 @@ class Application:
         # Starting fresh — abandon any retained retry audio from a previous
         # failed cycle so its file doesn't leak.
         self._abandon_retry_state()
+        # Entering a continuous session if the user enabled it. Auto-continued
+        # recordings also flow through here, but _continuous_active is already
+        # True in that case (idempotent set).
+        if self.config.output.continuous_mode:
+            self._continuous_active = True
         # Sync streaming flag from config and start the streaming ASR client
         # before the recorder begins capturing, so no PCM chunks are lost.
         streaming = self.config.asr.streaming_enabled
@@ -366,26 +384,27 @@ class Application:
         if refined_text:
             logger.info("Processing done: %d chars", len(refined_text))
             self.history_store.add(refined_text)
-            if self.config.output.auto_paste:
-                self._paste_async(refined_text, self._recording_controller.saved_hwnd)
-            else:
-                logger.debug("Auto-paste disabled — copying to clipboard only")
-                # Copy on a background thread: clipboard contention (another
-                # app holding the clipboard open) can make pyperclip.copy block
-                # for hundreds of ms, which would freeze the UI thread.
-                threading.Thread(
-                    target=pyperclip.copy, args=(refined_text,), daemon=True
-                ).start()
+            self._output_text_async(
+                refined_text,
+                self._recording_controller.saved_hwnd,
+                continue_session=self._continuous_active,
+            )
+        elif self._continuous_active and not self._quitting:
+            # Empty transcript: nothing to paste, but keep the continuous
+            # session going so the user can re-dictate immediately.
+            self._toggle_recording()
 
-    def _paste_async(self, text: str, hwnd: int) -> None:
-        """Paste text on a background thread so the pre-paste delay and the
-        keystroke sequence never block the UI thread.
+    def _output_text_async(self, text: str, hwnd: int, continue_session: bool = False) -> None:
+        """Output text on a background thread — paste (auto_paste on) or copy
+        to clipboard (auto_paste off) — so the pre-paste delay and keystroke
+        sequence never block the UI thread.
 
-        Window focus (``set_foreground_window``) and keyboard injection
-        (``keybd_event``) are OS-level and thread-agnostic — the foreground
-        restriction is handled via ``AttachThreadInput`` inside
-        ``set_foreground_window``. A paste failure is surfaced as a toast,
-        marshaled back to the UI thread via the ``_paste_bridge`` signal.
+        Unifies the paste and copy-only paths so both report completion via
+        ``paste_finished``. When ``continue_session`` is True, also emits
+        ``paste_continue_ready`` so the continuous-dictation loop restarts
+        recording after the output lands. Window focus and keyboard injection
+        are OS-level and thread-agnostic — the foreground restriction is
+        handled via ``AttachThreadInput`` inside ``set_foreground_window``.
 
         Threads are tracked in ``_paste_threads`` so ``_quit`` can join them
         before Qt objects are destroyed, preventing a daemon-thread ctypes
@@ -395,17 +414,42 @@ class Application:
         self._paste_threads = [t for t in self._paste_threads if t.is_alive()]
 
         def _work():
-            pasted = self.typer.output_text(text, hwnd)
-            if not pasted:
-                self._paste_bridge.paste_failed.emit()
+            if self.config.output.auto_paste:
+                success = self.typer.output_text(text, hwnd)
+            else:
+                try:
+                    pyperclip.copy(text)
+                    success = True
+                except Exception:
+                    success = False
+            self._paste_bridge.paste_finished.emit(success)
+            if continue_session:
+                self._paste_bridge.paste_continue_ready.emit(success)
 
         t = threading.Thread(target=_work, daemon=True)
         self._paste_threads.append(t)
         t.start()
 
-    def _on_paste_failed(self):
-        """Show the paste-failed toast (invoked on the UI thread via signal)."""
-        self._show_toast(t("msg.paste_failed_copied"))
+    def _on_paste_finished(self, success: bool):
+        """Handle paste/copy completion (invoked on the UI thread via signal).
+
+        On failure, surface the paste-failed toast. Continuous-dictation
+        restart is handled by the per-operation ``paste_continue_ready``
+        signal (see ``_on_continue_ready``), which is only connected for
+        processing-done outputs — history pastes never trigger a restart.
+        """
+        if not success:
+            self._show_toast(t("msg.paste_failed_copied"))
+
+    def _on_continue_ready(self, success: bool):
+        """Handle per-operation continue signal (invoked on the UI thread).
+
+        Only connected for processing-done outputs where ``continue_session``
+        was True, so history pastes never reach this handler. On success,
+        restart recording if the session is still active.
+        """
+        if success and self._continuous_active and not self._quitting:
+            self._toggle_recording()
 
     def _on_silence_detected(self):
         """Handle VAD auto-stop (invoked on the UI thread via signal).
@@ -423,6 +467,9 @@ class Application:
     def _on_processing_error(self, error_msg: str):
         logger.error("Processing error: %s", error_msg)
         self._cleanup_streaming()
+        # A failure breaks the continuous loop — don't auto-restart on a
+        # broken cycle. The user can retry, which doesn't resume the session.
+        self._continuous_active = False
         # Retain the audio file for retry. On a normal-flow failure the
         # recorder still holds the path — take ownership so it survives
         # (cancel_during_processing no longer calls recorder.cleanup()).
@@ -580,13 +627,7 @@ class Application:
         if self._history_dialog is not None:
             self._history_dialog.accept()
         target_hwnd = self._history_target_hwnd or get_foreground_window()
-        if self.config.output.auto_paste:
-            self._paste_async(text, target_hwnd)
-        else:
-            # Background thread — see _on_processing_done for rationale.
-            threading.Thread(
-                target=pyperclip.copy, args=(text,), daemon=True
-            ).start()
+        self._output_text_async(text, target_hwnd)
 
     def _show_toast(self, message: str):
         toast = Toast(message, parent=self.window)
@@ -642,6 +683,7 @@ class Application:
             return
         self._quitting = True
         logger.info("Application quitting")
+        self._continuous_active = False
         self.hotkey_manager.stop()
         self._audio_level_timer.stop()
         # Wait for any in-flight paste thread to finish before we tear down
@@ -711,6 +753,14 @@ class Application:
 
     def _set_asr_language(self, language: str):
         self.config.asr.language = language
+        self._save_quick_settings()
+
+    def _set_continuous_mode(self, enabled: bool):
+        self.config.output.continuous_mode = enabled
+        if not enabled:
+            # Turning off continuous mode ends any active session - the
+            # current cycle finishes but no new recording auto-starts.
+            self._continuous_active = False
         self._save_quick_settings()
 
     # ---- entry point -------------------------------------------------------

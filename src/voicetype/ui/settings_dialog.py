@@ -219,6 +219,7 @@ class SettingsDialog(QDialog):
             self.denoise_hint_label,
             self.vad_hint_label,
             self.streaming_hint_label,
+            self.continuous_hint_label,
         ]
         self._tabs.currentChanged.connect(lambda _: self._schedule_adjust_wrap_heights())
         # Snapshot original API-related fields to detect changes on save
@@ -603,6 +604,14 @@ class SettingsDialog(QDialog):
         self.auto_paste_check = QCheckBox(t("settings.auto_paste"))
         output_layout.addRow("", self.auto_paste_check)
 
+        self.continuous_mode_check = QCheckBox(t("settings.continuous_mode"))
+        output_layout.addRow("", self.continuous_mode_check)
+
+        self.continuous_hint_label = QLabel(t("settings.continuous_hint"))
+        self.continuous_hint_label.setWordWrap(True)
+        self.continuous_hint_label.setObjectName("hintLabel")
+        output_layout.addRow("", self.continuous_hint_label)
+
         output_group.setLayout(output_layout)
         output_tab_layout.addWidget(output_group)
         output_tab_layout.addStretch()
@@ -717,6 +726,7 @@ class SettingsDialog(QDialog):
             idx = self.paste_mode_combo.findData("auto")
         self.paste_mode_combo.setCurrentIndex(idx)
         self.auto_paste_check.setChecked(self.config.output.auto_paste)
+        self.continuous_mode_check.setChecked(self.config.output.continuous_mode)
 
         # Glossary
         self.glossary_table.setRowCount(0)
@@ -943,6 +953,7 @@ class SettingsDialog(QDialog):
         self.config.output.paste_delay_ms = self.paste_delay_spin.value()
         self.config.output.paste_mode = self.paste_mode_combo.currentData()
         self.config.output.auto_paste = self.auto_paste_check.isChecked()
+        self.config.output.continuous_mode = self.continuous_mode_check.isChecked()
 
         # Glossary
         self.config.glossary = self._collect_glossary_entries()

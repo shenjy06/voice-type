@@ -1,7 +1,7 @@
 """Tests for voice_type.polisher — TextPolisher."""
 
 from unittest.mock import MagicMock, patch
-from voicetype.polisher import TextPolisher, _BASE_PROMPT, STYLE_OVERRIDES, _build_system_prompt
+from voicetype.polisher import TextPolisher, _BASE_PROMPT, STYLE_OVERRIDES, _build_system_prompt, _language_hint
 from tests.conftest import make_config
 
 
@@ -197,3 +197,72 @@ class TestTextPolisherWarmup:
 
         cfg = make_config(polish={"api_key": "sk", "base_url": "https://api"})
         TextPolisher(cfg).warmup()  # must not raise
+
+
+class TestLanguageHint:
+    """_language_hint - determines the primary language for the polisher prompt."""
+
+    def test_explicit_zh(self):
+        assert _language_hint("hello", "zh") == "Chinese"
+
+    def test_explicit_en(self):
+        assert _language_hint("你好", "en") == "English"
+
+    def test_auto_chinese_text(self):
+        assert _language_hint("你好世界", "auto") == "Chinese"
+
+    def test_auto_english_text(self):
+        assert _language_hint("hello world", "auto") == ""
+
+    def test_auto_empty_text(self):
+        assert _language_hint("", "auto") == ""
+
+    def test_auto_mixed_mostly_chinese(self):
+        # "hi 你好" -> 2 CJK / 5 chars = 0.4 > 0.3 -> Chinese
+        assert _language_hint("hi 你好", "auto") == "Chinese"
+
+    def test_auto_mixed_mostly_english(self):
+        # "hello 你好" -> 2 CJK / 8 chars = 0.25 < 0.3 -> auto-detect
+        assert _language_hint("hello 你好", "auto") == ""
+
+    def test_other_language_code_returns_empty(self):
+        assert _language_hint("こんにちは", "ja") == ""
+
+
+class TestPolishLanguageHintInjection:
+    """The language hint is appended to the system prompt when known."""
+
+    def test_zh_language_appends_hint(self, mocker):
+        mock_resp = MagicMock()
+        mock_resp.choices = [MagicMock()]
+        mock_resp.choices[0].message.content = "ok"
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = mock_resp
+        _mock_api_client(mocker, mock_client)
+        cfg = make_config(
+            polish={"api_key": "sk", "base_url": "https://api", "model": "gpt-4o"},
+            asr={"language": "zh"},
+        )
+        polisher = TextPolisher(cfg)
+        polisher.polish("hello")
+
+        system_prompt = mock_client.chat.completions.create.call_args[1]["messages"][0]["content"]
+        assert "Primary Language" in system_prompt
+        assert "Chinese" in system_prompt
+
+    def test_auto_english_text_no_hint(self, mocker):
+        mock_resp = MagicMock()
+        mock_resp.choices = [MagicMock()]
+        mock_resp.choices[0].message.content = "ok"
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = mock_resp
+        _mock_api_client(mocker, mock_client)
+        cfg = make_config(
+            polish={"api_key": "sk", "base_url": "https://api", "model": "gpt-4o"},
+            asr={"language": "auto"},
+        )
+        polisher = TextPolisher(cfg)
+        polisher.polish("hello world")
+
+        system_prompt = mock_client.chat.completions.create.call_args[1]["messages"][0]["content"]
+        assert "Primary Language" not in system_prompt

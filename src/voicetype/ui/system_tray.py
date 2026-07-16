@@ -25,6 +25,7 @@ class TrayIcon(QObject):
     recording_toggled = Signal()
     retry_requested = Signal()
     auto_paste_toggled = Signal(bool)
+    continuous_mode_toggled = Signal(bool)
     polish_toggled = Signal(bool)
     polish_style_changed = Signal(str)
     paste_mode_changed = Signal(str)
@@ -95,6 +96,11 @@ class TrayIcon(QObject):
         self.auto_paste_action.toggled.connect(self.auto_paste_toggled.emit)
         menu.addAction(self.auto_paste_action)
 
+        self.continuous_mode_action = QAction(t("tray.continuous_mode"), menu)
+        self.continuous_mode_action.setCheckable(True)
+        self.continuous_mode_action.toggled.connect(self.continuous_mode_toggled.emit)
+        menu.addAction(self.continuous_mode_action)
+
         self.polish_action = QAction(t("tray.polish"), menu)
         self.polish_action.setCheckable(True)
         self.polish_action.toggled.connect(self.polish_toggled.emit)
@@ -152,6 +158,7 @@ class TrayIcon(QObject):
     def apply_config(self, config):
         """Reflect current runtime config in quick toggle actions."""
         self._set_action_checked(self.auto_paste_action, config.output.auto_paste)
+        self._set_action_checked(self.continuous_mode_action, config.output.continuous_mode)
         self._set_action_checked(self.polish_action, config.polish.enabled)
         self._check_action_group(self.paste_mode_actions, config.output.paste_mode, "auto")
         self._check_action_group(self.polish_style_actions, config.polish.style, "default")
@@ -199,6 +206,7 @@ class TrayIcon(QObject):
         )
         self._retry_action.setText(t("tray.retry"))
         self.auto_paste_action.setText(t("tray.auto_paste"))
+        self.continuous_mode_action.setText(t("tray.continuous_mode"))
         self.polish_action.setText(t("tray.polish"))
         self.polish_style_menu.setTitle(t("tray.polish_style"))
         for label_key, value in self.POLISH_STYLES:

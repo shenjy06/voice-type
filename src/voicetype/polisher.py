@@ -1,6 +1,7 @@
 """Text polishing via LLM API."""
 
 import logging
+import re
 import time
 from functools import lru_cache
 
@@ -65,6 +66,39 @@ _CONTEXT_USER_INNER_SUFFIX = """
 _CONTEXT_USER_SUFFIX = """
 
 Remember: output ONLY the polished version of the text between <new_text> tags. Do NOT include the context text. Do NOT end the output with any punctuation mark."""
+
+
+# Language hint appended to the system prompt when the primary language can
+# be determined. Guides the LLM to stay in the right language for mixed
+# input (e.g. Chinese text with English technical terms) instead of
+# drifting to the wrong language. Empty hint = let the LLM auto-detect.
+_CJK_HAN_RE = re.compile(r"[一-鿿]")
+
+_LANG_HINT_SECTION = (
+    "\n\n## Primary Language\n"
+    "The input is primarily in {lang}. Refine the text in {lang}. "
+    "Preserve foreign terms (proper names, technical terms, brand names) "
+    "as-is - do not translate them."
+)
+
+
+def _language_hint(text: str, configured_language: str) -> str:
+    """Return a language name to guide the polisher, or '' to auto-detect.
+
+    An explicit ASR language (zh/en) is trusted as the user's intent. For
+    'auto', infer from CJK Han-character ratio: enough Han chars means
+    Chinese; otherwise return '' so the LLM falls back to its own detection
+    (the text may be English or a language we don't model). Other codes
+    are left to the LLM.
+    """
+    if configured_language == "zh":
+        return "Chinese"
+    if configured_language == "en":
+        return "English"
+    if configured_language == "auto" and text:
+        if len(_CJK_HAN_RE.findall(text)) / len(text) > 0.3:
+            return "Chinese"
+    return ""
 
 
 @lru_cache(maxsize=8)  # 4 styles × 2 context-booleans
@@ -164,6 +198,9 @@ class TextPolisher:
         """Refine text using the LLM, with optional surrounding context."""
         has_context = bool(context_before or context_after)
         system_prompt = _build_system_prompt(self.config.polish.style, has_context=has_context)
+        lang = _language_hint(text, self.config.asr.language)
+        if lang:
+            system_prompt += _LANG_HINT_SECTION.format(lang=lang)
 
         if has_context:
             user_content = self._build_context_user_message(text, context_before, context_after)

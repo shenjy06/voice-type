@@ -561,6 +561,86 @@ class TestApplication:
         mock_dialog_cls.assert_called_once()
         mock_dialog.exec.assert_called_once()
 
+    # ---- continuous dictation ---------------------------------------------
+
+    def test_continuous_mode_restarts_recording_after_paste(self, qtbot, mocker):
+        """After a successful paste in a continuous session, recording restarts."""
+        app = self._make_application(qtbot, mocker)
+        app.config.output.auto_paste = True
+        app._continuous_active = True
+        app._recording_controller._saved_hwnd = 12345
+        app.typer.output_text = mocker.MagicMock(return_value=True)
+        app.audio_recorder.cleanup = mocker.MagicMock()
+        toggles = []
+        app._toggle_recording = lambda: toggles.append(1)
+
+        app._on_processing_done("Hello!")
+
+        qtbot.waitUntil(lambda: app.typer.output_text.called, timeout=2000)
+        qtbot.waitUntil(lambda: len(toggles) > 0, timeout=2000)
+        assert len(toggles) == 1
+
+    def test_continuous_mode_empty_transcript_restarts(self, qtbot, mocker):
+        """Empty transcript in a continuous session restarts recording immediately."""
+        app = self._make_application(qtbot, mocker)
+        app._continuous_active = True
+        app.audio_recorder.cleanup = mocker.MagicMock()
+        toggles = []
+        app._toggle_recording = lambda: toggles.append(1)
+
+        app._on_processing_done("")
+
+        assert len(toggles) == 1
+        app.history_store.add.assert_not_called()
+
+    def test_continuous_mode_paste_failure_no_restart(self, qtbot, mocker):
+        """A failed paste in a continuous session does not restart recording."""
+        app = self._make_application(qtbot, mocker)
+        app.config.output.auto_paste = True
+        app._continuous_active = True
+        app._recording_controller._saved_hwnd = 12345
+        app.typer.output_text = mocker.MagicMock(return_value=False)
+        app.audio_recorder.cleanup = mocker.MagicMock()
+        mocker.patch("voicetype.__main__.Toast")
+        toggles = []
+        app._toggle_recording = lambda: toggles.append(1)
+
+        app._on_processing_done("Hello!")
+
+        qtbot.waitUntil(lambda: app.typer.output_text.called, timeout=2000)
+        # _on_paste_finished shows a toast on failure; wait for it.
+        qtbot.waitUntil(lambda: len(app._toasts) > 0, timeout=2000)
+        assert len(toggles) == 0
+
+    def test_cancel_recording_ends_continuous_session(self, qtbot, mocker):
+        """Cancel clears the continuous-session flag."""
+        app = self._make_application(qtbot, mocker)
+        app._continuous_active = True
+
+        app._cancel_recording()
+
+        assert app._continuous_active is False
+
+    def test_processing_error_ends_continuous_session(self, qtbot, mocker):
+        """A processing error clears the continuous-session flag."""
+        app = self._make_application(qtbot, mocker)
+        app._continuous_active = True
+        app.audio_recorder.take_audio_path = mocker.MagicMock(return_value=None)
+
+        app._on_processing_error("API failed")
+
+        assert app._continuous_active is False
+
+    def test_disabling_continuous_mode_ends_active_session(self, qtbot, mocker):
+        """Turning off continuous mode via quick settings clears the session flag."""
+        app = self._make_application(qtbot, mocker)
+        app._continuous_active = True
+
+        app._set_continuous_mode(False)
+
+        assert app._continuous_active is False
+        assert app.config.output.continuous_mode is False
+
     def test_show_settings_reuses_existing_dialog(self, qtbot, mocker):
         app = self._make_application(qtbot, mocker)
         app._settings_dialog = mocker.MagicMock()

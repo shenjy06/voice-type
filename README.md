@@ -15,8 +15,10 @@ Licensed under [GPL-3.0](LICENSE).
 - **Processing Retry**: Failed batch processing (network jitter, rate limiting, API timeout) preserves the audio — retry from the tray menu without re-recording
 - **Speech Recognition (STT)**: Transcribe recorded audio to text (OpenAI-compatible protocol)
 - **Smart Refinement**: LLM automatically removes filler words, fixes grammar, and improves clarity
+- **Multilingual Polish Hint**: Uses the configured ASR language to keep the LLM focused on the correct language when refining mixed Chinese/English dictation, reducing drift toward the wrong language
 - **Glossary Corrections**: Replace frequently misrecognized names, project terms, and technical terms before refinement
 - **Text Injection**: Restores the original foreground window and pastes the refined text at the cursor position
+- **Continuous Dictation**: After each segment is processed and pasted, automatically restart recording so you can dictate long-form content without re-pressing the toggle hotkey. Press the cancel hotkey to end the session
 - **Local History**: Keeps recent recognized text in local SQLite for copy or re-paste from the tray menu
 - **Floating Control Window**: Always-on-top mini window with drag support and pulsing red dot animation
 - **Status Bubble**: Shows "录制中..." during recording, "润色中..." during processing, dismisses after paste
@@ -167,6 +169,8 @@ misrecognizes.
 
 The Right Alt hotkey distinguishes between a tap (start/stop toggle) and modifier use (holding it with another key will not trigger recording). Left Alt is ignored so it stays free for normal typing.
 
+When continuous dictation is enabled, a tap of the toggle hotkey finishes the current segment (process + paste) and automatically starts recording the next segment. Press Right Alt+C to end the continuous session.
+
 ### Output Configuration
 
 | Field | Description | Default |
@@ -174,6 +178,7 @@ The Right Alt hotkey distinguishes between a tap (start/stop toggle) and modifie
 | Paste Delay | Delay before pasting (milliseconds) | `120 ms` |
 | Paste Mode | Auto-detect target window, force `Ctrl+V`, force `Ctrl+Shift+V`, or copy only | Auto |
 | Auto-paste | Whether to auto-paste to cursor position | Enabled |
+| Continuous dictation | After each segment is pasted, automatically restart recording | Off |
 
 If auto-paste fails, the recognized text remains on the clipboard so it can be pasted manually.
 

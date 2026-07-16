@@ -89,6 +89,11 @@ class OutputConfig:
     paste_delay_ms: int = 120
     auto_paste: bool = True
     paste_mode: str = "auto"
+    # Continuous dictation: after each segment is processed and pasted,
+    # automatically restart recording so the user can dictate the next
+    # segment without re-pressing the toggle hotkey. The cancel hotkey ends
+    # the session. Off by default for backward compatibility.
+    continuous_mode: bool = False
 
 
 @dataclass
