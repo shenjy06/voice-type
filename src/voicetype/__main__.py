@@ -28,6 +28,8 @@ import logging
 import os
 import sys
 import threading
+import time
+import weakref
 
 import ctypes
 import pyperclip
@@ -53,17 +55,6 @@ from voicetype.i18n import init_language, t
 from voicetype.window_manager import get_foreground_window
 
 logger = logging.getLogger(__name__)
-
-
-class _SafeFormatMap(dict):
-    """A dict subclass that returns the key placeholder on missing lookups.
-
-    Used with ``str.format_map()`` so that a format-string with a missing
-    key doesn't crash with ``KeyError`` — the placeholder is left in the
-    output literally instead.
-    """
-    def __missing__(self, key):
-        return f"{{{key}}}"
 
 
 class _PasteBridge(QObject):
@@ -139,6 +130,7 @@ class Application:
             vad_silence_duration_ms=self.config.recording.vad_silence_duration_ms,
             vad_threshold=self.config.recording.vad_threshold,
             streaming_enabled=self.config.asr.streaming_enabled,
+            device=self.config.recording.device,
         )
         self.typer = TextTyper(self.config)
         self.history_store = HistoryStore()
@@ -167,9 +159,18 @@ class Application:
         self._audio_level_timer.setInterval(100)
         self._audio_level_timer.timeout.connect(self._sync_audio_level)
 
-        # Keep references to active toasts so they aren't GC'd mid-animation.
-        # Toasts auto-remove themselves via their destroyed signal.
-        self._toasts = []
+        # Polish elapsed-time timer — starts when polish begins, ticks every
+        # second so the status bubble shows "润色中... (5s)" during long operations.
+        self._polish_start = 0.0
+        self._polish_timer = QTimer()
+        self._polish_timer.setInterval(1000)
+        self._polish_timer.timeout.connect(self._update_polish_elapsed)
+
+        # Keep weak references to active toasts so they aren't GC'd mid-animation.
+        # Weak refs avoid the destroyed-signal race: if a toast is GC'd before
+        # its destroyed signal fires, the WeakSet silently drops the dead ref
+        # instead of crashing on a wild pointer.
+        self._toasts = weakref.WeakSet()
 
         # Bridge for marshaling background-thread paste failures to the UI
         # thread (created here so it lives on the UI/main thread).
@@ -222,13 +223,13 @@ class Application:
             if self.config.asr.api_key and not asr_url.startswith(("ws://", "wss://")):
                 try:
                     get_transcriber(self.config).warmup()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("ASR warmup skipped: %s", e)
             if self.config.polish.api_key:
                 try:
                     get_polisher(self.config).warmup()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Polish warmup skipped: %s", e)
 
         threading.Thread(target=_warmup, daemon=True).start()
 
@@ -287,6 +288,7 @@ class Application:
             on_error=self._on_processing_error,
             parent=self.app,
         )
+        self._processing_controller.progress.connect(self._on_processing_progress)
 
     def _init_hotkey(self):
         binding = HotkeyBinding.from_string(self.config.hotkey.toggle_hotkey)
@@ -369,9 +371,34 @@ class Application:
         except Exception:
             return ("", "")
 
-    # ---- processing result handlers ---------------------------------------
+    # ---- processing progress + result handlers ----------------------------
+
+    def _on_processing_progress(self, stage: str):
+        """Update the status bubble with the current processing stage.
+
+        When the polish stage begins, start the elapsed-time timer so the
+        bubble shows "润色中... (5s)" during long LLM calls.
+        """
+        self._status_bubble.show_status(stage)
+        if stage == t("status.polishing"):
+            self._polish_start = time.monotonic()
+            if not self._polish_timer.isActive():
+                self._polish_timer.start()
+
+    def _update_polish_elapsed(self):
+        """Tick the polish elapsed-time display every second."""
+        elapsed = int(time.monotonic() - self._polish_start)
+        self._status_bubble.show_status(
+            t("status.polishing") + f" ({elapsed}s)"
+        )
+
+    def _stop_polish_timer(self):
+        """Stop the polish elapsed timer (called when processing finishes/fails)."""
+        if self._polish_timer.isActive():
+            self._polish_timer.stop()
 
     def _on_processing_done(self, refined_text: str):
+        self._stop_polish_timer()
         self._recording_controller.reset_after_processing()
         self._cleanup_streaming()
         # Success — the worker has already deleted the audio file. Clear
@@ -465,6 +492,7 @@ class Application:
         self._recording_controller.stop()
 
     def _on_processing_error(self, error_msg: str):
+        self._stop_polish_timer()
         logger.error("Processing error: %s", error_msg)
         self._cleanup_streaming()
         # A failure breaks the continuous loop — don't auto-restart on a
@@ -485,10 +513,10 @@ class Application:
         retryable = self._retry_audio_path is not None
         self.tray.set_retry_available(retryable)
         hint = t("msg.error_retry_hint") if retryable else t("msg.error_format")
-        # Use format_map with a __missing__ fallback so a translated string
-        # that accidentally omits the ``{msg}`` placeholder doesn't crash the
-        # error handler with a KeyError.
-        formatted = hint.format_map(_SafeFormatMap(msg=error_msg))
+        # Use str.replace as a safe substitute for format_map — if the
+        # translated string accidentally omits the ``{msg}`` placeholder,
+        # the replacement is a no-op instead of a KeyError.
+        formatted = hint.replace("{msg}", error_msg)
         self.tray.show_message(t("app.name"), formatted)
 
     def _retry_processing(self):
@@ -514,7 +542,7 @@ class Application:
         # Drive the UI into PROCESSING — mirrors the transition the normal
         # stop path performs so the bubble + window reflect the retry.
         self.window.set_processing()
-        self._status_bubble.show_status(t("status.polishing"))
+        self._status_bubble.show_status(t("status.processing"))
         self.tray.set_retry_available(False)
         self._processing_controller.start(
             audio_path=self._retry_audio_path,
@@ -631,13 +659,7 @@ class Application:
 
     def _show_toast(self, message: str):
         toast = Toast(message, parent=self.window)
-
-        def _on_destroyed():
-            if toast in self._toasts:
-                self._toasts.remove(toast)
-
-        toast.destroyed.connect(_on_destroyed)
-        self._toasts.append(toast)
+        self._toasts.add(toast)
         toast.show()
 
     def _on_settings_saved(self):
@@ -656,6 +678,7 @@ class Application:
         self.audio_recorder.vad_silence_duration_ms = self.config.recording.vad_silence_duration_ms
         self.audio_recorder.vad_threshold = self.config.recording.vad_threshold
         self.audio_recorder.streaming_enabled = self.config.asr.streaming_enabled
+        self.audio_recorder.device = self.config.recording.device
         self.window.retranslate()
         self.tray.retranslate()
         self.tray.apply_config(self.config)
@@ -686,6 +709,7 @@ class Application:
         self._continuous_active = False
         self.hotkey_manager.stop()
         self._audio_level_timer.stop()
+        self._polish_timer.stop()
         # Wait for any in-flight paste thread to finish before we tear down
         # Qt objects. Each paste has a bounded timeout (window_manager retries
         # cap at ~2.5 s), so a short join is sufficient; pasted is True after
@@ -697,6 +721,7 @@ class Application:
         self.audio_recorder.stop()
         self.audio_recorder.cleanup()
         self._processing_controller.shutdown()
+        self.history_store.shutdown()
         self.tray.hide()
         self.window.close()
         # Give Qt's event loop a brief window to flush the quit. If the

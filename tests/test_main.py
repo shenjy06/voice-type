@@ -363,8 +363,25 @@ class TestProcessingClientCache:
 
 class TestApplication:
     def _make_application(self, qtbot, mocker, is_configured=True):
-        """Create an Application with all dependencies mocked."""
+        """Create an Application with all dependencies mocked.
+
+        Mocks every heavyweight dependency so each test creates only the
+        Application shell — no QApplication, no real AudioRecorder, no API
+        connections, no file I/O.  Without these mocks the 40-odd tests in
+        this class would each allocate ~100 MB and exhaust memory on
+        constrained runners.
+        """
         mocker.patch("voicetype.__main__.QApplication")
+        # Prevent _warmup_api_connections from spawning daemon threads with
+        # httpx connection pools — 40 tests × 2 pools = 80 orphaned sockets.
+        mocker.patch("voicetype.__main__.Application._warmup_api_connections")
+        # Prevent apply_theme_mode from rebuilding the global QSS on every test.
+        mocker.patch("voicetype.__main__.apply_theme_mode")
+        # Prevent init_language from re-reading the translation dict each time.
+        mocker.patch("voicetype.__main__.init_language")
+        # Prevent cleanup_stale_audio from globbing the filesystem.
+        mocker.patch("voicetype.audio.cleanup_stale_audio", return_value=None)
+
         mock_config = mocker.patch("voicetype.__main__.AppConfig")
         mock_cfg = mocker.MagicMock(
             recording=mocker.MagicMock(sample_rate=16000),

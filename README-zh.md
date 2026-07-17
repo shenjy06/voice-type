@@ -283,7 +283,8 @@ voice-type/
 │           ├── system_tray.py       # 系统托盘 + 全局热键管理
 │           ├── theme.py             # 主题管理：明暗调色板、QSS、矢量图标
 │           └── icon_utils.py        # 共享图标创建（圆形 + 居中文字）
-├── tests/                       # 单元测试（518 项，覆盖全部模块）
+├── tests/                       # 单元测试（495 项，23 个文件，覆盖全部模块）
+├── run_tests.py                 # 内存友好的测试运行器（每个文件独立子进程）
 │   ├── conftest.py
 │   ├── test_audio.py
 │   ├── test_asr.py
@@ -316,7 +317,19 @@ voice-type/
 ```bash
 # 安装测试依赖（在已激活的 venv 中执行）
 pip install -e ".[dev]"
-pytest tests/ -v
+```
+
+全套测试包含 495 个用例、23 个文件。在单个 `pytest` 进程内运行会持续积累内存（模块字节码、行缓存、Qt 图标缓存），峰值可达 500MB+。建议使用 `run_tests.py`，它会为每个测试文件启动独立的子进程，单个子进程内存控制在 ~150MB 以内，进程结束后操作系统自动回收全部内存：
+
+```bash
+python run_tests.py              # 运行全套测试
+python run_tests.py tests/test_controllers.py  # 运行单个文件
+```
+
+日常开发中也可以直接运行单个文件：
+
+```bash
+pytest tests/test_foo.py -v
 ```
 
 ## 配置文件

@@ -32,6 +32,10 @@ class ProcessingController(QObject):
     _done = Signal(str)
     _error = Signal(str)
 
+    # Public signal — emitted with stage text ("转写中..."/"润色中...") marshaled
+    # from the worker thread to the UI thread for progress feedback.
+    progress = Signal(str)
+
     def __init__(
         self,
         config: AppConfig,
@@ -108,6 +112,7 @@ class ProcessingController(QObject):
         thread.started.connect(worker.run)
         worker.finished.connect(self._done)
         worker.error.connect(self._error)
+        worker.progress.connect(self.progress)
         worker.finished.connect(thread.quit)
         worker.error.connect(thread.quit)
 

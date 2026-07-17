@@ -109,14 +109,12 @@ class RecordingController:
     def _is_processing(self) -> bool:
         """Return True when the UI window is currently in PROCESSING state.
 
-        Prefers the UI's public ``is_processing()`` method; falls back to
-        reading ``_state`` for collaborators that haven't been updated.
+        Requires the ``_ui`` collaborator to expose a public ``is_processing()``
+        method. All built-in UI classes (FloatingRecordingWindow) implement this,
+        so there is no fallback to private state — a missing method is a
+        contract violation and should surface as an AttributeError.
         """
-        is_processing = getattr(self._ui, "is_processing", None)
-        if callable(is_processing):
-            return bool(is_processing())
-        ui_state = getattr(self._ui, "_state", None)
-        return ui_state == RecorderState.PROCESSING
+        return bool(self._ui.is_processing())
 
     def on_recording_started(self) -> int:
         """Called when the UI has transitioned to RECORDING.
@@ -194,7 +192,7 @@ class RecordingController:
             return False
 
         self._ui.set_processing()
-        self._bubble.show_status(self._translate("status.polishing"))
+        self._bubble.show_status(self._translate("status.processing"))
 
         # Show the window WITHOUT stealing focus from the target window, if the
         # user already had it visible. SW_SHOWNA = show without activating.

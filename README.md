@@ -288,7 +288,8 @@ voice-type/
 │           ├── system_tray.py       # System tray icon + pynput hotkey manager
 │           ├── theme.py             # Centralized theme: light/dark palettes, QSS, vector icons
 │           └── icon_utils.py        # Shared icon creation (circle + centered text)
-├── tests/                       # Unit tests (518, covering all modules)
+├── tests/                       # Unit tests (495 across 23 files, covering all modules)
+├── run_tests.py                 # Memory-friendly test runner (one subprocess per file)
 │   ├── conftest.py
 │   ├── test_audio.py
 │   ├── test_asr.py
@@ -321,7 +322,19 @@ voice-type/
 ```bash
 # Install with test dependencies (run in the activated venv)
 pip install -e ".[dev]"
-pytest tests/ -v
+```
+
+The full suite contains 495 tests across 23 files. Running them in a single `pytest` process accumulates memory (module bytecode, linecache, Qt pixmap cache) and can exceed 500 MB. To keep memory under control, use `run_tests.py` — it spawns a fresh subprocess per test file so each one caps at ~150 MB and the OS reclaims the memory when it exits:
+
+```bash
+python run_tests.py              # Run all tests
+python run_tests.py tests/test_controllers.py  # Run a single file
+```
+
+For iterative development you can also run a single file directly:
+
+```bash
+pytest tests/test_foo.py -v
 ```
 
 ## Configuration File

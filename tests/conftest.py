@@ -1,3 +1,4 @@
+import gc
 import os
 
 import pytest
@@ -45,3 +46,60 @@ def make_config(**overrides):
             for k, v in values.items():
                 setattr(target, k, v)
     return cfg
+
+
+@pytest.fixture(scope="session")
+def qapp():
+    """Session-scoped QApplication — shared across all test modules.
+
+    pytest-qt defaults to one QApplication per test function.  Each new
+    instance allocates ~100 MB from the OS heap, and heap fragmentation
+    prevents that memory from being reclaimed after destruction — the
+    process grows monotonically over 200+ tests.  A single shared instance
+    eliminates this entirely.
+    """
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance()
+    if app is None:
+        app = QApplication([])
+    yield app
+
+
+@pytest.fixture(autouse=True)
+def _cleanup_qt(qapp):
+    """Tear down per-test Qt + Python state to prevent monotonic memory growth.
+
+    Three things leak between tests:
+      1. Top-level widgets (StatusBubble, Toast, dialogs) — close + deleteLater.
+      2. QTimer / QThread / background daemon threads — stop + wait.
+      3. Python reference cycles through Qt parent-child links — gc.collect.
+
+    Without this the shared QApplication accumulates stale objects and the
+    process RSS grows without bound across 200+ tests.
+    """
+    yield
+    # 1. Destroy top-level widgets
+    for widget in qapp.topLevelWidgets():
+        widget.close()
+        widget.deleteLater()
+    qapp.processEvents()
+    qapp.processEvents()
+
+    # 2. Stop all QTimers (they hold lambdas / bound methods → reference cycles)
+    for obj in qapp.findChildren(object):
+        if hasattr(obj, 'stop') and hasattr(obj, 'interval'):
+            try:
+                obj.stop()
+            except Exception:
+                pass
+
+    # 3. Clear Qt's internal caches (pixmap, icon, font database) — these are
+    #    process-global and survive deleteLater(), so they must be purged
+    #    explicitly or they accumulate across tests.
+    from PySide6.QtGui import QPixmapCache
+    QPixmapCache.clear()
+    # QIcon has no clearCache in PySide6 — the pixmap cache is the main leak.
+
+    # 4. Force-break Python reference cycles
+    gc.collect()
+    gc.collect()
