@@ -399,6 +399,7 @@ class TestApplication:
         mocker.patch("voicetype.__main__.HistoryStore")
         mocker.patch("voicetype.__main__.FloatingRecordingWindow")
         mocker.patch("voicetype.__main__.StatusBubble")
+        mocker.patch("voicetype.__main__.CaptionPanel")
         mocker.patch("voicetype.__main__.TrayIcon")
         mocker.patch("voicetype.__main__.HotkeyManager")
         mocker.patch("voicetype.__main__.ProcessingController")
@@ -862,3 +863,78 @@ class TestApplication:
 
         # Three toggles, but only one flushed write.
         assert app.config.save.call_count == 1
+
+
+    def test_streaming_text_updates_caption_and_bubble(self, qtbot, mocker):
+        """Live transcript goes to the caption panel in full; the bubble gets
+        the one-line preview."""
+        app = self._make_application(qtbot, mocker)
+
+        app._on_streaming_text("hello world")
+
+        app._caption_panel.show_text.assert_called_once_with("hello world")
+        app._status_bubble.show_status.assert_called_once_with("hello world")
+
+    def test_streaming_text_long_truncates_only_bubble(self, qtbot, mocker):
+        app = self._make_application(qtbot, mocker)
+        long_text = "x" * 100
+
+        app._on_streaming_text(long_text)
+
+        app._caption_panel.show_text.assert_called_once_with(long_text)
+        bubble_text = app._status_bubble.show_status.call_args[0][0]
+        assert len(bubble_text) == 40
+        assert bubble_text.endswith("…")
+
+    def test_streaming_text_empty_is_ignored(self, qtbot, mocker):
+        app = self._make_application(qtbot, mocker)
+
+        app._on_streaming_text("")
+
+        app._caption_panel.show_text.assert_not_called()
+        app._status_bubble.show_status.assert_not_called()
+
+    def test_recording_started_streaming_shows_caption_placeholder(self, qtbot, mocker):
+        app = self._make_application(qtbot, mocker)
+        app.config.asr.streaming_enabled = False
+        app._streaming_transcriber = mocker.MagicMock()
+        # Isolate from the real controller chain (context capture injects
+        # real keystrokes) — only the caption branch is under test.
+        app._recording_controller = mocker.MagicMock()
+
+        app._on_recording_started()
+
+        app._caption_panel.show_text.assert_called_once()
+        app._caption_panel.dismiss.assert_not_called()
+
+    def test_recording_started_non_streaming_dismisses_caption(self, qtbot, mocker):
+        app = self._make_application(qtbot, mocker)
+        app.config.asr.streaming_enabled = False
+        app._streaming_transcriber = None
+        app._recording_controller = mocker.MagicMock()
+
+        app._on_recording_started()
+
+        app._caption_panel.dismiss.assert_called_once()
+        app._caption_panel.show_text.assert_not_called()
+
+    def test_processing_done_dismisses_caption(self, qtbot, mocker):
+        app = self._make_application(qtbot, mocker)
+
+        app._on_processing_done("refined text")
+
+        app._caption_panel.dismiss.assert_called_once()
+
+    def test_processing_error_dismisses_caption(self, qtbot, mocker):
+        app = self._make_application(qtbot, mocker)
+
+        app._on_processing_error("boom")
+
+        app._caption_panel.dismiss.assert_called_once()
+
+    def test_cancel_recording_dismisses_caption(self, qtbot, mocker):
+        app = self._make_application(qtbot, mocker)
+
+        app._cancel_recording()
+
+        app._caption_panel.dismiss.assert_called_once()

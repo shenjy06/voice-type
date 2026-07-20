@@ -69,7 +69,9 @@ def _stft(x: np.ndarray, n_fft: int, hop_length: int) -> np.ndarray:
     """Compute the STFT as a complex matrix of shape (n_frames, n_fft // 2 + 1).
 
     The signal is padded at the tail so every original sample is covered
-    by at least one analysis frame.
+    by at least one analysis frame. Uses ``np.lib.stride_tricks.as_strided``
+    to construct the overlapping frames without a Python loop — the
+    vectorised path is O(1) per frame regardless of frame count.
     """
     if len(x) < n_fft:
         x = np.pad(x, (0, n_fft - len(x)))
@@ -81,29 +83,35 @@ def _stft(x: np.ndarray, n_fft: int, hop_length: int) -> np.ndarray:
     n_frames = 1 + (len(x) - n_fft) // hop_length
 
     window = _periodic_hann(n_fft)
-    # TODO: vectorise with np.lib.stride_tricks.as_strided — the Python
-    # loop here dominates denoise latency for recordings longer than a
-    # few minutes (e.g. 10 min → ~75 000 frames → ~0.5 s). For the
-    # typical 15-60 s dictation the loop is negligible (~0.01-0.08 s).
-    frames = np.empty((n_frames, n_fft), dtype=np.float64)
-    for i in range(n_frames):
-        start = i * hop_length
-        frames[i] = x[start:start + n_fft] * window
+    # Build the overlapping frame matrix via as_strided — each row is a
+    # view into ``x`` at a stride of ``hop_length`` samples. The copy at
+    # the end is mandatory: rfft would otherwise write into the view and
+    # corrupt neighbouring frames.
+    shape = (n_frames, n_fft)
+    strides = (x.strides[0] * hop_length, x.strides[0])
+    frames = np.lib.stride_tricks.as_strided(x, shape=shape, strides=strides)
+    frames = np.ascontiguousarray(frames) * window
     return np.fft.rfft(frames, axis=1)
 
 
 def _istft(spec: np.ndarray, n_fft: int, hop_length: int, length: int) -> np.ndarray:
-    """Invert ``_stft`` via overlap-add with window-squared normalization."""
+    """Invert ``_stft`` via overlap-add with window-squared normalization.
+
+    Uses ``np.add.at`` for the overlap-add step — unbuffered in-place
+    addition over a precomputed destination-index matrix, equivalent to
+    the per-frame Python loop but executed as a single vectorised call.
+    """
     window = _periodic_hann(n_fft)
     n_frames = spec.shape[0]
     out_len = (n_frames - 1) * hop_length + n_fft
     x = np.zeros(out_len, dtype=np.float64)
     w_sum = np.zeros(out_len, dtype=np.float64)
-    frames = np.fft.irfft(spec, n=n_fft, axis=1)
-    for i in range(n_frames):
-        start = i * hop_length
-        x[start:start + n_fft] += frames[i] * window
-        w_sum[start:start + n_fft] += window * window
+    frames = np.fft.irfft(spec, n=n_fft, axis=1) * window
+    # Destination sample index of every frame sample: shape (n_frames, n_fft),
+    # row i starts at i * hop_length.
+    idx = np.arange(n_frames)[:, None] * hop_length + np.arange(n_fft)[None, :]
+    np.add.at(x, idx, frames)
+    np.add.at(w_sum, idx, np.broadcast_to(window * window, idx.shape))
     # Where the window-squared sum is ~0 (signal boundaries), output
     # silence rather than amplifying boundary samples.
     w_sum = np.where(w_sum > 1e-8, w_sum, 1.0)

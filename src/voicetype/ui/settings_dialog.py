@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QIcon, QCursor, QAction, QColor
 from voicetype.api_client import fetch_models
-from voicetype.audio import MicrophoneMonitor, get_default_input_device_name
+from voicetype.audio import MicrophoneMonitor, list_input_devices
 from voicetype.config import (
     AppConfig, DEFAULT_BASE_URL, GlossaryEntry,
     EncryptedConfigError, InvalidPasswordError,
@@ -157,8 +157,8 @@ class SettingsDialog(QDialog):
     # Emitted (on the UI thread) when the background network check finishes;
     # carries True if the network is reachable.
     _network_check_done = Signal(bool)
-    # Emitted (on the UI thread) with the resolved default input device name.
-    _device_name_ready = Signal(str)
+    # Emitted (on the UI thread) with the list of (index, name) input devices.
+    _devices_loaded = Signal(list)
     # Emitted (on the UI thread) with (section, model_ids) when a background
     # model-list fetch succeeds. section is "asr" or "polish".
     _models_fetched = Signal(str, list)
@@ -214,7 +214,6 @@ class SettingsDialog(QDialog):
         # be enforced because QFormLayout sizes field rows by sizeHint, not by
         # heightForWidth, so wrapped text gets clipped (see _adjust_wrap_heights).
         self._wrap_labels = [
-            self.mic_device_label,
             self.mic_status_label,
             self.denoise_hint_label,
             self.vad_hint_label,
@@ -226,8 +225,8 @@ class SettingsDialog(QDialog):
         self._initial_api_state = self._snapshot_api_state()
         # Route the background network-check result back to the UI thread.
         self._network_check_done.connect(self._on_network_check_done)
-        # Route the background device-name query back to the UI thread.
-        self._device_name_ready.connect(self._set_microphone_device_label)
+        # Route the background device-list query back to the UI thread.
+        self._devices_loaded.connect(self._populate_mic_device_combo)
         # Route background model-list fetch results back to the UI thread.
         self._models_fetched.connect(self._on_models_fetched)
         self._models_error.connect(self._on_models_error)
@@ -407,9 +406,9 @@ class SettingsDialog(QDialog):
         self.sample_rate_spin.setSingleStep(8000)
         stt_misc_layout.addRow(t("settings.sample_rate"), self.sample_rate_spin)
 
-        self.mic_device_label = QLabel()
-        self.mic_device_label.setWordWrap(True)
-        stt_misc_layout.addRow(t("settings.mic_device"), self.mic_device_label)
+        self.mic_device_combo = QComboBox()
+        self.mic_device_combo.setCursor(QCursor(Qt.PointingHandCursor))
+        stt_misc_layout.addRow(t("settings.mic_device"), self.mic_device_combo)
 
         self.mic_level_bar = QProgressBar()
         self.mic_level_bar.setRange(0, 100)
@@ -736,7 +735,7 @@ class SettingsDialog(QDialog):
         # Hotkeys
         self.hotkey_toggle_check.setChecked(self.config.hotkey.toggle_enabled)
         self.hotkey_recorder.set_hotkey(self.config.hotkey.toggle_hotkey)
-        self._update_microphone_device_label()
+        self._load_mic_devices()
 
     def _snapshot_api_state(self) -> dict:
         """Capture current API-related fields so we can detect changes on save."""
@@ -937,6 +936,8 @@ class SettingsDialog(QDialog):
         self.config.asr.language = self.stt_lang_combo.currentData()
         self.config.asr.streaming_enabled = self.streaming_check.isChecked()
         self.config.recording.sample_rate = self.sample_rate_spin.value()
+        device_idx = self.mic_device_combo.currentData()
+        self.config.recording.device = None if device_idx is None or device_idx == -1 else device_idx
         self.config.recording.denoise_enabled = self.denoise_check.isChecked()
         self.config.recording.denoise_strength = self.denoise_strength_combo.currentData()
         self.config.recording.vad_enabled = self.vad_check.isChecked()
@@ -1335,20 +1336,41 @@ class SettingsDialog(QDialog):
         if btn is not None:
             btn.setVisible(not enabled)
 
-    def _update_microphone_device_label(self):
-        # sd.query_devices(kind="input") enumerates PortAudio devices, which
-        # can take 50-200ms on systems with many audio endpoints. Run it on a
-        # background thread and apply the result via signal so dialog open is
-        # not blocked. Defer the thread start to the next event-loop tick so
-        # the signal is delivered cleanly after construction completes.
+    def _load_mic_devices(self):
+        """Enumerate audio input devices on a background thread.
+
+        sd.query_devices() can take 50-200ms on systems with many endpoints.
+        We defer to a background thread and populate the combo via signal so
+        dialog open is not blocked.
+        """
         def _query():
-            self._device_name_ready.emit(get_default_input_device_name())
+            self._devices_loaded.emit(list_input_devices())
 
         QTimer.singleShot(0, lambda: threading.Thread(target=_query, daemon=True).start())
 
-    def _set_microphone_device_label(self, device_name: str):
-        self.mic_device_label.setText(device_name or t("settings.mic_device_none"))
-        self._schedule_adjust_wrap_heights()
+    def _populate_mic_device_combo(self, devices: list[tuple[int, str]]):
+        """Fill the mic device combo from the background device list.
+
+        Preserves the current selection (by device index) across repopulations.
+        """
+        current_device = self.mic_device_combo.currentData()
+        self.mic_device_combo.blockSignals(True)
+        self.mic_device_combo.clear()
+        if not devices:
+            self.mic_device_combo.addItem(t("settings.mic_device_none"), None)
+        else:
+            for idx, name in devices:
+                self.mic_device_combo.addItem(name, idx)
+        # Restore previous selection, or fall back to the config's saved device.
+        # For the config value, use -1 (index for "system default") if None.
+        config_device = self.config.recording.device
+        if config_device is None:
+            config_device = -1
+        target = current_device if current_device is not None else config_device
+        found = self.mic_device_combo.findData(target)
+        if found >= 0:
+            self.mic_device_combo.setCurrentIndex(found)
+        self.mic_device_combo.blockSignals(False)
 
     def _set_mic_status(self, text: str):
         """Update the mic status label and re-check its wrapped height."""
@@ -1363,8 +1385,10 @@ class SettingsDialog(QDialog):
 
     def _start_microphone_monitor(self):
         self._stop_microphone_monitor()
-        self._update_microphone_device_label()
-        self._mic_monitor = MicrophoneMonitor(self.sample_rate_spin.value())
+        # Use the selected device for the mic test. -1 = system default.
+        device_idx = self.mic_device_combo.currentData()
+        device = None if device_idx is None or device_idx == -1 else device_idx
+        self._mic_monitor = MicrophoneMonitor(self.sample_rate_spin.value(), device=device)
         if not self._mic_monitor.start():
             self.mic_level_bar.setValue(0)
             detail = self._mic_monitor.error or t("settings.mic_status_error")

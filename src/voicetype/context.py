@@ -3,7 +3,6 @@
 import logging
 import time
 import ctypes
-import uuid
 
 import pyperclip
 
@@ -12,6 +11,7 @@ from voicetype.window_detect import is_terminal_window
 logger = logging.getLogger(__name__)
 
 user32 = ctypes.windll.user32
+kernel32 = ctypes.windll.kernel32
 KEYEVENTF_KEYUP = 0x0002
 
 VK_SHIFT = 0x10
@@ -25,8 +25,6 @@ VK_C = 0x43
 # Max chars to capture on each side to avoid huge selections
 MAX_CONTEXT_CHARS = 500
 
-_CLIPBOARD_MARKER = f"__voice_type_ctx_{uuid.uuid4().hex[:8]}__"
-
 
 def _key_down(vk: int):
     user32.keybd_event(vk, 0, 0, 0)
@@ -36,13 +34,35 @@ def _key_up(vk: int):
     user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
 
 
-def _send_copy() -> str:
-    """Send Ctrl+C and return clipboard text, or empty string if copy failed."""
-    # Set a unique marker so we can detect if Ctrl+C actually changed the clipboard
+def _clipboard_sequence_number() -> int | None:
+    """Return the current clipboard sequence number, or ``None`` on failure.
+
+    The sequence number increments each time the clipboard contents change.
+    We use it to detect whether Ctrl+C actually changed the clipboard,
+    instead of writing a destructive marker — the marker was a race
+    condition: if the process crashed between writing the marker and
+    restoring the original, the user's clipboard was permanently lost.
+
+    ``None`` (API unavailable) means "cannot tell" — callers should fall
+    back to reading the clipboard directly rather than treating the copy
+    as failed.
+    """
     try:
-        pyperclip.copy(_CLIPBOARD_MARKER)
+        return kernel32.GetClipboardSequenceNumber()
     except Exception:
-        pass
+        return None
+
+
+def _send_copy() -> str:
+    """Send Ctrl+C and return clipboard text, or empty string if copy failed.
+
+    Uses the Windows clipboard sequence number instead of a destructive
+    marker to detect whether Ctrl+C changed the clipboard. When the
+    sequence number is unavailable (``None``), the clipboard is read
+    unconditionally — a slightly weaker check, but better than wrongly
+    reporting failure on systems where the API is missing.
+    """
+    seq_before = _clipboard_sequence_number()
 
     _key_down(VK_CONTROL)
     time.sleep(0.02)
@@ -53,18 +73,15 @@ def _send_copy() -> str:
     _key_up(VK_CONTROL)
     time.sleep(0.15)
 
-    try:
-        result = pyperclip.paste() or ""
-    except Exception:
-        return ""
-
-    # If clipboard still has our marker, the copy didn't work (no selection
-    # or unsupported editor). Log at debug level so developers can tell the
-    # difference between "Ctrl+C did nothing" and "selection was truly empty".
-    if result == _CLIPBOARD_MARKER:
+    seq_after = _clipboard_sequence_number()
+    if seq_before is not None and seq_after is not None and seq_before == seq_after:
         logger.debug("Ctrl+C had no effect — clipboard unchanged (unsupported editor or no selection)")
         return ""
-    return result
+
+    try:
+        return pyperclip.paste() or ""
+    except Exception:
+        return ""
 
 
 def _restore_clipboard(text: str):

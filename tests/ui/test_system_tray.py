@@ -288,7 +288,7 @@ class TestHotkeyManager:
         mgr = HotkeyManager()
         emitted = []
         mgr.toggle_recording.connect(lambda: emitted.append(True))
-        mgr._last_toggle_key = "alt_r"  # simulate stale state
+        mgr._ra_last_key = "alt_r"  # simulate stale state
         mgr._on_press(keyboard.Key.alt)
         mgr._on_release(keyboard.Key.alt)
         assert emitted == []
@@ -400,3 +400,28 @@ class TestHotkeyManager:
         mgr._on_release(KeyCode(char="a"))
         mgr._on_press(KeyCode(char="a"))
         assert len(emitted) == 2
+
+    def test_left_alt_interference_does_not_wedge_state_machine(self, qtbot):
+        """Left Alt pressed while Right Alt is held must not break toggling.
+
+        Regression: a generic Key.alt press mid-gesture cleared _ra_last_key
+        but left the machine in WAITING; the mismatched release returned
+        early without resetting, so every later Right-Alt tap was silently
+        ignored until the listener restarted.
+        """
+        mgr = HotkeyManager()
+        emitted = []
+        mgr.toggle_recording.connect(lambda: emitted.append(True))
+
+        # Right Alt held → Left Alt pressed (generic Key.alt) mid-gesture →
+        # both released. The gesture is swallowed (no toggle)...
+        mgr._on_press(keyboard.Key.alt_r)
+        mgr._on_press(keyboard.Key.alt)
+        mgr._on_release(keyboard.Key.alt)
+        mgr._on_release(keyboard.Key.alt_r)
+        assert emitted == []
+
+        # ...but the state machine recovered: the next clean tap toggles.
+        mgr._on_press(keyboard.Key.alt_r)
+        mgr._on_release(keyboard.Key.alt_r)
+        assert emitted == [True]

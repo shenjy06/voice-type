@@ -1,6 +1,7 @@
 """System tray icon with menu and global hotkeys."""
 
 import logging
+from enum import Enum, auto
 
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QAction, QColor
@@ -230,6 +231,20 @@ class TrayIcon(QObject):
         self._tray.hide()
 
 
+class _RightAltState(Enum):
+    """Explicit state machine for Right-Alt tap/combo detection.
+
+    Replaces the previous 4-boolean-flag approach (``_toggle_key_pressed``,
+    ``_combo_used``, ``_last_toggle_key``, ``_single_key_pressed``) with a
+    single enum that makes the state transitions explicit and testable.
+    """
+
+    IDLE = auto()           # No Right-Alt is held; waiting for a press
+    WAITING = auto()        # Right-Alt is held; waiting for release or combo
+    COMBO = auto()          # Another key was pressed while Right-Alt was held
+    CANCELLED = auto()      # Right-Alt+C was detected (cancel, not toggle)
+
+
 class HotkeyManager(QObject):
     """Global hotkeys for toggling and cancelling recording.
 
@@ -256,10 +271,12 @@ class HotkeyManager(QObject):
         super().__init__(parent)
         self._binding = binding or HotkeyBinding.right_alt()
         self._listener = None
-        self._toggle_key_pressed = False
-        self._combo_used = False
         self._running = False
-        self._last_toggle_key = None
+        # Right-Alt state machine — single source of truth for tap/combo
+        # detection. See _RightAltState docstring.
+        self._ra_state = _RightAltState.IDLE
+        self._ra_last_key: str | None = None
+        # Single-key binding (e.g. F9) — suppress repeat while held.
         self._single_key_pressed = False
 
     @property
@@ -305,10 +322,11 @@ class HotkeyManager(QObject):
                 logger.debug("Skipping listener join from callback thread")
             self._listener = None
         logger.info("Hotkey listener stopped")
-        self._toggle_key_pressed = False
-        self._combo_used = False
-        self._last_toggle_key = None
+        self._ra_state = _RightAltState.IDLE
+        self._ra_last_key = None
         self._single_key_pressed = False
+
+    # ---- event dispatch ------------------------------------------------------
 
     def _on_press(self, key):
         """Handle key press event."""
@@ -329,66 +347,73 @@ class HotkeyManager(QObject):
 
         self._on_release_right_alt(key)
 
+    # ---- Right-Alt state machine ---------------------------------------------
+
     def _on_press_right_alt(self, key):
-        """Handle Right-Alt-style press event."""
+        """Right-Alt state machine: key PRESS transitions."""
         is_alt_r = key == keyboard.Key.alt_r
         is_alt_gr = key == keyboard.Key.alt_gr
         is_alt = key == keyboard.Key.alt
+
         if is_alt_r or is_alt_gr or is_alt:
-            # Only Right Alt (alt_r / alt_gr) starts a toggle. A bare generic
-            # Key.alt press is treated as left-alt and ignored so
-            # left-alt keeps working as a normal modifier. Clear any stale
-            # toggle state so a later left-alt release does not toggle.
-            if (is_alt_r or is_alt_gr) and not self._toggle_key_pressed:
-                self._toggle_key_pressed = True
-                self._combo_used = False
-                self._last_toggle_key = "alt_r" if is_alt_r else "alt_gr"
+            if is_alt_r or is_alt_gr:
+                # Right Alt press: transition IDLE → WAITING
+                if self._ra_state == _RightAltState.IDLE:
+                    self._ra_state = _RightAltState.WAITING
+                    self._ra_last_key = "alt_r" if is_alt_r else "alt_gr"
             elif is_alt:
-                self._last_toggle_key = None
+                # Generic Alt press (likely left): clear any stale Right-Alt
+                # tracker so a later left-Alt release doesn't toggle.
+                self._ra_last_key = None
             return
 
-        try:
-            if (
-                self._toggle_key_pressed
-                and hasattr(key, "char")
-                and key.char
-                and key.char.lower() == "c"
-            ):
-                self._combo_used = True
+        # A non-Alt key was pressed while Right-Alt is held.
+        if self._ra_state == _RightAltState.WAITING:
+            if self._is_cancel_key(key):
+                self._ra_state = _RightAltState.CANCELLED
                 self.cancel_recording.emit()
-                return
-        except AttributeError:
-            pass
+            else:
+                self._ra_state = _RightAltState.COMBO
 
-        if self._toggle_key_pressed:
-            self._combo_used = True
+    def _is_cancel_key(self, key) -> bool:
+        """Return True if ``key`` is the Cancel hotkey (Right Alt+C)."""
+        try:
+            return bool(hasattr(key, "char") and key.char and key.char.lower() == "c")
+        except AttributeError:
+            return False
 
     def _on_release_right_alt(self, key):
-        """Handle Right-Alt-style release event and detect tap vs combo."""
+        """Right-Alt state machine: key RELEASE transitions."""
         is_alt_r = key == keyboard.Key.alt_r
         is_alt_gr = key == keyboard.Key.alt_gr
         is_alt = key == keyboard.Key.alt
 
         # On Windows pynput often delivers the Right-Alt release as
         # generic Key.alt rather than Key.alt_r. Accept any alt release
-        # when the matching press was one of the Right-Alt variants
-        # (otherwise true left-alt presses would also toggle).
+        # when the matching press was one of the Right-Alt variants.
         matching_toggle = (
             (is_alt_r or is_alt_gr or is_alt)
-            and self._last_toggle_key in self._RIGHT_ALT_TOGGLE_KEYS
+            and self._ra_last_key in self._RIGHT_ALT_TOGGLE_KEYS
         )
 
-        if matching_toggle:
-            if not self._toggle_key_pressed:
-                return
-            self._toggle_key_pressed = False
-            self._last_toggle_key = None
-
-            if self._combo_used:
-                return
-
-            self.toggle_recording.emit()
+        if not matching_toggle:
+            if (is_alt_r or is_alt_gr or is_alt) and self._ra_state != _RightAltState.IDLE:
+                # An Alt key was released mid-gesture but does not match the
+                # key that started it — e.g. Left Alt was pressed while Right
+                # Alt was held (which clears ``_ra_last_key``). Reset the
+                # machine so it can never get stuck in WAITING with a cleared
+                # tracker; otherwise every subsequent Right-Alt tap would be
+                # silently ignored until the listener restarts. The current
+                # gesture is swallowed, which is safe.
+                self._ra_state = _RightAltState.IDLE
+                self._ra_last_key = None
             return
 
-        if self._toggle_key_pressed:
-            self._combo_used = True
+        state = self._ra_state
+        self._ra_state = _RightAltState.IDLE
+        self._ra_last_key = None
+
+        if state == _RightAltState.WAITING:
+            # Pure tap: Right-Alt pressed and released without any other key.
+            self.toggle_recording.emit()
+        # COMBO / CANCELLED: no toggle — the combo was handled in _on_press.

@@ -60,24 +60,19 @@ class TestRecordingController:
         d.ui.start_recording.assert_not_called()
         d.ui.stop_recording.assert_not_called()
 
-    def test_toggle_falls_back_to_state_when_no_is_processing(self):
-        """When the UI lacks is_processing(), _state is consulted as a fallback."""
-        from voicetype.state import RecorderState
+    def test_toggle_requires_is_processing_method(self):
+        """When the UI lacks is_processing(), toggle must raise AttributeError.
 
-        d = _RecordingControllerDoubles()
-        # Build a UI double with no is_processing attribute at all.
-        ui = MagicMock(spec=["is_recording", "start_recording", "stop_recording",
-                             "set_audio_level", "set_processing", "set_done",
-                             "set_error", "isVisible", "winId"])
+        The old fallback to _state has been removed — is_processing() is now
+        a required public method on the UI collaborator.
+        """
+        ui = MagicMock(spec=["is_recording", "start_recording", "stop_recording"])
         ui.is_recording.return_value = False
-        ui._state = RecorderState.PROCESSING
-        rc = RecordingController(
-            recorder=d.recorder, ui=ui, tray=d.tray, bubble=d.bubble,
-            level_timer=d.level_timer,
-        )
-        rc.toggle()
-        ui.start_recording.assert_not_called()
-        ui.stop_recording.assert_not_called()
+        with pytest.raises(AttributeError):
+            RecordingController(
+                recorder=MagicMock(), ui=ui, tray=MagicMock(), bubble=MagicMock(),
+                level_timer=MagicMock(),
+            ).toggle()
 
     def test_on_recording_started_captures_hwnd_and_starts_recorder(self):
         rc, d, hwnd_provider = _make_controller()

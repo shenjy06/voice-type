@@ -1,10 +1,11 @@
 """Tests for voice_type.ui.main_window — FloatingRecordingWindow, PulsingDot, Toast."""
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtGui import QCloseEvent, QFontMetrics
 from PySide6.QtWidgets import QPushButton
 from voicetype.ui.main_window import (
     AudioLevelWaveform,
+    CaptionPanel,
     FloatingRecordingWindow,
     MicrophoneIcon,
     PulsingDot,
@@ -312,3 +313,57 @@ class TestThemeIntegration:
         assert not light_gear.isNull()
 
 
+
+
+class TestCaptionPanel:
+    def test_show_text_sets_text_and_shows(self, qtbot):
+        panel = CaptionPanel()
+        qtbot.addWidget(panel)
+        panel.show_text("hello world")
+        assert panel.text == "hello world"
+        assert panel._render_text == "hello world"
+        assert panel.isVisible()
+
+    def test_show_text_updates_existing_text(self, qtbot):
+        panel = CaptionPanel()
+        qtbot.addWidget(panel)
+        panel.show_text("hello")
+        panel.show_text("hello world again")
+        assert panel.text == "hello world again"
+
+    def test_long_text_is_trimmed_from_front(self, qtbot):
+        """Transcripts beyond the line cap drop the oldest content, keep the tail."""
+        panel = CaptionPanel()
+        qtbot.addWidget(panel)
+        long_text = "字" * 2000
+        panel.show_text(long_text)
+        # The full transcript is kept; only the rendered text is trimmed.
+        assert panel.text == long_text
+        assert panel._render_text.startswith("…")
+        assert panel._render_text.endswith("字")
+        fm = QFontMetrics(panel._font)
+        assert panel.height() <= fm.lineSpacing() * panel._MAX_LINES + panel._V_PADDING
+
+    def test_height_grows_with_content_up_to_cap(self, qtbot):
+        panel = CaptionPanel()
+        qtbot.addWidget(panel)
+        panel.show_text("short")
+        short_h = panel.height()
+        panel.show_text("word " * 200)
+        assert panel.height() >= short_h
+        fm = QFontMetrics(panel._font)
+        assert panel.height() <= fm.lineSpacing() * panel._MAX_LINES + panel._V_PADDING
+
+    def test_dismiss_hides_and_clears(self, qtbot):
+        panel = CaptionPanel()
+        qtbot.addWidget(panel)
+        panel.show_text("hello")
+        panel.dismiss()
+        assert not panel.isVisible()
+        assert panel.text == ""
+        assert panel._render_text == ""
+
+    def test_dismiss_when_hidden_is_safe(self, qtbot):
+        panel = CaptionPanel()
+        qtbot.addWidget(panel)
+        panel.dismiss()  # never shown — must not raise

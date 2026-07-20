@@ -47,7 +47,7 @@ from voicetype.recording_controller import RecordingController
 from voicetype.streaming_asr import StreamingTranscriber
 from voicetype.typer import TextTyper
 from voicetype.ui.history_dialog import HistoryDialog
-from voicetype.ui.main_window import FloatingRecordingWindow, StatusBubble, Toast
+from voicetype.ui.main_window import CaptionPanel, FloatingRecordingWindow, StatusBubble, Toast
 from voicetype.ui.settings_dialog import SettingsDialog
 from voicetype.ui.system_tray import HotkeyManager, TrayIcon
 from voicetype.ui.theme import apply_theme_mode
@@ -269,6 +269,9 @@ class Application:
 
         # Status bubble (persistent Bubble during recording/processing)
         self._status_bubble = StatusBubble()
+        # Live caption panel for streaming ASR — shows the full transcript
+        # (the bubble only shows a one-line truncated preview).
+        self._caption_panel = CaptionPanel()
 
         if self.config.window.show_on_start:
             self._show_window()
@@ -308,6 +311,7 @@ class Application:
         # Cancel ends any active continuous session — the user explicitly
         # wants to stop, so don't auto-restart after the current cycle.
         self._continuous_active = False
+        self._caption_panel.dismiss()
         self._recording_controller.cancel()
 
     def _on_recording_started(self):
@@ -334,6 +338,11 @@ class Application:
         # Override the bubble text to indicate live transcription.
         if self._streaming_transcriber is not None:
             self._status_bubble.show_status(t("status.streaming"))
+            # Show the caption panel with a placeholder until the first
+            # transcript fragment arrives.
+            self._caption_panel.show_text(t("caption.listening"))
+        else:
+            self._caption_panel.dismiss()
 
     def _on_recording_stopped(self):
         if not self._recording_controller.stop_recording_event():
@@ -399,6 +408,7 @@ class Application:
 
     def _on_processing_done(self, refined_text: str):
         self._stop_polish_timer()
+        self._caption_panel.dismiss()
         self._recording_controller.reset_after_processing()
         self._cleanup_streaming()
         # Success — the worker has already deleted the audio file. Clear
@@ -493,6 +503,7 @@ class Application:
 
     def _on_processing_error(self, error_msg: str):
         self._stop_polish_timer()
+        self._caption_panel.dismiss()
         logger.error("Processing error: %s", error_msg)
         self._cleanup_streaming()
         # A failure breaks the continuous loop — don't auto-restart on a
@@ -591,11 +602,13 @@ class Application:
         return True
 
     def _on_streaming_text(self, text: str):
-        """Update the status bubble with the live streaming transcript."""
+        """Update the caption panel and status bubble with the live transcript."""
         if not text:
             return
-        logger.debug("Streaming text -> bubble: %d chars: %r", len(text), text[:50])
-        # Truncate to keep the bubble on one line.
+        logger.debug("Streaming text -> caption/bubble: %d chars: %r", len(text), text[:50])
+        # Full transcript goes to the caption panel; the bubble keeps the
+        # one-line truncated preview.
+        self._caption_panel.show_text(text)
         display = text if len(text) <= 40 else text[:39] + "…"
         self._status_bubble.show_status(display)
 
@@ -722,6 +735,7 @@ class Application:
         self.audio_recorder.cleanup()
         self._processing_controller.shutdown()
         self.history_store.shutdown()
+        self._caption_panel.dismiss()
         self.tray.hide()
         self.window.close()
         # Give Qt's event loop a brief window to flush the quit. If the

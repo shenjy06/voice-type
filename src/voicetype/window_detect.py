@@ -9,6 +9,7 @@ killed CLI agents like kimi-code. This module is the single source of truth.
 """
 
 import ctypes
+import functools
 import logging
 
 logger = logging.getLogger(__name__)
@@ -123,14 +124,29 @@ def get_window_title(hwnd: int) -> str:
 
 
 def get_process_name(hwnd: int) -> str:
-    """Return the executable name for the process owning ``hwnd``."""
+    """Return the executable name for the process owning ``hwnd``.
+
+    The process lookup (OpenProcess + GetModuleFileNameEx) is cached, but
+    keyed by ``(hwnd, pid)`` — NOT by hwnd alone. Windows recycles HWNDs:
+    once a window is destroyed its handle can be handed to a new window of
+    a different process, so a pure-HWND cache could return a stale process
+    name and misdetect a terminal window.
+    """
     try:
         pid = ctypes.wintypes.DWORD()
         user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
         if not pid.value:
             return ""
+    except Exception:
+        return ""
+    return _get_process_name_cached(hwnd, pid.value)
+
+
+@functools.lru_cache(maxsize=64)
+def _get_process_name_cached(hwnd: int, pid: int) -> str:
+    try:
         # PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-        h_process = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid.value)
+        h_process = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
         if not h_process:
             return ""
         try:

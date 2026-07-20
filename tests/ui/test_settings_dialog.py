@@ -45,12 +45,14 @@ class TestSettingsDialogCreation:
         assert modes == ["auto", "ctrl_v", "ctrl_shift_v", "clipboard"]
 
     def test_microphone_controls_exist(self, qtbot, mocker):
-        mocker.patch("voicetype.ui.settings_dialog.get_default_input_device_name", return_value="Mic")
+        mocker.patch("voicetype.ui.settings_dialog.list_input_devices",
+                     return_value=[(-1, "Mic (System Default)"), (0, "Mic 2")])
         dlg = SettingsDialog(AppConfig())
         qtbot.addWidget(dlg)
-        # The device name is resolved on a background thread and applied via
-        # signal; wait for the label to update before asserting.
-        qtbot.waitUntil(lambda: dlg.mic_device_label.text() == "Mic", timeout=2000)
+        # The device list is resolved on a background thread and applied via
+        # signal; wait for the combo to be populated before asserting.
+        qtbot.waitUntil(lambda: dlg.mic_device_combo.count() >= 2, timeout=2000)
+        assert dlg.mic_device_combo.itemText(0) == "Mic (System Default)"
         assert dlg.mic_level_bar.value() == 0
         assert dlg.mic_test_btn.text() == "Test Microphone"
 
@@ -149,14 +151,14 @@ class TestSettingsDialogMicrophoneTest:
             "voicetype.ui.settings_dialog.MicrophoneMonitor",
             return_value=monitor,
         )
-        mocker.patch("voicetype.ui.settings_dialog.get_default_input_device_name", return_value="Mic")
+        mocker.patch("voicetype.ui.settings_dialog.list_input_devices", return_value=[(-1, "Mic (System Default)")])
 
         dlg = SettingsDialog(AppConfig())
         qtbot.addWidget(dlg)
         dlg.sample_rate_spin.setValue(16000)
         dlg._start_microphone_monitor()
 
-        mock_monitor_cls.assert_called_once_with(16000)
+        mock_monitor_cls.assert_called_once_with(16000, device=None)
         monitor.start.assert_called_once()
         assert dlg._mic_timer.isActive()
         assert dlg.mic_test_btn.text() == "Stop Test"
@@ -167,7 +169,7 @@ class TestSettingsDialogMicrophoneTest:
         monitor.start.return_value = False
         monitor.error = "permission denied"
         mocker.patch("voicetype.ui.settings_dialog.MicrophoneMonitor", return_value=monitor)
-        mocker.patch("voicetype.ui.settings_dialog.get_default_input_device_name", return_value="Mic")
+        mocker.patch("voicetype.ui.settings_dialog.list_input_devices", return_value=[(-1, "Mic (System Default)")])
 
         dlg = SettingsDialog(AppConfig())
         qtbot.addWidget(dlg)
@@ -182,7 +184,7 @@ class TestSettingsDialogMicrophoneTest:
         monitor = mocker.MagicMock()
         monitor.is_running = True
         monitor.input_level = 0.5
-        mocker.patch("voicetype.ui.settings_dialog.get_default_input_device_name", return_value="Mic")
+        mocker.patch("voicetype.ui.settings_dialog.list_input_devices", return_value=[(-1, "Mic (System Default)")])
 
         dlg = SettingsDialog(AppConfig())
         qtbot.addWidget(dlg)
@@ -196,7 +198,7 @@ class TestSettingsDialogMicrophoneTest:
         monitor = mocker.MagicMock()
         monitor.is_running = True
         monitor.input_level = 0.0
-        mocker.patch("voicetype.ui.settings_dialog.get_default_input_device_name", return_value="Mic")
+        mocker.patch("voicetype.ui.settings_dialog.list_input_devices", return_value=[(-1, "Mic (System Default)")])
 
         dlg = SettingsDialog(AppConfig())
         qtbot.addWidget(dlg)
@@ -209,7 +211,7 @@ class TestSettingsDialogMicrophoneTest:
     def test_reject_stops_microphone_monitor(self, qtbot, mocker):
         monitor = mocker.MagicMock()
         monitor.is_running = True
-        mocker.patch("voicetype.ui.settings_dialog.get_default_input_device_name", return_value="Mic")
+        mocker.patch("voicetype.ui.settings_dialog.list_input_devices", return_value=[(-1, "Mic (System Default)")])
 
         dlg = SettingsDialog(AppConfig())
         qtbot.addWidget(dlg)

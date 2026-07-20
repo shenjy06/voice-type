@@ -12,6 +12,7 @@ Licensed under [GPL-3.0](LICENSE).
 - **Noise Reduction**: Optional spectral-gate denoising removes steady background noise (fans, AC, hum) before recognition — pure numpy, no extra dependencies. Targets stationary noise; transient sounds (keyboard clicks) are not well suppressed.
 - **Silence Auto-stop (VAD)**: Optionally stop recording automatically after sustained silence is detected — no need to press stop. Silence is only counted after you start speaking, so pauses before talking are ignored.
 - **Streaming Real-time ASR**: Optionally stream audio in real-time via WebSocket for live transcription as you speak (OpenAI Realtime API protocol)
+- **Live Caption Panel**: While streaming, a caption panel above the status bubble shows the full real-time transcript — no more 40-character truncated preview. Long transcripts trim from the front so the newest words stay visible
 - **Processing Retry**: Failed batch processing (network jitter, rate limiting, API timeout) preserves the audio — retry from the tray menu without re-recording
 - **Speech Recognition (STT)**: Transcribe recorded audio to text (OpenAI-compatible protocol)
 - **Smart Refinement**: LLM automatically removes filler words, fixes grammar, and improves clarity

@@ -354,6 +354,9 @@ class FloatingRecordingWindow(QWidget):
         old_state = self._state
         if old_state != new_state:
             logger.debug("State transition: %s -> %s", old_state.name, new_state.name)
+        if old_state == RecorderState.ERROR and new_state != RecorderState.ERROR:
+            # Clear any error tooltip set by set_error() once we recover.
+            self.setToolTip("")
         self._set_state(new_state)
 
         if old_state == RecorderState.RECORDING and new_state == RecorderState.IDLE:
@@ -437,10 +440,12 @@ class FloatingRecordingWindow(QWidget):
     def set_error(self, msg: str = ""):
         """Transition to ERROR state.
 
-        ``msg`` is reserved for future UI use (e.g. showing the error text
-        in a tooltip).  Currently only the state transition is needed.
+        When ``msg`` is given it is surfaced as the window tooltip so the
+        failure reason is discoverable on hover; the tooltip is cleared
+        automatically when the state machine leaves ERROR.
         """
-        _ = msg  # reserved, not yet displayed
+        if msg:
+            self.setToolTip(msg)
         self._transition_to(RecorderState.ERROR)
 
     def closeEvent(self, event: QCloseEvent):
@@ -523,6 +528,110 @@ class StatusBubble(QWidget):
         painter.setPen(QColor(p.text_primary))
         painter.setFont(self._font)
         painter.drawText(self.rect(), Qt.AlignCenter, self._text)
+
+
+class CaptionPanel(QWidget):
+    """Live transcription caption panel shown during streaming ASR.
+
+    The status bubble only shows a one-line truncated preview; this panel
+    displays the full real-time transcript while a streaming dictation is
+    active. It never steals focus (``WA_ShowWithoutActivating``), stacks
+    above the status bubble at screen bottom-center, and trims long
+    transcripts from the front so the newest words are always visible
+    within ``_MAX_LINES`` lines.
+    """
+
+    _FONT_SIZE = 14
+    _TARGET_OPACITY = 0.92
+    _WIDTH = 520
+    _H_PADDING = 32  # total horizontal inset inside the card
+    _V_PADDING = 20  # total vertical inset inside the card
+    _MAX_LINES = 4
+    _MAX_CHARS = 500  # hard cap on stored text — older content scrolls off
+    # Bottom-center, stacked above the StatusBubble (bubble: 40 px tall,
+    # 60 px bottom margin) plus a 12 px gap.
+    _BOTTOM_MARGIN = StatusBubble._BOTTOM_MARGIN + 40 + 12
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._text = ""
+        self._render_text = ""
+        self._font = _default_font(self._FONT_SIZE)
+        self.setWindowFlags(
+            Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint | Qt.BypassWindowManagerHint
+        )
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_ShowWithoutActivating)
+        self.setAttribute(Qt.WA_QuitOnClose, False)
+
+    @property
+    def text(self) -> str:
+        """The full transcript currently held by the panel (before trimming)."""
+        return self._text
+
+    def show_text(self, text: str):
+        """Show or update the panel with the latest transcript."""
+        self._text = text
+        self._relayout()
+        self.setWindowOpacity(self._TARGET_OPACITY)
+        self.show()
+        self.raise_()
+
+    def dismiss(self):
+        """Hide the panel and drop its transcript."""
+        self._text = ""
+        self._render_text = ""
+        if self.isVisible():
+            self.hide()
+
+    def _fit_text(self, fm: QFontMetrics, text_w: int, max_h: int) -> str:
+        """Trim the transcript from the front until it fits ``_MAX_LINES``.
+
+        The tail (newest words) is what the user is currently saying, so the
+        oldest content is dropped first, marked with a leading ellipsis.
+        """
+        text = self._text
+        if len(text) > self._MAX_CHARS:
+            text = "…" + text[-self._MAX_CHARS:]
+        for _ in range(12):
+            rect = fm.boundingRect(0, 0, text_w, 0, Qt.TextWordWrap, text)
+            if rect.height() <= max_h or len(text) <= 10:
+                return text
+            # Drop the oldest ~15% per iteration — bounded loop, converges
+            # quickly even for pathological inputs.
+            text = "…" + text[int(len(text) * 0.15):].lstrip("… ")
+        return text
+
+    def _relayout(self):
+        fm = QFontMetrics(self._font)
+        text_w = self._WIDTH - self._H_PADDING
+        max_h = fm.lineSpacing() * self._MAX_LINES
+        self._render_text = self._fit_text(fm, text_w, max_h)
+        rect = fm.boundingRect(0, 0, text_w, 0, Qt.TextWordWrap, self._render_text)
+        h = min(rect.height(), max_h) + self._V_PADDING
+        self.setFixedSize(self._WIDTH, h)
+        screen = QApplication.primaryScreen()
+        if screen:
+            geo = screen.availableGeometry()
+            x = geo.center().x() - self._WIDTH // 2
+            y = geo.bottom() - h - self._BOTTOM_MARGIN
+            self.move(x, y)
+        self.update()
+
+    def paintEvent(self, event):
+        p = get_palette()
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setBrush(QColor(p.bg_card))
+        painter.setPen(QColor(p.border))
+        painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 10, 10)
+        painter.setPen(QColor(p.text_primary))
+        painter.setFont(self._font)
+        inner = self.rect().adjusted(
+            self._H_PADDING // 2, self._V_PADDING // 2,
+            -(self._H_PADDING // 2), -(self._V_PADDING // 2),
+        )
+        painter.drawText(inner, Qt.TextWordWrap | Qt.AlignLeft | Qt.AlignTop, self._render_text)
 
 
 class Toast(QWidget):

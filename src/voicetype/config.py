@@ -67,6 +67,9 @@ class HotkeyConfig:
 @dataclass
 class RecordingConfig:
     sample_rate: int = 16000
+    # Audio device index (sounddevice device index). ``None`` means
+    # "use the system default device". Set by the settings dialog.
+    device: int | None = None
     # Audio preprocessing — spectral-gate noise reduction applied before
     # ASR. Off by default so existing users see no behaviour change until
     # they opt in via Settings → STT → Recording.

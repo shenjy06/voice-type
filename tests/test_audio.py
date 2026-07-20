@@ -5,7 +5,12 @@ import struct
 import numpy as np
 import pytest
 from pathlib import Path
-from voicetype.audio import AudioRecorder, MicrophoneMonitor, get_default_input_device_name
+from voicetype.audio import (
+    AudioRecorder,
+    MicrophoneMonitor,
+    get_default_input_device_name,
+    list_input_devices,
+)
 
 
 class TestAudioRecorderDefaults:
@@ -299,21 +304,21 @@ class TestAudioRecorderVAD:
         """VAD off → _update_vad always returns False."""
         recorder = AudioRecorder()
         recorder.on_silence = lambda: None
-        assert recorder._update_vad(0.5) is False
-        assert recorder._update_vad(0.0) is False
+        assert recorder._update_vad(0.5, 0.0) is False
+        assert recorder._update_vad(0.0, 0.0) is False
 
     def test_no_silence_callback_no_trigger(self):
         """on_silence None → VAD never triggers even when enabled."""
         recorder = AudioRecorder(vad_enabled=True)
-        assert recorder._update_vad(0.5) is False
-        assert recorder._update_vad(0.0) is False
+        assert recorder._update_vad(0.5, 0.0) is False
+        assert recorder._update_vad(0.0, 0.0) is False
 
     def test_silence_before_speech_does_not_trigger(self, mocker):
         """Silence before first speech is ignored — no early stop."""
         mocker.patch("voicetype.audio.time.monotonic", return_value=0.0)
         recorder = AudioRecorder(vad_enabled=True, vad_silence_duration_ms=1000)
         recorder.on_silence = lambda: None
-        assert recorder._update_vad(0.0) is False
+        assert recorder._update_vad(0.0, 0.0) is False
         assert recorder._vad_speech_detected is False
 
     def test_speech_then_silence_below_duration_no_trigger(self, mocker):
@@ -322,11 +327,11 @@ class TestAudioRecorderVAD:
         t.return_value = 0.0
         recorder = AudioRecorder(vad_enabled=True, vad_silence_duration_ms=1500)
         recorder.on_silence = lambda: None
-        assert recorder._update_vad(0.5) is False  # speech
+        assert recorder._update_vad(0.5, 0.0) is False  # speech
         t.return_value = 1.0
-        assert recorder._update_vad(0.0) is False  # silence begins
+        assert recorder._update_vad(0.0, 1.0) is False  # silence begins
         t.return_value = 2.0  # elapsed = 1000ms < 1500ms
-        assert recorder._update_vad(0.0) is False
+        assert recorder._update_vad(0.0, 2.0) is False
 
     def test_speech_then_silence_above_duration_triggers(self, mocker):
         """Silence past the duration triggers exactly once."""
@@ -334,11 +339,11 @@ class TestAudioRecorderVAD:
         t.return_value = 0.0
         recorder = AudioRecorder(vad_enabled=True, vad_silence_duration_ms=1000)
         recorder.on_silence = lambda: None
-        assert recorder._update_vad(0.5) is False  # speech
+        assert recorder._update_vad(0.5, 0.0) is False  # speech
         t.return_value = 1.0
-        assert recorder._update_vad(0.0) is False  # silence begins
+        assert recorder._update_vad(0.0, 1.0) is False  # silence begins
         t.return_value = 2.5  # elapsed = 1500ms >= 1000ms
-        assert recorder._update_vad(0.0) is True
+        assert recorder._update_vad(0.0, 2.5) is True
 
     def test_trigger_latches_no_repeat(self, mocker):
         """After triggering, subsequent callbacks don't fire again."""
@@ -346,13 +351,13 @@ class TestAudioRecorderVAD:
         t.return_value = 0.0
         recorder = AudioRecorder(vad_enabled=True, vad_silence_duration_ms=1000)
         recorder.on_silence = lambda: None
-        recorder._update_vad(0.5)  # speech
+        recorder._update_vad(0.5, 0.0)  # speech
         t.return_value = 1.0
-        recorder._update_vad(0.0)  # silence begins
+        recorder._update_vad(0.0, 1.0)  # silence begins
         t.return_value = 2.5
-        assert recorder._update_vad(0.0) is True  # trigger
+        assert recorder._update_vad(0.0, 2.5) is True  # trigger
         t.return_value = 5.0
-        assert recorder._update_vad(0.0) is False  # latched
+        assert recorder._update_vad(0.0, 5.0) is False  # latched
 
     def test_speech_resets_silence_timer_then_triggers(self, mocker):
         """After speech resets the timer, a fresh silence window must elapse."""
@@ -360,17 +365,17 @@ class TestAudioRecorderVAD:
         t.return_value = 0.0
         recorder = AudioRecorder(vad_enabled=True, vad_silence_duration_ms=1000)
         recorder.on_silence = lambda: None
-        recorder._update_vad(0.5)        # speech
+        recorder._update_vad(0.5, 0.0)        # speech
         t.return_value = 1.0
-        recorder._update_vad(0.0)        # silence begins at 1.0
+        recorder._update_vad(0.0, 1.0)        # silence begins at 1.0
         t.return_value = 1.2
-        recorder._update_vad(0.5)        # speech interrupts — resets
+        recorder._update_vad(0.5, 1.2)        # speech interrupts — resets
         t.return_value = 1.3
-        assert recorder._update_vad(0.0) is False  # new silence begins at 1.3
+        assert recorder._update_vad(0.0, 1.3) is False  # new silence begins at 1.3
         t.return_value = 2.0             # 700ms < 1000ms
-        assert recorder._update_vad(0.0) is False
+        assert recorder._update_vad(0.0, 2.0) is False
         t.return_value = 2.5             # 1200ms >= 1000ms
-        assert recorder._update_vad(0.0) is True
+        assert recorder._update_vad(0.0, 2.5) is True
 
     def test_start_resets_vad_state(self, mocker):
         """start() clears speech-detected + trigger latch + silence timer."""
@@ -380,11 +385,11 @@ class TestAudioRecorderVAD:
         t.return_value = 0.0
         recorder = AudioRecorder(vad_enabled=True, vad_silence_duration_ms=1000)
         recorder.on_silence = lambda: None
-        recorder._update_vad(0.5)  # speech
+        recorder._update_vad(0.5, 0.0)  # speech
         t.return_value = 1.0
-        recorder._update_vad(0.0)  # silence begins
+        recorder._update_vad(0.0, 1.0)  # silence begins
         t.return_value = 2.5
-        recorder._update_vad(0.0)  # trigger
+        recorder._update_vad(0.0, 2.5)  # trigger
         assert recorder._vad_triggered is True
         recorder.start()
         assert recorder._vad_triggered is False
@@ -540,3 +545,51 @@ class TestMicrophoneMonitor:
         mocker.patch("voicetype.audio.sd.query_devices", side_effect=RuntimeError("no device"))
 
         assert get_default_input_device_name() == ""
+
+
+class TestListInputDevices:
+    def test_default_first_and_default_index_skipped(self, mocker):
+        mocker.patch("voicetype.audio.sd.query_devices", return_value=[
+            {"name": "Mic A", "max_input_channels": 2},
+            {"name": "Mic B", "max_input_channels": 1},
+        ])
+        mocker.patch("voicetype.audio.get_default_input_device_name", return_value="Mic A")
+        mocker.patch("voicetype.audio.sd.default.device", [0, 1])
+
+        devices = list_input_devices()
+
+        assert devices[0][0] == -1
+        assert "Mic A" in devices[0][1]
+        # Device at index 0 is the default — not duplicated under its real index.
+        assert devices[1:] == [(1, "Mic B")]
+
+    def test_output_only_devices_are_filtered(self, mocker):
+        mocker.patch("voicetype.audio.sd.query_devices", return_value=[
+            {"name": "Speaker", "max_input_channels": 0},
+            {"name": "Mic", "max_input_channels": 1},
+        ])
+        mocker.patch("voicetype.audio.get_default_input_device_name", return_value="")
+        mocker.patch("voicetype.audio.sd.default.device", [-1, -1])
+
+        assert list_input_devices() == [(1, "Mic")]
+
+    def test_query_devices_failure_returns_empty_list(self, mocker):
+        mocker.patch("voicetype.audio.sd.query_devices", side_effect=RuntimeError("no audio"))
+
+        assert list_input_devices() == []
+
+    def test_unresolvable_default_device_still_enumerates(self, mocker):
+        """sd.default.device may be unreadable — enumeration must still work."""
+        mocker.patch("voicetype.audio.sd.query_devices", return_value=[
+            {"name": "Mic A", "max_input_channels": 1},
+        ])
+        mocker.patch("voicetype.audio.get_default_input_device_name", return_value="Mic A")
+        # sd.default intercepts attribute assignment, so patch the whole
+        # default object: int(MagicMock()[0]) raises TypeError, exercising
+        # the defensive fallback in list_input_devices().
+        mocker.patch("voicetype.audio.sd.default")
+
+        devices = list_input_devices()
+        assert devices[0][0] == -1
+        # Nothing is skipped (default index unknown) — the real index is listed too.
+        assert (0, "Mic A") in devices

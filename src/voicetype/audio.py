@@ -85,11 +85,57 @@ def get_default_input_device_name() -> str:
     return str(device)
 
 
+def list_input_devices() -> list[tuple[int, str]]:
+    """Return a list of ``(device_index, device_name)`` for all input-capable audio devices.
+
+    The first entry is always ``(-1, "…")`` representing the system default.
+    Returns an empty list on failure.
+    """
+    try:
+        devices = sd.query_devices()
+    except Exception:
+        return []
+    # sd.default.device can raise or be a bare ``-1`` when no default input
+    # is configured — resolve defensively so enumeration still works.
+    try:
+        default_index = int(sd.default.device[0])
+    except Exception:
+        default_index = -1
+    result: list[tuple[int, str]] = []
+    default_name = get_default_input_device_name()
+    if default_name:
+        result.append((-1, f"{default_name} ({_t('settings.mic_device_default')})"))
+    for i, dev in enumerate(devices):
+        if isinstance(dev, dict):
+            if dev.get("max_input_channels", 0) > 0:
+                name = str(dev.get("name", f"Device {i}"))
+                # Skip adding the default device again under its real index.
+                if i == default_index:
+                    continue
+                result.append((i, name))
+        elif hasattr(dev, "max_input_channels") and dev.max_input_channels > 0:
+            name = getattr(dev, "name", f"Device {i}")
+            if i == default_index:
+                continue
+            result.append((i, name))
+    return result
+
+
+def _t(key: str) -> str:
+    """Lazy translate helper — avoids import-time i18n dependency."""
+    try:
+        from voicetype.i18n import t
+        return t(key)
+    except Exception:
+        return key
+
+
 class MicrophoneMonitor:
     """Lightweight microphone level monitor for settings diagnostics."""
 
-    def __init__(self, sample_rate: int = 16000):
+    def __init__(self, sample_rate: int = 16000, device: int | None = None):
         self.sample_rate = sample_rate
+        self._device = device
         self._stream: sd.InputStream | None = None
         self._input_level = 0.0
         self._error = ""
@@ -116,6 +162,7 @@ class MicrophoneMonitor:
                 samplerate=self.sample_rate,
                 channels=1,
                 dtype=np.float32,
+                device=self._device,
                 callback=self._callback,
             )
             self._stream.start()
@@ -167,6 +214,7 @@ class AudioRecorder:
         vad_silence_duration_ms: int = 1500,
         vad_threshold: float = 0.02,
         streaming_enabled: bool = False,
+        device: int | None = None,
     ):
         self.sample_rate = sample_rate
         self.denoise_enabled = denoise_enabled
@@ -175,6 +223,7 @@ class AudioRecorder:
         self.vad_silence_duration_ms = vad_silence_duration_ms
         self.vad_threshold = vad_threshold
         self.streaming_enabled = streaming_enabled
+        self.device = device
         self._recording = False
         self._frames: list[np.ndarray] = []
         self._stream: sd.InputStream | None = None
@@ -230,6 +279,7 @@ class AudioRecorder:
                 samplerate=self.sample_rate,
                 channels=1,
                 dtype=np.float32,
+                device=self.device,
                 callback=self._callback,
             )
             stream.start()
@@ -310,11 +360,14 @@ class AudioRecorder:
         return self._temp_file
 
     def _callback(self, indata, frames, time_info, status):
-        # Do the (CPU) level computation and the array copy OUTSIDE the lock —
-        # they don't touch shared mutable state. Only the list append and the
-        # level write need the lock, so we hold it for the minimum span.
+        # Do the (CPU) level computation, the array copy, AND the timestamp
+        # OUTSIDE the lock — they don't touch shared mutable state. Only the
+        # list append and the level write need the lock, so we hold it for the
+        # minimum span. ``time.monotonic()`` is a system call; calling it
+        # under the lock would block the audio thread.
         level = _calculate_input_level(indata)
         frame = indata.copy()
+        now = time.monotonic()
         trigger = False
         stream_chunk = False
         with self._lock:
@@ -324,7 +377,7 @@ class AudioRecorder:
                 if not self.streaming_enabled:
                     self._frames.append(frame)
                 self._input_level = level
-                if self._update_vad(level):
+                if self._update_vad(level, now):
                     trigger = True
                 if self.streaming_enabled:
                     stream_chunk = True
@@ -358,18 +411,21 @@ class AudioRecorder:
         pcm = np.ascontiguousarray(frame * 32767, dtype=np.int16)
         return pcm.tobytes()
 
-    def _update_vad(self, level: float) -> bool:
+    def _update_vad(self, level: float, now: float) -> bool:
         """Advance the VAD state machine; return True to trigger auto-stop.
 
-        Called under self._lock on the audio thread. Silence is only counted
-        after the first speech has been detected (``level >= vad_threshold``),
-        so a pause before the user starts talking does not trigger an early
-        stop. Once triggered, the latch (``_vad_triggered``) prevents repeat
-        fires until the next ``start()`` resets it.
+        Called under self._lock on the audio thread. ``now`` is the current
+        ``time.monotonic()`` value, captured OUTSIDE the lock so the system
+        call never blocks the critical section.
+
+        Silence is only counted after the first speech has been detected
+        (``level >= vad_threshold``), so a pause before the user starts
+        talking does not trigger an early stop. Once triggered, the latch
+        (``_vad_triggered``) prevents repeat fires until the next ``start()``
+        resets it.
         """
         if not self.vad_enabled or self.on_silence is None or self._vad_triggered:
             return False
-        now = time.monotonic()
         if level >= self.vad_threshold:
             self._vad_speech_detected = True
             self._vad_silence_start = None
