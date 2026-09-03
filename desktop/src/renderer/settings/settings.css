@@ -1,0 +1,283 @@
+/* Settings window styles. */
+
+.settings-body {
+  padding: 14px 16px 12px;
+  gap: 10px;
+}
+
+.tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--vt-border);
+}
+
+.tab {
+  border: none;
+  background: transparent;
+  border-radius: 6px 6px 0 0;
+  padding: 7px 12px;
+  color: var(--vt-text-secondary);
+  border-bottom: 2px solid transparent;
+}
+
+.tab:hover {
+  background: var(--vt-bg-hover);
+  color: var(--vt-text-primary);
+}
+
+.tab.active {
+  color: var(--vt-accent);
+  border-bottom-color: var(--vt-accent);
+}
+
+.tab-panel {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 2px 8px;
+  min-height: 0;
+}
+
+.group {
+  border: 1px solid var(--vt-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+
+.group-title {
+  font-weight: 600;
+  color: var(--vt-text-title);
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.field.align-top {
+  align-items: flex-start;
+}
+
+.field > label {
+  width: 118px;
+  flex-shrink: 0;
+  color: var(--vt-text-secondary);
+  text-align: right;
+}
+
+.field > .control {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.field .control > input[type='text'],
+.field .control > input[type='password'],
+.field .control > select {
+  flex: 1;
+  min-width: 0;
+}
+
+.hint {
+  font-size: 11px;
+  color: var(--vt-text-secondary);
+  margin: 2px 0 0 126px;
+  line-height: 1.5;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0;
+  cursor: pointer;
+}
+
+.checkbox-row input {
+  flex-shrink: 0;
+}
+
+.footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--vt-border);
+}
+
+.password-wrap {
+  position: relative;
+  flex: 1;
+  display: flex;
+}
+
+.password-wrap input {
+  width: 100%;
+  padding-right: 30px;
+}
+
+.eye-btn {
+  position: absolute;
+  right: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 26px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--vt-text-secondary);
+  padding: 0;
+}
+
+.eye-btn:hover {
+  background: transparent;
+  color: var(--vt-text-primary);
+}
+
+.toast {
+  position: absolute;
+  bottom: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--vt-bg-card);
+  color: var(--vt-text-primary);
+  border: 1px solid var(--vt-border-focus);
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  z-index: 60;
+  max-width: 80%;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+
+.modal {
+  width: 380px;
+  background: var(--vt-bg-dialog);
+  border: 1px solid var(--vt-border);
+  border-radius: 10px;
+  padding: 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.modal h3 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  color: var(--vt-text-title);
+}
+
+.modal .modal-body {
+  font-size: 12.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  color: var(--vt-text-primary);
+  max-height: 260px;
+  overflow-y: auto;
+  user-select: text;
+}
+
+.modal .modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.error-text {
+  color: var(--vt-danger);
+  font-size: 12px;
+  margin-top: 6px;
+}
+
+.mic-bar {
+  flex: 1;
+  height: 10px;
+  border-radius: 5px;
+  background: var(--vt-bg-input);
+  border: 1px solid var(--vt-border);
+  overflow: hidden;
+}
+
+.mic-bar .fill {
+  height: 100%;
+  background: var(--vt-success);
+  transition: width 100ms linear;
+}
+
+.glossary-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 8px;
+}
+
+.glossary-table th {
+  text-align: left;
+  font-size: 11px;
+  color: var(--vt-text-secondary);
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--vt-border);
+}
+
+.glossary-table td {
+  padding: 2px 4px;
+}
+
+.glossary-table input {
+  width: 100%;
+  border: 1px solid transparent;
+  background: transparent;
+  padding: 4px 6px;
+}
+
+.glossary-table input:focus {
+  border-color: var(--vt-border-focus);
+  background: var(--vt-bg-input);
+}
+
+.glossary-table tr.selected input {
+  background: var(--vt-bg-input);
+}
+
+.model-refresh {
+  flex-shrink: 0;
+  padding: 5px 8px;
+}
+
+.hotkey-display {
+  flex: 1;
+  border: 1px solid var(--vt-border);
+  border-radius: 6px;
+  padding: 5px 10px;
+  background: var(--vt-bg-input);
+  color: var(--vt-text-secondary);
+}
+
+.hotkey-display.listening {
+  border-color: var(--vt-border-focus);
+  color: var(--vt-text-primary);
+}
+
+.profile-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.profile-row select {
+  flex: 1;
+}

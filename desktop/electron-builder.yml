@@ -1,0 +1,32 @@
+appId: com.voicetype.desktop
+productName: VoiceType
+# koffi & uiohook-napi ship prebuilt N-API binaries (ABI-stable across
+# Electron versions) — no native rebuild step required.
+npmRebuild: false
+directories:
+  output: dist
+  buildResources: build
+files:
+  - out/**
+  - package.json
+asarUnpack:
+  - "**/node_modules/koffi/**"
+  - "**/node_modules/uiohook-napi/**"
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: zip
+      arch:
+        - x64
+  icon: build/icon.ico
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  artifactName: VoiceType-Setup-${version}.${ext}
+  shortcutName: VoiceType
+# zip 目标（绿色便携版）命名；nsis 节的 artifactName 优先级更高互不影响。
+# 解压到任意目录后直接运行 VoiceType.exe。
+artifactName: VoiceType-${version}-portable.${ext}

@@ -1,0 +1,92 @@
+/* History window styles. */
+
+.history-body {
+  padding: 12px;
+  gap: 10px;
+}
+
+.history-main {
+  flex: 1;
+  display: flex;
+  gap: 10px;
+  min-height: 0;
+}
+
+.history-list {
+  flex: 1;
+  border: 1px solid var(--vt-border);
+  border-radius: 8px;
+  background: var(--vt-bg-card);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.history-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--vt-text-secondary);
+}
+
+.history-item {
+  display: block;
+  text-align: left;
+  border: none;
+  border-bottom: 1px solid var(--vt-border);
+  border-radius: 0;
+  background: transparent;
+  padding: 8px 10px;
+  width: 100%;
+}
+
+.history-item:hover {
+  background: var(--vt-bg-hover);
+}
+
+.history-item.selected {
+  background: var(--vt-bg-hover);
+}
+
+.history-time {
+  display: block;
+  font-size: 11px;
+  color: var(--vt-text-secondary);
+}
+
+.history-preview {
+  display: block;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-detail {
+  flex: 2;
+  border: 1px solid var(--vt-border);
+  border-radius: 8px;
+  background: var(--vt-bg-input);
+  padding: 10px;
+  overflow-y: auto;
+  user-select: text;
+  white-space: pre-wrap;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.history-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.history-actions .spacer {
+  flex: 1;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}

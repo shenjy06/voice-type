@@ -1,0 +1,132 @@
+/* Base styles for every VoiceType window — the CSS counterpart of theme.py's
+   settings_qss(). Colors come from --vt-* custom properties applied by
+   theme-css.ts on <html data-theme>. */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  font-family: 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
+  font-size: 13px;
+  color: var(--vt-text-primary);
+  background: transparent;
+  user-select: none;
+  overflow: hidden;
+}
+
+.window-body {
+  width: 100%;
+  height: 100%;
+  background: var(--vt-bg-dialog);
+  color: var(--vt-text-primary);
+  display: flex;
+  flex-direction: column;
+}
+
+button {
+  font: inherit;
+  color: var(--vt-text-primary);
+  background: var(--vt-bg-card);
+  border: 1px solid var(--vt-border);
+  border-radius: 6px;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: var(--vt-bg-hover);
+  border-color: var(--vt-border-hover);
+}
+
+button:disabled {
+  color: var(--vt-text-disabled);
+  cursor: default;
+  background: var(--vt-bg-card);
+}
+
+button.primary {
+  background: var(--vt-accent);
+  border-color: var(--vt-accent);
+  color: #fff;
+}
+
+button.primary:hover {
+  background: var(--vt-accent-hover);
+}
+
+button.primary:active {
+  background: var(--vt-accent-pressed);
+}
+
+button.primary:disabled {
+  background: var(--vt-accent);
+  opacity: 0.5;
+}
+
+button.danger {
+  color: var(--vt-danger);
+  border-color: var(--vt-danger);
+  background: transparent;
+}
+
+button.danger:hover {
+  background: var(--vt-danger);
+  color: #fff;
+}
+
+input[type='text'],
+input[type='password'],
+select,
+textarea {
+  font: inherit;
+  color: var(--vt-text-primary);
+  background: var(--vt-bg-input);
+  border: 1px solid var(--vt-border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  outline: none;
+  user-select: text;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--vt-border-focus);
+}
+
+input[type='checkbox'] {
+  accent-color: var(--vt-accent);
+  width: 15px;
+  height: 15px;
+}
+
+select option {
+  background: var(--vt-bg-card);
+  color: var(--vt-text-primary);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--vt-border);
+  border-radius: 5px;
+  border: 2px solid var(--vt-bg-dialog);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--vt-border-hover);
+}

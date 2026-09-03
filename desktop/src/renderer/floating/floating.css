@@ -1,0 +1,123 @@
+/* Floating recording widget styles. */
+
+.floating-card {
+  width: 260px;
+  height: 156px;
+  padding: 10px 12px 12px;
+  border-radius: 12px;
+  background: var(--vt-bg-card);
+  border: 1px solid var(--vt-border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.drag-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  -webkit-app-region: drag;
+}
+
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
+.app-name {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--vt-text-title);
+  flex: 1;
+  margin-left: 2px;
+}
+
+.icon-btn {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: var(--vt-text-secondary);
+}
+
+.icon-btn.close:hover {
+  color: var(--vt-danger);
+  border-color: var(--vt-danger);
+  background: transparent;
+}
+
+.status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 16px;
+}
+
+.pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--vt-border);
+  opacity: 0.4;
+}
+
+.pulse-dot.on {
+  background: var(--vt-danger);
+  animation: pulse 1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.timer {
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--vt-text-secondary);
+}
+
+.waveform {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 22px;
+}
+
+.waveform .bar {
+  flex: 1;
+  border-radius: 2px;
+  transition: height 80ms linear;
+}
+
+.record-btn {
+  height: 40px;
+  width: 100%;
+  font-weight: 600;
+  font-size: 13px;
+  border-radius: 8px;
+}
+
+.record-btn.danger {
+  background: var(--vt-danger);
+  border-color: var(--vt-danger);
+  color: #fff;
+}
+
+.record-btn.danger:hover {
+  background: var(--vt-danger-hover);
+}
+
+.record-btn.warning {
+  background: var(--vt-warning);
+  border-color: var(--vt-warning);
+  color: #232323;
+  opacity: 0.85;
+}

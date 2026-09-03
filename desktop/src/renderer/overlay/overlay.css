@@ -1,0 +1,59 @@
+/* Overlay styles — transparent window, stacked layers, bottom-aligned. */
+
+.overlay-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  height: 100%;
+  padding-bottom: 4px;
+}
+
+.bubble {
+  max-width: 520px;
+  padding: 8px 18px;
+  border-radius: 18px;
+  background: var(--vt-bg-card);
+  border: 1px solid var(--vt-border);
+  color: var(--vt-text-primary);
+  font-size: 13px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.caption-panel {
+  width: 520px;
+  max-height: 110px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--vt-bg-card);
+  border: 1px solid var(--vt-border);
+  opacity: 0.92;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+}
+
+.caption-text {
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--vt-text-primary);
+  word-break: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.toast {
+  max-width: 520px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  background: var(--vt-bg-card);
+  border: 1px solid var(--vt-warning);
+  color: var(--vt-warning);
+  font-size: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
