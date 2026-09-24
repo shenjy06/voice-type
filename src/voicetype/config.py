@@ -228,7 +228,9 @@ class AppConfig:
         else:
             hotkey_data = _safe_dict(data.get("hotkey"))
         glossary_entries = []
-        for item in data.get("glossary", []):
+        # ``or []`` guards against an explicit ``null`` in the JSON — a plain
+        # missing key would hit the default, but ``null`` does not.
+        for item in data.get("glossary") or []:
             if isinstance(item, dict):
                 glossary_entries.append(
                     GlossaryEntry(
@@ -245,7 +247,7 @@ class AppConfig:
                     phrase=str(item.get("phrase", "")),
                     action=str(item.get("action", "")),
                 )
-                for item in commands_data.get("items", [])
+                for item in commands_data.get("items") or []
                 if isinstance(item, dict)
             ]
         commands_kwargs = _filtered(CommandsConfig, commands_data)
@@ -261,7 +263,7 @@ class AppConfig:
                 match=str(item.get("match", "")),
                 profile=str(item.get("profile", "")),
             )
-            for item in scenes_data.get("rules", [])
+            for item in scenes_data.get("rules") or []
             if isinstance(item, dict)
         ]
 

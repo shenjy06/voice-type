@@ -92,7 +92,7 @@ describe('HistoryStore archive + stats', () => {
     expect(stats.total_duration_ms).toBe(3000)
     expect(stats.today_count).toBe(1)
     expect(stats.week_count).toBe(2)
-    expect(stats.est_minutes_saved).toBeCloseTo(Math.round((20 / 40) * 10) / 10, 5)
+    expect(stats.est_minutes_saved).toBeCloseTo(Math.round((20 / 200) * 10) / 10, 5)
   })
 
   it('returns zeroed stats for an empty history', () => {
@@ -103,6 +103,3 @@ describe('HistoryStore archive + stats', () => {
     expect(stats.est_minutes_saved).toBe(0)
   })
 })
-
-import { existsSync, mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
-import { tmpdir } from 'node:os'

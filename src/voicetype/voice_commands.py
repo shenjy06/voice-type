@@ -8,6 +8,7 @@ commands.
 """
 
 import logging
+import unicodedata
 
 from voicetype.config import VoiceCommandEntry
 
@@ -21,12 +22,22 @@ ALL_ACTIONS = KEY_ACTIONS + (DISCARD_ACTION,)
 
 
 def _normalize(text: str) -> str:
-    """Reduce ``text`` to its alphanumeric core (lowercased).
+    """Lowercase ``text`` and drop punctuation, symbols and whitespace.
 
-    Chinese characters count as alphanumeric (category Lo), so this keeps
-    CJK phrases intact while dropping spaces, punctuation and symbols.
+    Matches the desktop implementation (voice-commands.ts, which strips
+    ``[\\p{P}\\p{S}\\s]``): characters in categories P*/S*/Z* and all other
+    whitespace are removed, while letters, digits and Unicode combining
+    marks survive. ``"换行。"`` and ``"New Line!"`` both reduce to the bare
+    phrase.
     """
-    return "".join(ch.lower() for ch in text if ch.isalnum())
+    kept = []
+    for ch in text.lower():
+        if ch.isspace():
+            continue
+        if unicodedata.category(ch)[0] in ("P", "S"):
+            continue
+        kept.append(ch)
+    return "".join(kept)
 
 
 def match_voice_command(

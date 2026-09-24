@@ -70,10 +70,10 @@ export class HotkeyManager {
   private raLastVk: number | null = null
   // Long-press detection: fires onPttStart when the key is still held.
   private pttTimer: NodeJS.Timeout | null = null
-  // Double-tap detection: a completed first tap holds its onToggle back for
-  // the double-tap window; a second press inside the window cancels it.
-  private tapTimer: NodeJS.Timeout | null = null
-  private raSecondPress = false
+  // Double-tap detection: timestamp of the last completed tap release. The
+  // first tap fires onToggle immediately (same semantics as the Python
+  // port); a second tap released within the window fires onRawToggle.
+  private raLastTapAt = 0
   // Single-key repeat suppression.
   private singleKeyPressed = false
 
@@ -128,9 +128,8 @@ export class HotkeyManager {
     }
     this.raState = RaState.IDLE
     this.raLastVk = null
-    this.raSecondPress = false
+    this.raLastTapAt = 0
     this.clearPttTimer()
-    this.clearTapTimer()
     this.singleKeyPressed = false
   }
 
@@ -197,22 +196,9 @@ export class HotkeyManager {
     }
   }
 
-  private clearTapTimer(): void {
-    if (this.tapTimer) {
-      clearTimeout(this.tapTimer)
-      this.tapTimer = null
-    }
-  }
-
   private onPress(vk: number): void {
     if (vk === VK_RMENU) {
       if (this.raState === RaState.IDLE) {
-        // A second press inside the double-tap window cancels the pending
-        // single-tap toggle and becomes a double-tap / long-press candidate.
-        if (this.tapTimer) {
-          this.clearTapTimer()
-          this.raSecondPress = true
-        }
         this.raState = RaState.WAITING
         this.raLastVk = VK_RMENU
         if (this.gestures.pushToTalk) {
@@ -258,7 +244,6 @@ export class HotkeyManager {
         const wasPtt = this.raState === RaState.PTT
         this.raState = RaState.IDLE
         this.raLastVk = null
-        this.raSecondPress = false
         this.clearPttTimer()
         if (wasPtt) this.events.onPttStop?.()
       }
@@ -266,10 +251,8 @@ export class HotkeyManager {
     }
 
     const state = this.raState
-    const secondPress = this.raSecondPress
     this.raState = RaState.IDLE
     this.raLastVk = null
-    this.raSecondPress = false
     this.clearPttTimer()
 
     if (state === RaState.PTT) {
@@ -279,20 +262,16 @@ export class HotkeyManager {
     }
 
     if (state === RaState.WAITING) {
-      if (secondPress) {
-        // Second quick tap inside the window → double-tap gesture.
+      // Pure tap: fires onToggle immediately. When double-tap is enabled, a
+      // second tap released within the window becomes the raw gesture
+      // instead (matching the Python HotkeyManager semantics).
+      const now = Date.now()
+      if (this.gestures.doubleTap && now - this.raLastTapAt <= DOUBLE_TAP_WINDOW_MS) {
+        this.raLastTapAt = 0
         this.events.onRawToggle?.()
         return
       }
-      if (this.gestures.doubleTap) {
-        // Hold the toggle back until the double-tap window expires.
-        this.tapTimer = setTimeout(() => {
-          this.tapTimer = null
-          this.events.onToggle()
-        }, DOUBLE_TAP_WINDOW_MS)
-        return
-      }
-      // Pure tap.
+      this.raLastTapAt = now
       this.events.onToggle()
     }
     // COMBO / CANCELLED: no toggle.

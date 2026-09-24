@@ -16,54 +16,100 @@ function HistoryApp(): JSX.Element {
   const [selected, setSelected] = useState<number>(-1)
   const [copied, setCopied] = useState(false)
   const [playing, setPlaying] = useState(false)
+  const [loading, setLoading] = useState(false)
   const audioCtxRef = useRef<AudioContext | null>(null)
   const sourceRef = useRef<AudioBufferSourceNode | null>(null)
-
-  const refreshStats = (): void => {
-    void windowApi.statsSummary().then(setStats)
-  }
+  // Decoded buffers by entry index — replaying an entry must not re-fetch
+  // and re-decode the whole WAV every time. Tiny LRU (most recent 4).
+  const bufferCacheRef = useRef<Map<number, AudioBuffer>>(new Map())
+  const playGenRef = useRef(0)
 
   useEffect(() => {
     void windowApi.historyList().then((list) => {
       setEntries(list)
       setSelected(list.length ? 0 : -1)
     })
-    refreshStats()
+    void windowApi.statsSummary().then(setStats)
   }, [])
-
-  // Stop any playback when the window goes away.
-  useEffect(() => {
-    const stop = (): void => stopAudio()
-    window.addEventListener('beforeunload', stop)
-    return () => window.removeEventListener('beforeunload', stop)
-  }, [])
-
-  const current = selected >= 0 && selected < entries.length ? entries[selected] : null
 
   const stopAudio = (): void => {
-    sourceRef.current?.stop()
+    playGenRef.current++
+    try {
+      sourceRef.current?.stop()
+    } catch {
+      // stop() throws if the source already ended — harmless here
+    }
     sourceRef.current = null
     setPlaying(false)
   }
 
-  const onPlay = (): void => {
-    if (playing) {
+  // Stop playback and release the AudioContext when the window goes away.
+  useEffect(() => {
+    const cleanup = (): void => {
       stopAudio()
+      void audioCtxRef.current?.close()
+      audioCtxRef.current = null
+      bufferCacheRef.current.clear()
+    }
+    window.addEventListener('beforeunload', cleanup)
+    return () => window.removeEventListener('beforeunload', cleanup)
+  }, [])
+
+  const current = selected >= 0 && selected < entries.length ? entries[selected] : null
+
+  const onPlay = (): void => {
+    if (playing || loading) {
+      // A take is in flight: the button means "stop" (or "be patient").
+      stopAudio()
+      setLoading(false)
       return
     }
     if (!current?.audio_path) return
-    void windowApi.historyAudio(selected).then((res) => {
-      if (!res.ok || !res.data) return
+    setLoading(true)
+    const gen = ++playGenRef.current
+
+    const startPlayback = (buf: AudioBuffer): void => {
+      if (gen !== playGenRef.current) return // superseded by a newer click
       const ctx = audioCtxRef.current ?? new AudioContext()
       audioCtxRef.current = ctx
-      void ctx.decodeAudioData(res.data.buffer as ArrayBuffer).then((buf) => {
-        const src = ctx.createBufferSource()
-        src.buffer = buf
-        src.connect(ctx.destination)
-        src.onended = () => setPlaying(false)
-        src.start()
-        sourceRef.current = src
-        setPlaying(true)
+      const src = ctx.createBufferSource()
+      src.buffer = buf
+      src.connect(ctx.destination)
+      src.onended = () => {
+        if (sourceRef.current === src) {
+          sourceRef.current = null
+          setPlaying(false)
+        }
+      }
+      src.start()
+      sourceRef.current = src
+      setPlaying(true)
+    }
+
+    const cached = bufferCacheRef.current.get(selected)
+    if (cached) {
+      setLoading(false)
+      startPlayback(cached)
+      return
+    }
+    void windowApi.historyAudio(selected).then((res) => {
+      setLoading(false)
+      if (!res.ok || !res.data) return
+      // decodeAudioData needs the exact byte range — a pooled Buffer view
+      // would otherwise decode garbage.
+      const bytes = res.data
+      const slice = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+      const ctx = audioCtxRef.current ?? new AudioContext()
+      audioCtxRef.current = ctx
+      void ctx.decodeAudioData(slice).then((buf) => {
+        if (gen !== playGenRef.current) return
+        const cache = bufferCacheRef.current
+        cache.set(selected, buf)
+        if (cache.size > 4) {
+          // Drop the oldest decoded entry (Map preserves insertion order).
+          cache.delete(cache.keys().next().value!)
+        }
+        startPlayback(buf)
       })
     })
   }
@@ -81,10 +127,12 @@ function HistoryApp(): JSX.Element {
   }
 
   const onClear = (): void => {
+    stopAudio()
+    bufferCacheRef.current.clear()
     void windowApi.historyClear().then(() => {
       setEntries([])
       setSelected(-1)
-      refreshStats()
+      void windowApi.statsSummary().then(setStats)
     })
   }
 
@@ -130,7 +178,7 @@ function HistoryApp(): JSX.Element {
           {t('history.paste')}
         </button>
         <button disabled={!current?.audio_path} onClick={onPlay}>
-          {playing ? t('history.stop') : t('history.play')}
+          {playing ? t('history.stop') : loading ? '…' : t('history.play')}
         </button>
         <div className="spacer" />
         <button className="danger" disabled={!entries.length} onClick={onClear}>

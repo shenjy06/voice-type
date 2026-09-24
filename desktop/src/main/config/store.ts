@@ -2,7 +2,7 @@
 // Storage lives under a caller-supplied base dir (Electron userData), so this
 // module stays electron-free and unit-testable.
 
-import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, existsSync, renameSync } from 'node:fs'
+import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, existsSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
 import type { AppConfig, ConfigSummary, GlossaryEntry, SceneRule, VoiceCommandItem } from '../../shared/types'
 import { DEFAULT_BASE_URL } from '../../shared/types'
@@ -13,6 +13,7 @@ import {
   isEncryptedEnvelope,
   type AtRestCrypto
 } from './crypto'
+import { COMMAND_ACTIONS } from '../services/voice-commands'
 
 export class EncryptedConfigError extends Error {}
 export class InvalidPasswordError extends Error {}
@@ -127,7 +128,9 @@ export function configFromDict(data: unknown): AppConfig {
     ? (commandsData.items as unknown[])
         .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
         .map((item) => ({ phrase: coerceStr(item.phrase), action: coerceStr(item.action) }))
-        .filter((item) => item.phrase && item.action)
+        // Whitelist: an unknown action would only fail at runtime with a
+        // confusing toast — drop it here instead.
+        .filter((item) => item.phrase && COMMAND_ACTIONS.includes(item.action as (typeof COMMAND_ACTIONS)[number]))
     : def.commands.items
 
   const scenesData = section(d.scenes)
@@ -166,7 +169,9 @@ export function configFromDict(data: unknown): AppConfig {
       vad_silence_duration_ms: num(rec.vad_silence_duration_ms, def.recording.vad_silence_duration_ms),
       vad_threshold: num(rec.vad_threshold, def.recording.vad_threshold),
       archive_audio: bool(rec.archive_audio, def.recording.archive_audio),
-      archive_retention_days: num(rec.archive_retention_days, def.recording.archive_retention_days)
+      // Clamp: 0/negative days would make pruneArchive delete the WAV it
+      // just wrote (and everything else).
+      archive_retention_days: Math.max(1, num(rec.archive_retention_days, def.recording.archive_retention_days))
     },
     output: {
       paste_delay_ms: num(section(d.output).paste_delay_ms, def.output.paste_delay_ms),
@@ -347,11 +352,26 @@ export class ConfigStore {
     mkdirSync(this.profilesDir, { recursive: true })
     const plain = JSON.stringify(config)
     writeFileSync(join(this.profilesDir, `${name}.json`), plain, 'utf-8')
+    this.profileCache.delete(name)
   }
+
+  // Scene presets load a profile on every matching take — cache by (name,
+  // file mtime) so repeated dictation doesn't re-read and re-decrypt the
+  // file each time.
+  private profileCache = new Map<string, { mtime: number; config: AppConfig }>()
 
   loadProfile(name: string): AppConfig {
     validateProfileName(name)
-    return this.importFrom(join(this.profilesDir, `${name}.json`))
+    const path = join(this.profilesDir, `${name}.json`)
+    const mtime = statSync(path).mtimeMs
+    const cached = this.profileCache.get(name)
+    if (cached && cached.mtime === mtime) {
+      // Deep copy: callers mutate the returned session config in place.
+      return JSON.parse(JSON.stringify(cached.config)) as AppConfig
+    }
+    const config = this.importFrom(path)
+    this.profileCache.set(name, { mtime, config: JSON.parse(JSON.stringify(config)) as AppConfig })
+    return config
   }
 
   deleteProfile(name: string): void {
@@ -361,6 +381,7 @@ export class ConfigStore {
     } catch {
       // already gone
     }
+    this.profileCache.delete(name)
     if (this.getActiveProfile() === name) this.setActiveProfile(null)
   }
 

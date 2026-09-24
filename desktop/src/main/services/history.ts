@@ -100,8 +100,9 @@ export class HistoryStore {
   }
 
   /**
-   * Aggregate stats for the history window's summary bar. est_minutes_saved
-   * assumes a 40 chars/minute typing speed.
+   * Aggregate stats over the same visible window the history list shows
+   * (latest `limit` entries). est_minutes_saved assumes a typing speed of
+   * ~200 chars/minute (40 words/min × 5 chars).
    */
   stats(): HistoryStats {
     this.load()
@@ -114,7 +115,8 @@ export class HistoryStore {
     let todayChars = 0
     let weekCount = 0
     let weekChars = 0
-    for (const entry of this.entries) {
+    const visible = this.entries.slice(0, this.limit)
+    for (const entry of visible) {
       const chars = entry.text.length
       totalChars += chars
       totalDuration += entry.duration_ms ?? 0
@@ -130,14 +132,14 @@ export class HistoryStore {
       }
     }
     return {
-      total: this.entries.length,
+      total: visible.length,
       total_chars: totalChars,
       total_duration_ms: totalDuration,
       today_count: todayCount,
       today_chars: todayChars,
       week_count: weekCount,
       week_chars: weekChars,
-      est_minutes_saved: Math.round((totalChars / 40) * 10) / 10
+      est_minutes_saved: Math.round((totalChars / 200) * 10) / 10
     }
   }
 

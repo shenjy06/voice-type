@@ -146,31 +146,53 @@ export class TextTyper {
     const api = getWin32()
     if (!api) return false
     try {
-      // Same modifier-clearing / Esc-tap prelude as the paste path: the Alt
-      // tap from the foreground restore leaves menu bars armed in some apps.
-      for (const vk of [VK_MENU, VK_SHIFT, VK_CONTROL]) {
-        api.keybdEvent(vk, 0, KEYEVENTF_KEYUP)
-      }
-      api.keybdEvent(VK_ESCAPE, 0, 0)
-      api.keybdEvent(VK_ESCAPE, 0, KEYEVENTF_KEYUP)
+      this.prelude(api)
       await sleep(20)
-
-      for (const mod of spec.modifiers) {
-        if (!api.keybdEvent(mod, 0, 0)) return false
-        await sleep(20)
-      }
-      if (!api.keybdEvent(spec.key, 0, 0)) return false
-      await sleep(20)
-      if (!api.keybdEvent(spec.key, 0, KEYEVENTF_KEYUP)) return false
-      await sleep(20)
-      for (const mod of [...spec.modifiers].reverse()) {
-        if (!api.keybdEvent(mod, 0, KEYEVENTF_KEYUP)) return false
-        await sleep(20)
-      }
-      return true
+      return await this.pressKeyChord(api, spec.modifiers, spec.key)
     } catch (e) {
       console.warn('Action key injection raised:', String(e))
       return false
+    }
+  }
+
+  /** Modifier-clearing + Esc-tap prelude: the Alt tap used to restore the
+   *  foreground window leaves menu bars armed in some apps, where letters
+   *  would trigger menu mnemonics instead of the intended action. */
+  private prelude(api: NonNullable<ReturnType<typeof getWin32>>): void {
+    for (const vk of [VK_MENU, VK_SHIFT, VK_CONTROL]) {
+      api.keybdEvent(vk, 0, KEYEVENTF_KEYUP)
+    }
+    api.keybdEvent(VK_ESCAPE, 0, 0)
+    api.keybdEvent(VK_ESCAPE, 0, KEYEVENTF_KEYUP)
+  }
+
+  /** Press modifiers + key + release everything. Whatever happens, every
+   *  modifier that was successfully pressed is released in `finally` — an
+   *  early failure must never leave Shift/Ctrl logically stuck for the user. */
+  private async pressKeyChord(
+    api: NonNullable<ReturnType<typeof getWin32>>,
+    modifiers: number[],
+    key: number
+  ): Promise<boolean> {
+    const pressed: number[] = []
+    try {
+      for (const mod of modifiers) {
+        if (!api.keybdEvent(mod, 0, 0)) return false
+        pressed.push(mod)
+        await sleep(20)
+      }
+      if (!api.keybdEvent(key, 0, 0)) return false
+      await sleep(20)
+      if (!api.keybdEvent(key, 0, KEYEVENTF_KEYUP)) return false
+      await sleep(20)
+      return true
+    } finally {
+      // Best-effort release; failures here are reported through the early
+      // returns above, but the keys must come up regardless.
+      for (const mod of [...pressed].reverse()) {
+        api.keybdEvent(mod, 0, KEYEVENTF_KEYUP)
+        await sleep(20)
+      }
     }
   }
 
@@ -186,29 +208,10 @@ export class TextTyper {
     if (!api) return false
     try {
       // Best-effort cleanup — never blocks the actual paste.
-      for (const vk of [VK_MENU, VK_SHIFT, VK_CONTROL]) {
-        api.keybdEvent(vk, 0, KEYEVENTF_KEYUP)
-      }
-      api.keybdEvent(VK_ESCAPE, 0, 0)
-      api.keybdEvent(VK_ESCAPE, 0, KEYEVENTF_KEYUP)
+      this.prelude(api)
       await sleep(20)
-
-      if (!api.keybdEvent(VK_CONTROL, 0, 0)) return false
-      await sleep(20)
-      if (useTerminalPaste) {
-        if (!api.keybdEvent(VK_SHIFT, 0, 0)) return false
-        await sleep(20)
-      }
-      if (!api.keybdEvent(VK_V, 0, 0)) return false
-      await sleep(20)
-      if (!api.keybdEvent(VK_V, 0, KEYEVENTF_KEYUP)) return false
-      await sleep(20)
-      if (useTerminalPaste) {
-        if (!api.keybdEvent(VK_SHIFT, 0, KEYEVENTF_KEYUP)) return false
-        await sleep(20)
-      }
-      if (!api.keybdEvent(VK_CONTROL, 0, KEYEVENTF_KEYUP)) return false
-      return true
+      const modifiers = useTerminalPaste ? [VK_CONTROL, VK_SHIFT] : [VK_CONTROL]
+      return await this.pressKeyChord(api, modifiers, VK_V)
     } catch (e) {
       console.warn('Paste key injection raised:', String(e))
       return false

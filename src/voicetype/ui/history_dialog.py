@@ -1,6 +1,6 @@
 """History dialog for recent recognized text."""
 
-import threading
+import os
 
 import pyperclip
 import sounddevice as sd
@@ -188,7 +188,9 @@ class HistoryDialog(QDialog):
 
     def _update_play_button(self):
         entry = self._current_entry()
-        has_audio = bool(entry and entry.audio_path)
+        # Files may have been pruned since the entry was loaded — check the
+        # path, not just its presence on the entry.
+        has_audio = bool(entry and entry.audio_path and os.path.exists(entry.audio_path))
         if not has_audio:
             self._play_check_timer.stop()
         self.play_btn.setVisible(has_audio)
@@ -226,6 +228,14 @@ class HistoryDialog(QDialog):
 
     def _restore_copy_label(self):
         self.copy_btn.setText(t("history.copy"))
+
+    def closeEvent(self, event):
+        """Stop playback and the check timer when the dialog is dismissed,
+        so an in-flight stream doesn't keep playing with no way to stop it."""
+        self._play_check_timer.stop()
+        if self._is_playing():
+            sd.stop()
+        super().closeEvent(event)
 
     def retranslate(self):
         self.setWindowTitle(t("history.title"))

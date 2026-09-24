@@ -16,9 +16,9 @@ logger = logging.getLogger(__name__)
 HISTORY_DB_FILE = CONFIG_DIR / "history.sqlite3"
 DEFAULT_HISTORY_LIMIT = 20
 
-# Rough typing-speed estimate used for the "minutes saved" stat: an average
-# dictation user types about 40 characters per minute.
-_CHARS_PER_MINUTE = 40
+# Rough typing-speed estimate used for the "minutes saved" stat: ~40 words
+# per minute at ~5 characters per word ≈ 200 characters per minute.
+_CHARS_PER_MINUTE = 200
 
 
 @dataclass
@@ -150,11 +150,15 @@ class HistoryStore:
 
         ``archive_dir`` is swept for WAV files older than ``retention_days``
         days (by mtime). History entries whose ``audio_path`` no longer
-        exists on disk are NOT rewritten (the dialog simply hides the play
-        button). Runs synchronously on the caller's thread — intended for a
-        startup background thread, not the UI.
+        exists on disk are NOT rewritten — the dialog checks file existence
+        when deciding whether to show the play button. Runs synchronously on
+        the caller's thread; invoke from a background thread, not the UI.
         """
         if not archive_dir.exists():
+            return 0
+        # A misconfigured retention (0/negative) must never wipe the archive.
+        if retention_days < 1:
+            logger.warning("Ignoring invalid archive retention: %s days", retention_days)
             return 0
         cutoff = time.time() - retention_days * 86400
         deleted = 0

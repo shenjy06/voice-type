@@ -16,10 +16,13 @@ free of Qt widget leakage.
 """
 
 import ctypes
+import logging
 import threading
 
 from voicetype.state import RecorderState
 from voicetype.window_manager import get_foreground_window
+
+logger = logging.getLogger(__name__)
 
 # Show window without activating (keep focus on the user's target window).
 SW_SHOWNA = 4
@@ -142,7 +145,8 @@ class RecordingController:
         if self._scene_resolver is not None:
             try:
                 self._session_config = self._scene_resolver(self._saved_hwnd)
-            except Exception:
+            except Exception as e:
+                logger.warning("Scene resolution failed for hwnd %s: %s", self._saved_hwnd, e)
                 self._session_config = None
         if not self._recorder.start():
             self._saved_hwnd = 0

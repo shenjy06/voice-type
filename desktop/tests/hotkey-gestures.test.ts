@@ -54,25 +54,24 @@ describe('Right-Alt gesture machine', () => {
     expect(m.onRawToggle).not.toHaveBeenCalled()
   })
 
-  it('holds the toggle back for the double-tap window when enabled', () => {
+  it('fires the first tap immediately even when double-tap is enabled', () => {
+    // Same semantics as the Python HotkeyManager: no 350ms delayed toggle.
     const m = makeManager({ doubleTap: true })
     m.press(VK_RMENU)
     m.release(VK_RMENU)
-    expect(m.onToggle).not.toHaveBeenCalled()
-    vi.advanceTimersByTime(400)
     expect(m.onToggle).toHaveBeenCalledTimes(1)
     expect(m.onRawToggle).not.toHaveBeenCalled()
   })
 
-  it('a second quick tap inside the window fires raw toggle instead', () => {
+  it('a second quick tap inside the window fires raw toggle', () => {
     const m = makeManager({ doubleTap: true })
     m.press(VK_RMENU)
     m.release(VK_RMENU)
     m.press(VK_RMENU)
     m.release(VK_RMENU)
-    vi.advanceTimersByTime(400)
     expect(m.onRawToggle).toHaveBeenCalledTimes(1)
-    expect(m.onToggle).not.toHaveBeenCalled()
+    // The first tap already toggled; the second became the raw gesture.
+    expect(m.onToggle).toHaveBeenCalledTimes(1)
   })
 
   it('a slow second tap is two toggles, not a double tap', () => {
@@ -82,8 +81,19 @@ describe('Right-Alt gesture machine', () => {
     vi.advanceTimersByTime(500) // first tap's window expires
     m.press(VK_RMENU)
     m.release(VK_RMENU)
-    vi.advanceTimersByTime(500)
     expect(m.onRawToggle).not.toHaveBeenCalled()
+    expect(m.onToggle).toHaveBeenCalledTimes(2)
+  })
+
+  it('a third quick tap starts a fresh window, not another raw toggle', () => {
+    const m = makeManager({ doubleTap: true })
+    m.press(VK_RMENU)
+    m.release(VK_RMENU) // tap 1 → toggle
+    m.press(VK_RMENU)
+    m.release(VK_RMENU) // tap 2 → raw
+    m.press(VK_RMENU)
+    m.release(VK_RMENU) // tap 3 → toggle (fresh window)
+    expect(m.onRawToggle).toHaveBeenCalledTimes(1)
     expect(m.onToggle).toHaveBeenCalledTimes(2)
   })
 

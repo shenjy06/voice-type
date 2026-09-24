@@ -758,6 +758,7 @@ class SettingsDialog(QDialog):
         self.gestures_hint_label.setWordWrap(True)
         self.gestures_hint_label.setObjectName("hintLabel")
         hotkey_layout.addWidget(self.gestures_hint_label)
+        self._update_gesture_controls(self.hotkey_recorder.hotkey())
 
         hotkey_group.setLayout(hotkey_layout)
         hotkey_tab_layout.addWidget(hotkey_group)
@@ -867,6 +868,7 @@ class SettingsDialog(QDialog):
         self.hotkey_recorder.set_hotkey(self.config.hotkey.toggle_hotkey)
         self.double_tap_check.setChecked(self.config.hotkey.double_tap_action == "raw")
         self.push_to_talk_check.setChecked(self.config.hotkey.push_to_talk)
+        self._update_gesture_controls(self.config.hotkey.toggle_hotkey)
         self._load_mic_devices()
 
     def _snapshot_api_state(self) -> dict:
@@ -1431,11 +1433,19 @@ class SettingsDialog(QDialog):
 
     # ---- commands / scenes tables -------------------------------------------
 
+    _COMMAND_ACTIONS = ("newline", "enter", "undo", "tab", "discard")
+
     def _add_command_row(self, phrase: str = "", action: str = ""):
         row = self.commands_table.rowCount()
         self.commands_table.insertRow(row)
         self.commands_table.setItem(row, 0, QTableWidgetItem(phrase.strip()))
-        self.commands_table.setItem(row, 1, QTableWidgetItem(action.strip()))
+        # Action column is a fixed set — a dropdown prevents silent typos
+        # that would never match at runtime.
+        action_combo = QComboBox()
+        action_combo.setEditable(True)
+        action_combo.addItems(self._COMMAND_ACTIONS)
+        action_combo.setCurrentText(action.strip() or self._COMMAND_ACTIONS[0])
+        self.commands_table.setCellWidget(row, 1, action_combo)
 
     def _remove_selected_command_rows(self):
         rows = sorted(
@@ -1449,10 +1459,10 @@ class SettingsDialog(QDialog):
         entries = []
         for row in range(self.commands_table.rowCount()):
             phrase_item = self.commands_table.item(row, 0)
-            action_item = self.commands_table.item(row, 1)
+            action_widget = self.commands_table.cellWidget(row, 1)
             phrase = phrase_item.text().strip() if phrase_item else ""
-            action = action_item.text().strip() if action_item else ""
-            if phrase and action:
+            action = action_widget.currentText().strip() if isinstance(action_widget, QComboBox) else ""
+            if phrase and action in self._COMMAND_ACTIONS:
                 entries.append(VoiceCommandEntry(phrase=phrase, action=action))
         return entries
 
@@ -1485,6 +1495,14 @@ class SettingsDialog(QDialog):
         """Update the recorder display when a key is captured."""
         self.hotkey_recorder.set_hotkey(hotkey)
         self.hotkey_recorder.stop_recording()
+        self._update_gesture_controls(hotkey)
+
+    def _update_gesture_controls(self, hotkey: str):
+        """Enable the gesture checkboxes only for the right_alt binding —
+        they silently do nothing for single-key bindings."""
+        is_right_alt = hotkey.strip().lower() == "right_alt"
+        self.double_tap_check.setEnabled(is_right_alt)
+        self.push_to_talk_check.setEnabled(is_right_alt)
 
     # ---- theme switching -------------------------------------------------
 

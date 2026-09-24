@@ -3,10 +3,12 @@
 import logging
 import os
 import time
+import wave
 
 from PySide6.QtCore import QObject, Signal
 
 from voicetype.asr import Transcriber
+from voicetype.audio import get_archive_dir
 from voicetype.config import AppConfig
 from voicetype.glossary import apply_glossary
 from voicetype.i18n import t
@@ -307,8 +309,6 @@ class ProcessingWorker(QObject):
     @staticmethod
     def _is_archived(audio_path: str) -> bool:
         """Return True when ``audio_path`` lives in the audio-archive dir."""
-        from voicetype.audio import get_archive_dir
-
         try:
             return os.path.dirname(os.path.abspath(audio_path)) == os.path.abspath(
                 str(get_archive_dir())
@@ -341,8 +341,6 @@ def _probe_wav_duration_ms(audio_path: str) -> int | None:
     longer available. Returns None on any failure — duration is metadata,
     never worth failing the pipeline over.
     """
-    import wave
-
     try:
         with wave.open(audio_path, "rb") as wf:
             rate = wf.getframerate()

@@ -165,7 +165,7 @@ class TestHistoryArchiveAndStats:
         assert stats["total_duration_ms"] == 3000
         assert stats["today_count"] == 1
         assert stats["week_count"] == 2
-        assert stats["est_minutes_saved"] == round((16 + len("old text")) / 40, 1)
+        assert stats["est_minutes_saved"] == round((16 + len("old text")) / 200, 1)
         store.shutdown()
 
     def test_stats_empty_history(self, tmp_path):

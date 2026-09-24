@@ -38,7 +38,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 
 from voicetype._logging import setup_logging
 from voicetype.audio import AudioRecorder, cleanup_stale_audio, get_archive_dir
-from voicetype.config import AppConfig, load_profile
+from voicetype.config import AppConfig, PROFILES_DIR, load_profile
 from voicetype.context import get_cursor_context
 from voicetype.hotkey_parser import HotkeyBinding
 from voicetype.history import HistoryStore
@@ -150,6 +150,12 @@ class Application:
         # Raw mode flag set by the double-tap gesture: the next processing
         # cycle skips polishing. Consumed at recording stop.
         self._raw_once = False
+        # Whether the current recording was started by a push-to-talk press —
+        # ptt_stop must only end takes that ptt_start began.
+        self._ptt_active = False
+        # Scene profile cache: name -> (file mtime, config), so repeated
+        # dictation in the same app doesn't re-read/decrypt the profile.
+        self._scene_profile_cache: dict[str, tuple[float, AppConfig]] = {}
         # Track paste threads so we can join them at quit, preventing
         # ctypes calls from daemon threads after Qt objects are destroyed.
         self._paste_threads: list[threading.Thread] = []
@@ -349,11 +355,19 @@ class Application:
     def _ptt_start(self):
         """Push-to-talk: Right-Alt held — start recording (with state guards)."""
         if self._recording_controller.is_recording:
+            # A tap-toggle recording is already running: don't take ownership
+            # of it — the release would otherwise stop a recording the press
+            # never started.
+            self._ptt_active = False
             return
+        self._ptt_active = True
         self._recording_controller.toggle()
 
     def _ptt_stop(self):
         """Push-to-talk: Right-Alt released — stop and process."""
+        if not self._ptt_active:
+            return
+        self._ptt_active = False
         if not self._recording_controller.is_recording:
             return
         self._recording_controller.stop()
@@ -460,12 +474,27 @@ class Application:
         if not profile_name:
             return None
         try:
-            session_config = load_profile(profile_name)
+            session_config = self._load_scene_profile(profile_name)
         except Exception as e:
             logger.warning("Scene profile %r failed to load: %s", profile_name, e)
             return None
         self._show_toast(t("msg.scene_applied").format(name=profile_name))
         return session_config
+
+    def _load_scene_profile(self, name: str) -> AppConfig:
+        """Load a scene profile, cached by (name, file mtime).
+
+        Without the cache every recording start would hit the disk (JSON
+        parse, possibly key decryption) on the UI thread.
+        """
+        path = PROFILES_DIR / f"{name}.json"
+        mtime = path.stat().st_mtime
+        cached = self._scene_profile_cache.get(name)
+        if cached and cached[0] == mtime:
+            return cached[1]
+        cfg = load_profile(name)
+        self._scene_profile_cache[name] = (mtime, cfg)
+        return cfg
 
     # ---- processing progress + result handlers ----------------------------
 
@@ -509,6 +538,14 @@ class Application:
             logger.info("Processing done: %d chars", len(refined_text))
             meta = self._processing_controller.last_archive_info or {}
             self.history_store.add(refined_text, **meta)
+            if meta.get("audio_path"):
+                # Keep the archive within its retention window; off the UI
+                # thread since it stats every file in the archive dir.
+                threading.Thread(
+                    target=HistoryStore.prune_archive,
+                    args=(get_archive_dir(), self.config.recording.archive_retention_days),
+                    daemon=True,
+                ).start()
             self._output_text_async(
                 refined_text,
                 self._recording_controller.saved_hwnd,
@@ -546,9 +583,9 @@ class Application:
             ok = self.typer.send_action_key(action, hwnd)
             self._paste_bridge.action_key_finished.emit(ok)
 
-        t = threading.Thread(target=_work, daemon=True)
-        self._paste_threads.append(t)
-        t.start()
+        thread = threading.Thread(target=_work, daemon=True)
+        self._paste_threads.append(thread)
+        thread.start()
 
     def _on_action_key_finished(self, success: bool):
         if not success:
@@ -806,6 +843,10 @@ class Application:
         self.hotkey_manager.stop()
         binding = HotkeyBinding.from_string(self.config.hotkey.toggle_hotkey)
         self.hotkey_manager.set_binding(binding)
+        # Gestures are constructor-injected — refresh them here too, or a
+        # settings change would silently require a restart to take effect.
+        self.hotkey_manager.double_tap_action = self.config.hotkey.double_tap_action
+        self.hotkey_manager.push_to_talk = self.config.hotkey.push_to_talk
         if self.config.hotkey.toggle_enabled:
             self.hotkey_manager.start()
         self.audio_recorder.sample_rate = self.config.recording.sample_rate
@@ -816,6 +857,7 @@ class Application:
         self.audio_recorder.vad_threshold = self.config.recording.vad_threshold
         self.audio_recorder.streaming_enabled = self.config.asr.streaming_enabled
         self.audio_recorder.device = self.config.recording.device
+        self.audio_recorder.archive_enabled = self.config.recording.archive_audio
         self.window.retranslate()
         self.tray.retranslate()
         self.tray.apply_config(self.config)
@@ -828,6 +870,14 @@ class Application:
         # Glossary may have changed — drop cached compiled regex.
         from voicetype.glossary import invalidate_glossary_cache
         invalidate_glossary_cache()
+        # Retention days may have been lowered, or archiving just enabled —
+        # sweep expired WAVs now instead of waiting for the next launch.
+        if self.config.recording.archive_audio:
+            threading.Thread(
+                target=HistoryStore.prune_archive,
+                args=(get_archive_dir(), self.config.recording.archive_retention_days),
+                daemon=True,
+            ).start()
         self._settings_dialog = None
         self._show_toast(t("msg.settings_saved"))
 

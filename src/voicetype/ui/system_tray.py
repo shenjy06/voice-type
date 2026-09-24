@@ -301,6 +301,10 @@ class HotkeyManager(QObject):
         # detection. See _RightAltState docstring.
         self._ra_state = _RightAltState.IDLE
         self._ra_last_key: str | None = None
+        # Guards the state machine against the pynput listener thread racing
+        # the push-to-talk ``threading.Timer`` thread: a release landing on
+        # the 300ms boundary must not produce an unpaired ptt_start.
+        self._lock = threading.Lock()
         # Double-tap tracking: monotonic timestamp of the last tap release.
         self._ra_last_tap = 0.0
         # Push-to-talk hold timer, armed on Right-Alt press.
@@ -355,11 +359,12 @@ class HotkeyManager(QObject):
                 logger.debug("Skipping listener join from callback thread")
             self._listener = None
         logger.info("Hotkey listener stopped")
-        self._cancel_ptt_timer()
-        self._ra_state = _RightAltState.IDLE
-        self._ra_last_key = None
-        self._ra_last_tap = 0.0
-        self._single_key_pressed = False
+        with self._lock:
+            self._cancel_ptt_timer()
+            self._ra_state = _RightAltState.IDLE
+            self._ra_last_key = None
+            self._ra_last_tap = 0.0
+            self._single_key_pressed = False
 
     # ---- gesture helpers -----------------------------------------------------
 
@@ -381,12 +386,16 @@ class HotkeyManager(QObject):
         """Fires when Right-Alt has been held past the PTT threshold.
 
         Runs on a threading.Timer thread; emitting a Qt signal from here is
-        thread-safe (queued delivery to receivers).
+        thread-safe (queued delivery to receivers). The lock pairs it with
+        release handling: a release that already consumed the gesture flips
+        the state away from WAITING, so a callback that won the race against
+        ``timer.cancel()`` simply sees nothing to do.
         """
-        self._ptt_timer = None
-        if self._ra_state == _RightAltState.WAITING:
-            self._ra_state = _RightAltState.PTT
-            self.ptt_start.emit()
+        with self._lock:
+            self._ptt_timer = None
+            if self._ra_state == _RightAltState.WAITING:
+                self._ra_state = _RightAltState.PTT
+                self.ptt_start.emit()
 
     # ---- event dispatch ------------------------------------------------------
 
@@ -413,6 +422,10 @@ class HotkeyManager(QObject):
 
     def _on_press_right_alt(self, key):
         """Right-Alt state machine: key PRESS transitions."""
+        with self._lock:
+            self._on_press_right_alt_locked(key)
+
+    def _on_press_right_alt_locked(self, key):
         is_alt_r = key == keyboard.Key.alt_r
         is_alt_gr = key == keyboard.Key.alt_gr
         is_alt = key == keyboard.Key.alt
@@ -426,9 +439,13 @@ class HotkeyManager(QObject):
                     if self.push_to_talk:
                         self._arm_ptt_timer()
             elif is_alt:
-                # Generic Alt press (likely left): clear any stale Right-Alt
-                # tracker so a later left-Alt release doesn't toggle.
-                self._ra_last_key = None
+                # Generic Alt press (likely left): clear a stale Right-Alt
+                # tracker so a later left-Alt release doesn't toggle. During
+                # PTT the tracker must survive, or the Right-Alt release
+                # would no longer match and ptt_stop would never fire —
+                # the recording would run forever.
+                if self._ra_state == _RightAltState.WAITING:
+                    self._ra_last_key = None
             return
 
         # A non-Alt key was pressed while Right-Alt is held.
@@ -450,6 +467,10 @@ class HotkeyManager(QObject):
 
     def _on_release_right_alt(self, key):
         """Right-Alt state machine: key RELEASE transitions."""
+        with self._lock:
+            self._on_release_right_alt_locked(key)
+
+    def _on_release_right_alt_locked(self, key):
         is_alt_r = key == keyboard.Key.alt_r
         is_alt_gr = key == keyboard.Key.alt_gr
         is_alt = key == keyboard.Key.alt
@@ -470,10 +491,14 @@ class HotkeyManager(QObject):
                 # machine so it can never get stuck in WAITING with a cleared
                 # tracker; otherwise every subsequent Right-Alt tap would be
                 # silently ignored until the listener restarts. The current
-                # gesture is swallowed, which is safe.
+                # gesture is swallowed, which is safe — but don't strand an
+                # active PTT take: its recording must still be stopped.
+                was_ptt = self._ra_state == _RightAltState.PTT
                 self._cancel_ptt_timer()
                 self._ra_state = _RightAltState.IDLE
                 self._ra_last_key = None
+                if was_ptt:
+                    self.ptt_stop.emit()
             return
 
         state = self._ra_state

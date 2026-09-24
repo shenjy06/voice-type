@@ -373,8 +373,10 @@ export function RecordingTab({ draft, update }: TabProps): JSX.Element {
       setLevel(lvl)
       if (lvl > 0.02) setStatus('ok')
     })
-      .then(() => {
-        
+      .then((handle) => {
+        // Keep the stop handle — without it the button is a no-op and the
+        // mic stream + AudioContext leak until the window closes.
+        testRef.current = handle
         setTesting(true)
         setStatus('listening')
       })

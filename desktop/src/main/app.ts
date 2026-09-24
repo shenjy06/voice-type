@@ -5,7 +5,7 @@
 // output, continuous dictation, retry, VAD auto-stop, and the 300s watchdog.
 
 import { clipboard, nativeTheme } from 'electron'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { AppConfig, HistoryEntry, RecorderState } from '../shared/types'
 import { setLanguage, t, format } from '../shared/i18n'
@@ -199,12 +199,15 @@ export class Application {
 
   // ---- hotkey gesture entry points ------------------------------------------------
 
-  /** Double-tap: start one recording whose output skips polishing. */
+  /** Double-tap: mark the current/next take raw (no polish) and record. */
   toggleRaw(): void {
-    if (this.state !== 'idle' && this.state !== 'error') return
+    // Arm the flag even when the first tap already started a recording —
+    // the gesture never stops a take in flight, it only makes it raw.
     this.rawOnce = true
     this.showToast(t('msg.raw_once'))
-    void this.startRecording()
+    if (this.state === 'idle' || this.state === 'error') {
+      void this.startRecording()
+    }
   }
 
   /** Push-to-talk: press starts recording (ignored while busy). */
@@ -248,10 +251,9 @@ export class Application {
 
   async startRecording(): Promise<boolean> {
     if (this.state === 'recording' || this.state === 'processing') return false
-    const cfg = this.config
     this.savedHwnd = getForegroundWindow()
     this.sessionConfig = this.resolveSceneConfig(this.savedHwnd)
-    const sessionCfg = this.sessionConfig ?? cfg
+    const sessionCfg = this.sessionConfig ?? this.config
     this.pcmChunks = []
     this.pcmBytes = 0
     this.contextBefore = ''
@@ -259,18 +261,21 @@ export class Application {
     this.recordingStartedAt = Date.now()
 
     this.vad = new VadDetector({
-      enabled: cfg.recording.vad_enabled,
-      threshold: cfg.recording.vad_threshold,
-      silenceDurationMs: cfg.recording.vad_silence_duration_ms,
+      enabled: sessionCfg.recording.vad_enabled,
+      threshold: sessionCfg.recording.vad_threshold,
+      silenceDurationMs: sessionCfg.recording.vad_silence_duration_ms,
       onSilence: () => {
         // Audio-thread analogue: VAD fires from the level IPC path.
         if (this.state === 'recording') void this.stopRecording()
       }
     })
 
+    // Capture must use the session config too: a scene profile with a
+    // different sample rate would otherwise be recorded at one rate and
+    // advertised to the ASR at another (pitched, garbled audio).
     const ok = await this.deps.audio.start({
-      sampleRate: cfg.recording.sample_rate,
-      deviceId: cfg.recording.device_id
+      sampleRate: sessionCfg.recording.sample_rate,
+      deviceId: sessionCfg.recording.device_id
     })
     if (!ok) {
       this.showToast(t('error.no_audio'))
@@ -279,7 +284,7 @@ export class Application {
     }
     this.capturing = true
 
-    if (cfg.output.continuous_mode) this.continuousActive = true
+    if (sessionCfg.output.continuous_mode) this.continuousActive = true
 
     // Streaming ASR (non-fatal on failure — fall back to file mode).
     this.streamer = null
@@ -437,21 +442,26 @@ export class Application {
       }
       if (gen !== this.generation) return
 
-      const durationMs = Math.max(0, startedAt - this.recordingStartedAt)
+      // Retry runs reuse an old recording: don't recompute its duration from
+      // the original recordingStartedAt (that would over-count idle time).
+      const durationMs = retry ? undefined : Math.max(0, startedAt - this.recordingStartedAt)
       let audioPath: string | undefined
       if (cfg.recording.archive_audio) {
         // Batch/retry runs already hold a WAV; streaming takes re-encode the
         // buffered PCM on demand.
         const archiveWav = wav ?? encodeWavPcm16(Buffer.concat(this.pcmChunks), cfg.recording.sample_rate)
-        audioPath = this.archiveAudio(archiveWav)
+        audioPath = await this.archiveAudio(archiveWav)
       }
+      // Free the buffered PCM on the streaming path too (the batch path
+      // cleared it right after encoding).
+      this.pcmChunks = []
       this.deps.history.add(text, {
         audio_path: audioPath,
         duration_ms: durationMs,
         processing_ms: Date.now() - startedAt
       })
       if (cfg.recording.archive_audio && this.deps.archiveDir) {
-        this.deps.history.pruneArchive(cfg.recording.archive_retention_days, this.deps.archiveDir)
+        this.maybePruneArchive(cfg)
       }
       await this.outputText(text)
       if (gen !== this.generation) return
@@ -501,19 +511,31 @@ export class Application {
   }
 
   /** Write one take's WAV into the archive dir; non-fatal on failure. */
-  private archiveAudio(wav: Buffer): string | undefined {
+  private async archiveAudio(wav: Buffer): Promise<string | undefined> {
     const dir = this.deps.archiveDir
     if (!dir) return undefined
     try {
-      mkdirSync(dir, { recursive: true })
+      await mkdir(dir, { recursive: true })
       const stamp = new Date().toISOString().replace(/[:.]/g, '-')
       const path = join(dir, `${stamp}.wav`)
-      writeFileSync(path, wav)
+      await writeFile(path, wav)
       return path
     } catch (e) {
       console.warn('audio archive failed:', String(e))
       return undefined
     }
+  }
+
+  /**
+   * Throttled archive sweep: pruneArchive stats every file in the dir, so it
+   * runs at most once an hour instead of after every single dictation.
+   */
+  private lastPruneAt = 0
+  private maybePruneArchive(cfg: AppConfig): void {
+    const now = Date.now()
+    if (now - this.lastPruneAt < 3_600_000) return
+    this.lastPruneAt = now
+    this.deps.history.pruneArchive(cfg.recording.archive_retention_days, this.deps.archiveDir!)
   }
 
   private onProcessingError(gen: number, err: unknown, timedOut: boolean, streamer?: StreamingTranscriber | null): void {
