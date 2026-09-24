@@ -1,8 +1,12 @@
-/* Base styles for every VoiceType window — the CSS counterpart of theme.py's
-   settings_qss(). Colors come from --vt-* custom properties applied by
-   theme-css.ts on <html data-theme>. */
+/* Base styles shared by every VoiceType window.
+   All colours come from --vt-* palette tokens; spacing/radius/elevation/motion
+   come from the design tokens emitted alongside them (see src/shared/theme.ts).
+   Element selectors are deliberately scoped so per-window stylesheets can
+   override without fighting specificity. */
 
-* {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
 }
 
@@ -13,12 +17,16 @@ body,
   padding: 0;
   width: 100%;
   height: 100%;
-  font-family: 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
-  font-size: 13px;
+  font-family: var(--vt-font-stack);
+  font-size: var(--vt-font-md);
+  line-height: 1.5;
   color: var(--vt-text-primary);
   background: transparent;
   user-select: none;
   overflow: hidden;
+  /* Crisper text on the small UI type sizes we use. */
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 .window-body {
@@ -30,44 +38,69 @@ body,
   flex-direction: column;
 }
 
+/* ---- controls ------------------------------------------------------------- */
+
 button {
   font: inherit;
+  line-height: 1.4;
   color: var(--vt-text-primary);
   background: var(--vt-bg-card);
   border: 1px solid var(--vt-border);
-  border-radius: 6px;
-  padding: 6px 14px;
+  border-radius: var(--vt-radius-md);
+  padding: var(--vt-space-sm) var(--vt-space-lg);
   cursor: pointer;
+  /* Native apps respond instantly on press but ease on hover. */
+  transition:
+    background-color var(--vt-motion-fast) var(--vt-motion-ease),
+    border-color var(--vt-motion-fast) var(--vt-motion-ease),
+    color var(--vt-motion-fast) var(--vt-motion-ease),
+    box-shadow var(--vt-motion-fast) var(--vt-motion-ease),
+    transform var(--vt-motion-fast) var(--vt-motion-ease);
 }
 
-button:hover {
+button:hover:not(:disabled) {
   background: var(--vt-bg-hover);
   border-color: var(--vt-border-hover);
+}
+
+button:active:not(:disabled) {
+  transform: translateY(0.5px);
+}
+
+button:focus-visible {
+  outline: none;
+  box-shadow: var(--vt-focus-ring);
+  border-color: var(--vt-border-focus);
 }
 
 button:disabled {
   color: var(--vt-text-disabled);
   cursor: default;
-  background: var(--vt-bg-card);
+  background: var(--vt-bg-subtle);
+  border-color: var(--vt-border-subtle);
 }
 
 button.primary {
   background: var(--vt-accent);
   border-color: var(--vt-accent);
-  color: #fff;
+  color: var(--vt-text-on-accent);
+  box-shadow: var(--vt-shadow-1);
 }
 
-button.primary:hover {
+button.primary:hover:not(:disabled) {
   background: var(--vt-accent-hover);
+  border-color: var(--vt-accent-hover);
 }
 
-button.primary:active {
+button.primary:active:not(:disabled) {
   background: var(--vt-accent-pressed);
 }
 
 button.primary:disabled {
   background: var(--vt-accent);
-  opacity: 0.5;
+  border-color: var(--vt-accent);
+  opacity: 0.45;
+  box-shadow: none;
 }
 
 button.danger {
@@ -76,35 +109,94 @@ button.danger {
   background: transparent;
 }
 
-button.danger:hover {
+button.danger:hover:not(:disabled) {
   background: var(--vt-danger);
-  color: #fff;
+  border-color: var(--vt-danger);
+  color: var(--vt-text-on-accent);
 }
+
+button.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--vt-text-secondary);
+}
+
+button.ghost:hover:not(:disabled) {
+  background: var(--vt-bg-hover);
+  border-color: transparent;
+  color: var(--vt-text-primary);
+}
+
+/* ---- form controls -------------------------------------------------------- */
 
 input[type='text'],
 input[type='password'],
+input[type='search'],
 select,
 textarea {
   font: inherit;
   color: var(--vt-text-primary);
   background: var(--vt-bg-input);
   border: 1px solid var(--vt-border);
-  border-radius: 6px;
-  padding: 5px 8px;
+  border-radius: var(--vt-radius-md);
+  padding: var(--vt-space-sm) var(--vt-space-md);
   outline: none;
   user-select: text;
+  transition:
+    border-color var(--vt-motion-fast) var(--vt-motion-ease),
+    box-shadow var(--vt-motion-fast) var(--vt-motion-ease),
+    background-color var(--vt-motion-fast) var(--vt-motion-ease);
 }
 
+input[type='text']:hover:not(:disabled),
+input[type='password']:hover:not(:disabled),
+select:hover:not(:disabled),
+textarea:hover:not(:disabled) {
+  border-color: var(--vt-border-hover);
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
 input:focus,
 select:focus,
 textarea:focus {
+  outline: none;
   border-color: var(--vt-border-focus);
+  box-shadow: var(--vt-focus-ring);
+}
+
+input:disabled,
+select:disabled,
+textarea:disabled {
+  color: var(--vt-text-disabled);
+  background: var(--vt-bg-subtle);
+  cursor: not-allowed;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--vt-text-disabled);
 }
 
 input[type='checkbox'] {
   accent-color: var(--vt-accent);
   width: 15px;
   height: 15px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+input[type='checkbox']:focus-visible {
+  outline: none;
+  box-shadow: var(--vt-focus-ring);
+  border-radius: var(--vt-radius-sm);
+}
+
+select {
+  cursor: pointer;
+  /* Room for the native chevron. */
+  padding-right: var(--vt-space-xl);
 }
 
 select option {
@@ -112,9 +204,11 @@ select option {
   color: var(--vt-text-primary);
 }
 
+/* ---- scrollbars ----------------------------------------------------------- */
+
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 11px;
+  height: 11px;
 }
 
 ::-webkit-scrollbar-track {
@@ -123,10 +217,45 @@ select option {
 
 ::-webkit-scrollbar-thumb {
   background: var(--vt-border);
-  border-radius: 5px;
-  border: 2px solid var(--vt-bg-dialog);
+  border-radius: var(--vt-radius-pill);
+  /* Inset the thumb so it floats rather than touching the edge. */
+  border: 3px solid transparent;
+  background-clip: padding-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--vt-border-hover);
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* ---- shared layout helpers ------------------------------------------------ */
+
+.hint {
+  font-size: var(--vt-font-xs);
+  color: var(--vt-text-secondary);
+  line-height: 1.6;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Respect users who ask for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

@@ -41,6 +41,11 @@ export function registerIpc(deps: IpcDeps): void {
     application.previewSettings(next)
   })
 
+  // Settings dialog closed without saving: discard live theme/language preview.
+  ipcMain.handle('config:cancel-preview', () => {
+    application.clearPreview()
+  })
+
   ipcMain.handle('config:export', async (e, password: string | null) => {
     const win = windowFromSender(e.sender.id, windows)
     const result = await dialog.showSaveDialog(win, {
@@ -58,11 +63,14 @@ export function registerIpc(deps: IpcDeps): void {
   })
 
   // Remember the picked import path so a password retry doesn't re-open the
-  // file dialog (mirrors the Python dialog flow).
-  let importPath: string | null = null
+  // file dialog (mirrors the Python dialog flow). Keyed by webContents id so
+  // concurrent settings windows can't pick up each other's pending import.
+  const importPaths = new Map<number, string>()
 
   ipcMain.handle('config:import', async (e, opts: { password?: string } = {}) => {
     const win = windowFromSender(e.sender.id, windows)
+    const senderId = e.sender.id
+    let importPath = importPaths.get(senderId) ?? null
     if (!importPath) {
       const result = await dialog.showOpenDialog(win, {
         title: 'Import Config',
@@ -73,11 +81,12 @@ export function registerIpc(deps: IpcDeps): void {
         return { ok: false, canceled: true }
       }
       importPath = result.filePaths[0]
+      importPaths.set(senderId, importPath)
     }
     try {
       const config = store.importFrom(importPath, opts.password ?? null)
       const summary = configSummary(config)
-      importPath = null
+      importPaths.delete(senderId)
       return { ok: true, config, summary }
     } catch (err) {
       if (err instanceof EncryptedConfigError) {
@@ -86,7 +95,7 @@ export function registerIpc(deps: IpcDeps): void {
       if (err instanceof InvalidPasswordError) {
         return { ok: false, invalidPassword: true }
       }
-      importPath = null
+      importPaths.delete(senderId)
       return { ok: false, error: String(err) }
     }
   })

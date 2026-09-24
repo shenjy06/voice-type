@@ -16,12 +16,11 @@ export interface TabProps {
   draft: AppConfig
   update(mutate: (d: AppConfig) => void): void
   showToast(message: string): void
-  snapshot: AppConfig
 }
 
 // ---- General -----------------------------------------------------------------
 
-export function GeneralTab({ draft, update, showToast, snapshot }: TabProps): JSX.Element {
+export function GeneralTab({ draft, update, showToast }: TabProps): JSX.Element {
   const { t, format } = useApp()
   const [profiles, setProfiles] = useState<{ profiles: string[]; active: string | null }>({ profiles: [], active: null })
   const [modal, setModal] = useState<'save-as' | 'delete' | 'switch' | null>(null)
@@ -278,8 +277,6 @@ export function GeneralTab({ draft, update, showToast, snapshot }: TabProps): JS
         />
       )}
       {modalSpec && <Modal spec={modalSpec} />}
-      {/* keep snapshot referenced so cancel-rollback stays symmetric */}
-      <span style={{ display: 'none' }}>{snapshot.window.theme_mode}</span>
     </div>
   )
 }

@@ -63,12 +63,23 @@ export class Application {
   private streamerUsable = false
   private vad: VadDetector | null = null
   private captureStopPromise: Promise<void> | null = null
+  /**
+   * True from the moment capture starts until the audio window confirms it
+   * stopped. Kept separate from `state` because stopRecording() flips the
+   * state to 'processing' before capture teardown finishes, and any audio
+   * still in flight during that window must not be dropped.
+   */
+  private capturing = false
 
   // failure retry state (audio + context kept for tray "retry last")
   private retryState: { wav: Buffer; before: string; after: string } | null = null
 
   // continuous dictation session
   private continuousActive = false
+
+  // Unsaved settings-preview overrides (null = use the stored config).
+  private previewThemeMode: string | null = null
+  private previewLanguage: string | null = null
 
   private watchdog: NodeJS.Timeout | null = null
   private generation = 0 // guards async processing against stale completions
@@ -84,18 +95,21 @@ export class Application {
   // ---- theme / language ------------------------------------------------------
 
   resolvedTheme(): 'dark' | 'light' {
-    const mode = this.config.window.theme_mode
+    const mode = this.previewThemeMode ?? this.config.window.theme_mode
     if (mode === 'system') return nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
     return mode === 'light' ? 'light' : 'dark'
   }
 
   applyLanguage(): void {
-    setLanguage(this.config.language, process.env.LANG || 'en-US')
+    setLanguage(this.previewLanguage ?? this.config.language, process.env.LANG || 'en-US')
     this.deps.tray.retranslate()
   }
 
   broadcastConfig(): void {
     this.applyLanguage()
+    // A real save/broadcast always supersedes any pending preview.
+    this.previewThemeMode = null
+    this.previewLanguage = null
     this.deps.windows.broadcast('evt', { type: 'config', config: this.config, theme: this.resolvedTheme() })
     this.deps.tray.applyConfig(this.config)
     this.applyHotkeyAndAutostart()
@@ -154,9 +168,13 @@ export class Application {
     this.continuousActive = false
     this.retryState = null
     this.deps.tray.setRetryAvailable(false)
+    // Drop anything still in flight: a cancel is an explicit discard, unlike
+    // the implicit teardown in stopRecording().
+    this.capturing = false
     void this.stopCapture()
     this.streamer?.abort()
     this.streamer = null
+    this.streamerUsable = false
     this.pcmChunks = []
     this.pcmBytes = 0
     if (gen === this.generation) {
@@ -167,8 +185,8 @@ export class Application {
 
   // ---- recording ---------------------------------------------------------------
 
-  async startRecording(): Promise<void> {
-    if (this.state === 'recording' || this.state === 'processing') return
+  async startRecording(): Promise<boolean> {
+    if (this.state === 'recording' || this.state === 'processing') return false
     const cfg = this.config
     this.savedHwnd = getForegroundWindow()
     this.pcmChunks = []
@@ -194,8 +212,9 @@ export class Application {
     if (!ok) {
       this.showToast(t('error.no_audio'))
       this.setState('error', t('error.no_audio_detail'))
-      return
+      return false
     }
+    this.capturing = true
 
     if (cfg.output.continuous_mode) this.continuousActive = true
 
@@ -230,6 +249,7 @@ export class Application {
       this.contextBefore = before
       this.contextAfter = after
     })
+    return true
   }
 
   async stopRecording(): Promise<void> {
@@ -247,9 +267,17 @@ export class Application {
 
   private stopCapture(): Promise<void> {
     if (!this.captureStopPromise) {
-      this.captureStopPromise = this.deps.audio.stop().finally(() => {
-        this.captureStopPromise = null
-      })
+      // Flip `capturing` only once the audio window confirms the stop, so
+      // in-flight chunks keep buffering instead of being discarded.
+      this.captureStopPromise = this.deps.audio
+        .stop()
+        .catch(() => undefined)
+        .then(() => {
+          this.capturing = false
+        })
+        .finally(() => {
+          this.captureStopPromise = null
+        })
     }
     return this.captureStopPromise
   }
@@ -257,7 +285,10 @@ export class Application {
   // ---- audio bridge callbacks ----------------------------------------------------
 
   onAudioChunk(pcm: Buffer): void {
-    if (this.state !== 'recording') return
+    // Accept chunks while capture is live, even after state moved to
+    // 'processing': stopCapture() is async, so the tail of the utterance
+    // arrives after the state flip and would otherwise be truncated.
+    if (!this.capturing) return
     this.pcmChunks.push(pcm)
     this.pcmBytes += pcm.length
     if (this.streamerUsable && this.streamer) {
@@ -301,10 +332,13 @@ export class Application {
         if (wav.length <= 44) {
           throw new Error(t('error.no_audio_detail'))
         }
+        // Retain the WAV *before* the network call, mirroring Python's
+        // take_audio_path(): a failed transcription is precisely the case the
+        // user wants to retry, so the audio must survive the failure. On a
+        // retry-flow failure the existing state is kept as-is.
+        this.retryState = { wav, before: this.contextBefore, after: this.contextAfter }
         this.showBubble(t('status.transcribing'))
         transcript = await new Transcriber(cfg).transcribe(wav, cfg.recording.sample_rate)
-        // Keep the WAV for the tray retry path (freed on success).
-        this.retryState = { wav, before: this.contextBefore, after: this.contextAfter }
       }
 
       if (gen !== this.generation) return
@@ -330,11 +364,13 @@ export class Application {
       this.hideCaption()
       this.setState('idle')
 
-      // Continuous dictation: restart after a successful paste.
+      // Continuous dictation: restart after a successful paste. startRecording()
+      // reports whether capture actually began, so a failed restart doesn't
+      // leave the flag set while the app sits in 'error'.
       if (this.continuousActive && cfg.output.continuous_mode && this.state === 'idle') {
-        this.continuousActive = false // session restart clears the flag
-        void this.startRecording().then(() => {
-          this.continuousActive = true
+        this.continuousActive = false // a restart re-arms it on success
+        void this.startRecording().then((started) => {
+          if (started) this.continuousActive = true
         })
       }
       void startedAt
@@ -350,24 +386,30 @@ export class Application {
     }
     streamer?.abort()
     this.pcmChunks = []
+    this.pcmBytes = 0
+    this.streamer = null
+    this.streamerUsable = false
     if (gen !== this.generation) return
     const message = err instanceof Error ? err.message : String(err)
     console.error('Processing failed:', message)
-    this.deps.tray.setRetryAvailable(this.retryState !== null)
+    // Whether retry is offered depends on the retained audio, not on the
+    // failure kind: streaming runs keep no WAV, batch runs do.
+    const retryable = this.retryState !== null
+    this.deps.tray.setRetryAvailable(retryable)
     this.hideCaption()
     this.setState('error', message)
-    if (timedOut) {
-      this.showToast(format(t('msg.error_retry_hint'), { msg: 'timeout' }))
-    } else {
-      this.showToast(format(t('msg.error_retry_hint'), { msg: message }))
-    }
-    this.deps.tray.showNotification(t('error.title'), format(t('msg.error_retry_hint'), { msg: message }))
+    const hint = retryable ? t('msg.error_retry_hint') : t('msg.error_format')
+    const shown = timedOut ? 'timeout' : message
+    this.showToast(format(hint, { msg: shown }))
+    this.deps.tray.showNotification(t('error.title'), format(hint, { msg: shown }))
   }
 
   /** Tray "retry last": re-run the pipeline on the retained audio. */
   retry(): void {
     const retryState = this.retryState
-    if (!retryState || this.state !== 'idle') {
+    // A failed run leaves the state at 'error', so both idle and error are
+    // valid here — checking only 'idle' made the tray item a no-op.
+    if (!retryState || (this.state !== 'idle' && this.state !== 'error')) {
       this.showToast(t('msg.retry_unavailable'))
       return
     }
@@ -426,25 +468,38 @@ export class Application {
   }
 
   previewSettings(next: { theme_mode?: string; language?: string }): void {
-    // Live preview without persisting; cancel re-broadcasts the stored config.
+    // Live preview without persisting. store.config must never be mutated
+    // here, or the previewed value would leak into the next debounced save.
     const cfg = this.config
-    let changed = false
-    if (next.theme_mode && next.theme_mode !== cfg.window.theme_mode) {
-      cfg.window.theme_mode = next.theme_mode
-      changed = true
-    }
-    if (next.language && next.language !== cfg.language) {
-      cfg.language = next.language
-      changed = true
-    }
-    if (changed) {
-      this.applyLanguage()
-      this.deps.windows.broadcast('evt', { type: 'config', config: cfg, theme: this.resolvedTheme() })
-    }
+    const themeMode = next.theme_mode && next.theme_mode !== cfg.window.theme_mode ? next.theme_mode : null
+    const language = next.language && next.language !== cfg.language ? next.language : null
+    if (!themeMode && !language) return
+
+    this.previewThemeMode = themeMode
+    this.previewLanguage = language
+    if (language) setLanguage(language, process.env.LANG || 'en-US')
+
+    const preview: AppConfig = JSON.parse(JSON.stringify(cfg)) as AppConfig
+    if (themeMode) preview.window.theme_mode = themeMode
+    if (language) preview.language = language
+    this.deps.windows.broadcast('evt', { type: 'config', config: preview, theme: this.resolvedTheme() })
+    if (language) this.deps.tray.retranslate()
+  }
+
+  /** Drop any unsaved preview overrides (called on save and on dialog cancel). */
+  clearPreview(): void {
+    if (!this.previewThemeMode && !this.previewLanguage) return
+    this.previewThemeMode = null
+    this.previewLanguage = null
+    this.broadcastConfig()
   }
 
   handleQuickUpdate(mutate: (config: AppConfig) => void): void {
     mutate(this.config)
+    // Cheap and content-keyed, so invalidating unconditionally is safe and
+    // keeps a future quick-toggle for glossary/runtime fields from serving
+    // stale compiled patterns.
+    invalidateGlossaryCache()
     this.deps.debouncedSave()
     this.broadcastConfig()
   }

@@ -18,6 +18,7 @@ export interface VoiceTypeApi {
   getConfig(): Promise<AppConfig>
   saveConfig(next: AppConfig): Promise<void>
   previewSettings(next: { theme_mode?: string; language?: string }): Promise<void>
+  cancelPreview(): Promise<void>
   exportConfig(password: string | null): Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }>
   importConfig(password?: string): Promise<ImportResult>
 

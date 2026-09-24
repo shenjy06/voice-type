@@ -1,22 +1,46 @@
-/* Floating recording widget styles. */
+/* Floating recording widget.
+   Compact always-on-top card: header (drag handle + actions), status line
+   (pulse dot + timer), level waveform, primary action button.
+   The card itself paints the rounded surface so the transparent window shows
+   a clean, shadowed panel. */
 
 .floating-card {
+  position: relative;
   width: 260px;
   height: 156px;
-  padding: 10px 12px 12px;
-  border-radius: 12px;
+  padding: var(--vt-space-md) var(--vt-space-lg) var(--vt-space-lg);
+  border-radius: var(--vt-radius-xl);
   background: var(--vt-bg-card);
   border: 1px solid var(--vt-border);
+  box-shadow: var(--vt-shadow-4);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--vt-space-md);
+  overflow: hidden;
+  transition: border-color var(--vt-motion-base) var(--vt-motion-ease);
+}
+
+/* Recording: a soft accent halo so the state reads at a glance. */
+.floating-card.recording {
+  border-color: var(--vt-danger);
+  box-shadow:
+    var(--vt-shadow-4),
+    0 0 0 1px var(--vt-danger);
+}
+
+.floating-card.processing {
+  border-color: var(--vt-warning);
 }
 
 .drag-header {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--vt-space-sm);
   -webkit-app-region: drag;
+  /* Tight header so the waveform gets the vertical space. */
+  margin: calc(var(--vt-space-xs) * -1) calc(var(--vt-space-sm) * -1) 0;
+  padding: var(--vt-space-xs) var(--vt-space-sm);
+  border-radius: var(--vt-radius-md);
 }
 
 .no-drag {
@@ -25,10 +49,14 @@
 
 .app-name {
   font-weight: 600;
-  font-size: 13px;
+  font-size: var(--vt-font-md);
+  letter-spacing: 0.01em;
   color: var(--vt-text-title);
   flex: 1;
   margin-left: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .icon-btn {
@@ -38,86 +66,150 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 6px;
+  border-radius: var(--vt-radius-sm);
+  border-color: transparent;
+  background: transparent;
   color: var(--vt-text-secondary);
+  flex-shrink: 0;
 }
 
-.icon-btn.close:hover {
+.icon-btn:hover:not(:disabled) {
+  background: var(--vt-bg-hover);
+  border-color: transparent;
+  color: var(--vt-text-primary);
+}
+
+.icon-btn:active:not(:disabled) {
+  transform: none;
+}
+
+.icon-btn.close:hover:not(:disabled) {
   color: var(--vt-danger);
-  border-color: var(--vt-danger);
   background: transparent;
 }
+
+/* ---- status line ---------------------------------------------------------- */
 
 .status-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--vt-space-sm);
   height: 16px;
 }
 
 .pulse-dot {
   width: 8px;
   height: 8px;
-  border-radius: 50%;
-  background: var(--vt-border);
-  opacity: 0.4;
+  border-radius: var(--vt-radius-pill);
+  background: var(--vt-border-hover);
+  flex-shrink: 0;
+  transition: background-color var(--vt-motion-base) var(--vt-motion-ease);
 }
 
 .pulse-dot.on {
   background: var(--vt-danger);
-  animation: pulse 1s ease-in-out infinite;
+  animation: pulse 1.15s ease-in-out infinite;
+}
+
+.pulse-dot.busy {
+  background: var(--vt-warning);
+  animation: pulse 1.6s ease-in-out infinite;
 }
 
 @keyframes pulse {
   0%,
   100% {
-    opacity: 0.3;
+    opacity: 0.35;
+    transform: scale(0.9);
   }
   50% {
     opacity: 1;
+    transform: scale(1);
   }
 }
 
 .timer {
   font-variant-numeric: tabular-nums;
-  font-size: 12px;
+  font-size: var(--vt-font-sm);
   color: var(--vt-text-secondary);
+  letter-spacing: 0.02em;
 }
+
+.status-label {
+  margin-left: auto;
+  font-size: var(--vt-font-xs);
+  color: var(--vt-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- waveform ------------------------------------------------------------- */
 
 .waveform {
   display: flex;
   align-items: flex-end;
   gap: 3px;
   height: 22px;
+  /* Bars are bottom-aligned; give them a subtle baseline. */
+  border-bottom: 1px solid var(--vt-border-subtle);
+  padding-bottom: 1px;
+  flex-shrink: 0;
 }
 
 .waveform .bar {
   flex: 1;
-  border-radius: 2px;
-  transition: height 80ms linear;
+  border-radius: 2px 2px 0 0;
+  transition:
+    height 80ms linear,
+    background-color var(--vt-motion-base) var(--vt-motion-ease),
+    opacity var(--vt-motion-base) var(--vt-motion-ease);
 }
 
+/* ---- primary action ------------------------------------------------------- */
+
 .record-btn {
-  height: 40px;
+  height: 38px;
   width: 100%;
   font-weight: 600;
-  font-size: 13px;
-  border-radius: 8px;
+  font-size: var(--vt-font-md);
+  border-radius: var(--vt-radius-lg);
+  margin-top: auto;
+  flex-shrink: 0;
+}
+
+.record-btn:disabled {
+  cursor: default;
 }
 
 .record-btn.danger {
   background: var(--vt-danger);
   border-color: var(--vt-danger);
-  color: #fff;
+  color: var(--vt-text-on-accent);
+  box-shadow: var(--vt-shadow-1);
 }
 
-.record-btn.danger:hover {
+.record-btn.danger:hover:not(:disabled) {
   background: var(--vt-danger-hover);
+  border-color: var(--vt-danger-hover);
 }
 
 .record-btn.warning {
+  background: transparent;
+  border-color: var(--vt-warning);
+  color: var(--vt-warning);
+}
+
+.record-btn.warning:disabled {
+  opacity: 0.75;
+  background: transparent;
+  border-color: var(--vt-warning);
+  color: var(--vt-warning);
+}
+
+/* Busy state gets a subtle sweep to imply work in progress. */
+.record-btn.warning:not(:disabled) {
   background: var(--vt-warning);
   border-color: var(--vt-warning);
-  color: #232323;
-  opacity: 0.85;
+  color: #1f2937;
 }

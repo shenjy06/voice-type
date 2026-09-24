@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyGlossary } from '../src/main/services/glossary'
+import { applyGlossary, invalidateGlossaryCache } from '../src/main/services/glossary'
 import type { GlossaryEntry } from '../src/shared/types'
 
 const entry = (source: string, replacement: string): GlossaryEntry => ({ source, replacement })
@@ -30,5 +30,23 @@ describe('applyGlossary', () => {
 
   it('keeps the first occurrence when duplicate sources exist', () => {
     expect(applyGlossary('aa bb', [entry('aa', '1'), entry('aa', '2')])).toBe('1 bb')
+  })
+
+  it('picks up in-place entry mutations via the content-keyed cache', () => {
+    // The cache key is derived from the normalized entries, so mutating an
+    // entry array in place still produces a fresh compile — no explicit
+    // invalidation required.
+    const entries = [entry('hello', 'hi')]
+    expect(applyGlossary('hello', entries)).toBe('hi')
+
+    entries[0].replacement = 'yo'
+    expect(applyGlossary('hello', entries)).toBe('yo')
+  })
+
+  it('still works after invalidateGlossaryCache', () => {
+    const entries = [entry('hello', 'hi')]
+    expect(applyGlossary('hello', entries)).toBe('hi')
+    invalidateGlossaryCache()
+    expect(applyGlossary('hello', entries)).toBe('hi')
   })
 })

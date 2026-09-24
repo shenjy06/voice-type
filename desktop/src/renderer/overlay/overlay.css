@@ -1,44 +1,62 @@
-/* Overlay styles — transparent window, stacked layers, bottom-aligned. */
+/* Overlay — transparent, click-through, bottom-centred stack.
+   Order (top to bottom): caption panel, status bubble, toast. */
 
 .overlay-stack {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: flex-end;
-  gap: 10px;
+  gap: var(--vt-space-md);
   height: 100%;
-  padding-bottom: 4px;
+  padding-bottom: var(--vt-space-xs);
 }
+
+/* ---- status bubble ------------------------------------------------------- */
 
 .bubble {
   max-width: 520px;
-  padding: 8px 18px;
-  border-radius: 18px;
+  padding: var(--vt-space-sm) var(--vt-space-xl);
+  border-radius: var(--vt-radius-pill);
   background: var(--vt-bg-card);
   border: 1px solid var(--vt-border);
   color: var(--vt-text-primary);
-  font-size: 13px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  font-size: var(--vt-font-md);
+  box-shadow: var(--vt-shadow-3);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  animation: bubble-in var(--vt-motion-base) var(--vt-motion-ease);
 }
+
+@keyframes bubble-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ---- live caption panel --------------------------------------------------- */
 
 .caption-panel {
   width: 520px;
-  max-height: 110px;
-  padding: 10px 14px;
-  border-radius: 10px;
+  max-height: 116px;
+  padding: var(--vt-space-md) var(--vt-space-lg);
+  border-radius: var(--vt-radius-lg);
   background: var(--vt-bg-card);
   border: 1px solid var(--vt-border);
-  opacity: 0.92;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  opacity: 0.95;
+  box-shadow: var(--vt-shadow-3);
   overflow: hidden;
+  animation: bubble-in var(--vt-motion-base) var(--vt-motion-ease);
 }
 
 .caption-text {
-  font-size: 14px;
-  line-height: 1.45;
+  font-size: var(--vt-font-lg);
+  line-height: 1.5;
   color: var(--vt-text-primary);
   word-break: break-word;
   display: -webkit-box;
@@ -47,13 +65,16 @@
   overflow: hidden;
 }
 
+/* ---- toast ---------------------------------------------------------------- */
+
 .toast {
   max-width: 520px;
-  padding: 8px 16px;
-  border-radius: 8px;
+  padding: var(--vt-space-sm) var(--vt-space-lg);
+  border-radius: var(--vt-radius-md);
   background: var(--vt-bg-card);
   border: 1px solid var(--vt-warning);
   color: var(--vt-warning);
-  font-size: 12px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  font-size: var(--vt-font-sm);
+  box-shadow: var(--vt-shadow-3);
+  animation: bubble-in var(--vt-motion-base) var(--vt-motion-ease);
 }

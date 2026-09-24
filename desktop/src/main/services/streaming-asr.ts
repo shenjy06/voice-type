@@ -150,6 +150,11 @@ export class StreamingTranscriber {
   /** Stop sending audio and wait for the final transcript (≤ timeout). */
   async finalize(timeoutMs = 10_000): Promise<string> {
     if (!this.finishedPromise) return this.finalText
+    // Drain the socket's send buffer before closing: ws.send() queues
+    // asynchronously, so the last chunks of the utterance may still be
+    // pending when the caller stops capture. Closing first would emit a
+    // truncated transcript.
+    await this.drainPendingSends()
     await Promise.race([this.finishedPromise, new Promise<void>((r) => setTimeout(r, timeoutMs))])
     this.closeWs()
     return this.finalText
@@ -159,6 +164,35 @@ export class StreamingTranscriber {
   abort(): void {
     this.closeWs()
     this.finished?.()
+  }
+
+  /**
+   * Wait until everything queued on the socket has been written out.
+   * ws.send() is asynchronous; appending an empty frame and waiting for its
+   * callback guarantees every byte queued before it has already flushed.
+   */
+  private drainPendingSends(): Promise<void> {
+    const ws = this.ws
+    if (!ws || ws.readyState !== WebSocket.OPEN) return Promise.resolve()
+    return new Promise<void>((resolve) => {
+      let settled = false
+      const done = (): void => {
+        if (settled) return
+        settled = true
+        resolve()
+      }
+      // Never let a stalled socket block the pipeline.
+      const timer = setTimeout(done, 2_000)
+      try {
+        ws.send('', () => {
+          clearTimeout(timer)
+          done()
+        })
+      } catch {
+        clearTimeout(timer)
+        done()
+      }
+    })
   }
 
   // ---- protocol ---------------------------------------------------------------
@@ -212,14 +246,17 @@ export class StreamingTranscriber {
       this.finished?.()
     } else if (eventType === 'conversation.item.created') {
       // Fallback: some providers carry the transcript in the created item.
+      // Treat it as authoritative (overwrite) like the transcription events —
+      // appending here raced with the full-text events and duplicated output.
       const item = (data.item ?? {}) as { content?: Array<{ transcript?: string }> }
-      for (const content of item.content ?? []) {
-        const transcript = content.transcript ?? ''
-        if (transcript) {
-          this.finalText = this.finalText ? `${this.finalText} ${transcript}` : transcript
-          this.onTextUpdate?.(this.finalText)
-          this.finished?.()
-        }
+      const transcript = (item.content ?? [])
+        .map((content) => content.transcript ?? '')
+        .filter(Boolean)
+        .join(' ')
+      if (transcript) {
+        this.finalText = transcript
+        this.onTextUpdate?.(this.finalText)
+        this.finished?.()
       }
     } else if (eventType === 'response.audio_transcript.done') {
       const transcript = String(data.transcript ?? '')

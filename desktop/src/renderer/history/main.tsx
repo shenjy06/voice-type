@@ -45,6 +45,10 @@ function HistoryApp(): JSX.Element {
 
   return (
     <div className="window-body history-body">
+      <div className="history-header">
+        <span className="history-title">{t('history.title')}</span>
+        {entries.length > 0 && <span className="history-count">{entries.length}</span>}
+      </div>
       <div className="history-main">
         <div className="history-list">
           {entries.length === 0 && <div className="history-empty">{t('history.empty')}</div>}
@@ -59,7 +63,9 @@ function HistoryApp(): JSX.Element {
             </button>
           ))}
         </div>
-        <div className="history-detail">{current ? current.text : ''}</div>
+        <div className={`history-detail ${current ? '' : 'empty'}`}>
+          {current ? current.text : t('history.select_hint')}
+        </div>
       </div>
       <div className="history-actions">
         <button disabled={!current} onClick={onCopy}>

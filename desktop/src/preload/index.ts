@@ -27,6 +27,7 @@ const api = {
   saveConfig: (next: unknown): Promise<void> => ipcRenderer.invoke('config:save', next),
   previewSettings: (next: { theme_mode?: string; language?: string }): Promise<void> =>
     ipcRenderer.invoke('config:preview', next),
+  cancelPreview: (): Promise<void> => ipcRenderer.invoke('config:cancel-preview'),
   exportConfig: (password: string | null): Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }> =>
     ipcRenderer.invoke('config:export', password),
   importConfig: (

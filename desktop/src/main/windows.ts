@@ -129,6 +129,14 @@ export class WindowManager {
         win?.hide()
       }
     })
+    // Show once the page has painted: creating with show:false and never
+    // revealing it left the first call (e.g. the first-run wizard) invisible.
+    win.once('ready-to-show', () => {
+      if (!win?.isDestroyed()) {
+        win.show()
+        win.focus()
+      }
+    })
     this.windows.set('settings', win)
     return win
   }
@@ -158,6 +166,13 @@ export class WindowManager {
       if (!this.quitting) {
         e.preventDefault()
         win?.hide()
+      }
+    })
+    // Same as the settings window: without this the first open never appears.
+    win.once('ready-to-show', () => {
+      if (!win?.isDestroyed()) {
+        win.show()
+        win.focus()
       }
     })
     this.windows.set('history', win)

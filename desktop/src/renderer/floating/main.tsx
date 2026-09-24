@@ -121,8 +121,21 @@ function FloatingApp(): JSX.Element {
   const buttonClass =
     state === 'recording' ? 'record-btn danger' : state === 'processing' ? 'record-btn warning' : 'record-btn primary'
 
+  // A short status word keeps the card informative at a glance; the full error
+  // text stays in the tooltip and the overlay toast.
+  const statusLabel =
+    state === 'recording' ? t('status.recording') : state === 'processing' ? t('status.transcribing') : ''
+
+  const cardClass = ['floating-card', recording ? 'recording' : '', state === 'processing' ? 'processing' : '']
+    .filter(Boolean)
+    .join(' ')
+
+  const dotClass = ['pulse-dot', recording ? 'on' : '', state === 'processing' ? 'busy' : '']
+    .filter(Boolean)
+    .join(' ')
+
   return (
-    <div className="floating-card" title={state === 'error' ? error : undefined}>
+    <div className={cardClass} title={state === 'error' ? error : undefined}>
       <div className="drag-header">
         <MicIcon color="var(--vt-accent)" />
         <span className="app-name">Voice Type</span>
@@ -134,10 +147,11 @@ function FloatingApp(): JSX.Element {
         </button>
       </div>
       <div className="status-row">
-        <span className={`pulse-dot ${recording ? 'on' : ''}`} />
+        <span className={dotClass} />
         <span className="timer">
           {mm}:{ss}
         </span>
+        {statusLabel && <span className="status-label">{statusLabel}</span>}
       </div>
       <Waveform level={level} recording={recording} />
       <button
