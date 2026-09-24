@@ -10,8 +10,11 @@ import {
   VK_CONTROL,
   VK_ESCAPE,
   VK_MENU,
+  VK_RETURN,
   VK_SHIFT,
-  VK_V
+  VK_TAB,
+  VK_V,
+  VK_Z
 } from './win32/user32'
 import { setForegroundWindow } from './win32/windows'
 import { isTerminalWindow } from './win32/terminal-detect'
@@ -32,6 +35,15 @@ export class TextTyper {
   // Serialize clipboard operations so the delayed restore cannot race a new
   // copy (Windows clipboard access is not thread-safe).
   private chain: Promise<unknown> = Promise.resolve()
+
+  // Voice-command key actions: newline=Shift+Enter, enter=Return,
+  // undo=Ctrl+Z, tab=Tab (same mapping as the Python typer).
+  private static readonly ACTION_KEYS: Record<string, { modifiers: number[]; key: number }> = {
+    newline: { modifiers: [VK_SHIFT], key: VK_RETURN },
+    enter: { modifiers: [], key: VK_RETURN },
+    undo: { modifiers: [VK_CONTROL], key: VK_Z },
+    tab: { modifiers: [], key: VK_TAB }
+  }
 
   constructor(clipboard: ClipboardAdapter) {
     this.clipboard = clipboard
@@ -106,6 +118,60 @@ export class TextTyper {
     if (pasteMode === PASTE_MODE_CTRL_V) return false
     // auto (or unknown): terminals need Ctrl+Shift+V.
     return isTerminalWindow(hwnd)
+  }
+
+  /**
+   * Send a voice-command key action (newline/enter/undo/tab) into the
+   * previously-foreground window. Returns false for unknown actions or when
+   * the injection fails.
+   */
+  async sendActionKey(action: string, savedHwnd: number): Promise<boolean> {
+    const spec = TextTyper.ACTION_KEYS[action]
+    if (!spec) return false
+    const run = this.chain.then(() => this._sendActionKey(spec, savedHwnd))
+    this.chain = run.catch(() => undefined)
+    return run
+  }
+
+  private async _sendActionKey(
+    spec: { modifiers: number[]; key: number },
+    savedHwnd: number
+  ): Promise<boolean> {
+    if (savedHwnd) {
+      const restored = await setForegroundWindow(savedHwnd)
+      if (!restored) console.warn(`Failed to restore foreground window (hwnd=${savedHwnd})`)
+    }
+    await sleep(50)
+
+    const api = getWin32()
+    if (!api) return false
+    try {
+      // Same modifier-clearing / Esc-tap prelude as the paste path: the Alt
+      // tap from the foreground restore leaves menu bars armed in some apps.
+      for (const vk of [VK_MENU, VK_SHIFT, VK_CONTROL]) {
+        api.keybdEvent(vk, 0, KEYEVENTF_KEYUP)
+      }
+      api.keybdEvent(VK_ESCAPE, 0, 0)
+      api.keybdEvent(VK_ESCAPE, 0, KEYEVENTF_KEYUP)
+      await sleep(20)
+
+      for (const mod of spec.modifiers) {
+        if (!api.keybdEvent(mod, 0, 0)) return false
+        await sleep(20)
+      }
+      if (!api.keybdEvent(spec.key, 0, 0)) return false
+      await sleep(20)
+      if (!api.keybdEvent(spec.key, 0, KEYEVENTF_KEYUP)) return false
+      await sleep(20)
+      for (const mod of [...spec.modifiers].reverse()) {
+        if (!api.keybdEvent(mod, 0, KEYEVENTF_KEYUP)) return false
+        await sleep(20)
+      }
+      return true
+    } catch (e) {
+      console.warn('Action key injection raised:', String(e))
+      return false
+    }
   }
 
   /**

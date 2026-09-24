@@ -1,6 +1,7 @@
-// Window management for the five renderer views.
+// Window management for the six renderer views.
 // floating  — frameless, always-on-top, draggable recording widget
 // overlay   — transparent click-through layer hosting bubble/caption/toast
+// caption   — standalone interactive live-caption card (resizable, always-on-top)
 // settings  — normal window (hidden, not destroyed, on close)
 // history   — normal window (hidden, not destroyed, on close)
 // audio     — hidden persistent capture window
@@ -8,7 +9,7 @@
 import { BrowserWindow, screen } from 'electron'
 import { join } from 'node:path'
 
-export type WindowName = 'floating' | 'overlay' | 'settings' | 'history' | 'audio'
+export type WindowName = 'floating' | 'overlay' | 'caption' | 'settings' | 'history' | 'audio'
 
 function preloadPath(): string {
   return join(__dirname, '../preload/index.js')
@@ -176,6 +177,43 @@ export class WindowManager {
       }
     })
     this.windows.set('history', win)
+    return win
+  }
+
+  /** Standalone live caption card: resizable, always-on-top, stays above work
+   *  windows but below nothing modal. Closing hides it; the tray reopens it. */
+  ensureCaption(): BrowserWindow {
+    let win = this.windows.get('caption')
+    if (win && !win.isDestroyed()) {
+      win.show()
+      return win
+    }
+    const { workArea } = screen.getPrimaryDisplay()
+    win = new BrowserWindow({
+      width: 420,
+      height: 240,
+      x: workArea.x + Math.floor((workArea.width - 420) / 2),
+      y: workArea.y + workArea.height - 320,
+      minWidth: 280,
+      minHeight: 140,
+      show: false,
+      title: 'Voice Type — Caption',
+      alwaysOnTop: true,
+      frame: false,
+      webPreferences: DEFAULT_PRELOAD
+    })
+    win.setMenu(null)
+    win.loadURL(htmlPath('caption'))
+    win.on('close', (e) => {
+      if (!this.quitting) {
+        e.preventDefault()
+        win?.hide()
+      }
+    })
+    win.once('ready-to-show', () => {
+      if (!win?.isDestroyed()) win.show()
+    })
+    this.windows.set('caption', win)
     return win
   }
 

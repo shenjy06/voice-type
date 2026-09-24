@@ -12,12 +12,15 @@ export const KEYEVENTF_KEYUP = 0x0002
 export const VK_SHIFT = 0x10
 export const VK_CONTROL = 0x11
 export const VK_MENU = 0x12 // Alt
+export const VK_RETURN = 0x0d
+export const VK_TAB = 0x09
 export const VK_END = 0x23
 export const VK_HOME = 0x24
 export const VK_LEFT = 0x25
 export const VK_RIGHT = 0x27
 export const VK_C = 0x43
 export const VK_V = 0x56
+export const VK_Z = 0x5a
 export const VK_ESCAPE = 0x1b
 
 type KoffiLibrary = ReturnType<typeof koffi.load>

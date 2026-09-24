@@ -193,6 +193,19 @@ export function registerIpc(deps: IpcDeps): void {
     history.clear()
   })
 
+  // WAV bytes for one archived entry (by visible index) — renderer replays it.
+  ipcMain.handle('history:audio', (_e, index: number) => {
+    const entry = history.loadRecent()[index]
+    if (!entry || !entry.audio_path) return { ok: false, error: 'no audio' }
+    try {
+      return { ok: true, data: readFileSync(entry.audio_path) }
+    } catch (err) {
+      return { ok: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('stats:summary', () => history.stats())
+
   ipcMain.handle('history:copy', (_e, text: string) => {
     clipboard.writeText(text)
   })
@@ -215,6 +228,9 @@ export function registerIpc(deps: IpcDeps): void {
   ipcMain.handle('ui:show-floating', () => {
     const cfg = store.config
     windows.ensureFloating({ alwaysOnTop: cfg.window.always_on_top, show: true })
+  })
+  ipcMain.handle('ui:show-caption', () => {
+    windows.ensureCaption()
   })
   ipcMain.handle('app:quit', () => deps.onQuit())
 

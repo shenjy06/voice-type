@@ -4,7 +4,7 @@
 
 import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, existsSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
-import type { AppConfig, ConfigSummary, GlossaryEntry } from '../../shared/types'
+import type { AppConfig, ConfigSummary, GlossaryEntry, SceneRule, VoiceCommandItem } from '../../shared/types'
 import { DEFAULT_BASE_URL } from '../../shared/types'
 import {
   createAtRestCrypto,
@@ -45,7 +45,9 @@ export function defaultConfig(): AppConfig {
       denoise_strength: 'medium',
       vad_enabled: false,
       vad_silence_duration_ms: 1500,
-      vad_threshold: 0.02
+      vad_threshold: 0.02,
+      archive_audio: false,
+      archive_retention_days: 7
     },
     output: {
       paste_delay_ms: 120,
@@ -58,11 +60,31 @@ export function defaultConfig(): AppConfig {
       show_on_start: true,
       always_on_top: true,
       auto_start: false,
-      theme_mode: 'dark'
+      theme_mode: 'dark',
+      show_caption: true
     },
     hotkey: {
       toggle_enabled: true,
-      toggle_hotkey: 'right_alt'
+      toggle_hotkey: 'right_alt',
+      double_tap_action: 'none',
+      push_to_talk: false
+    },
+    commands: {
+      enabled: true,
+      items: [
+        { phrase: '换行', action: 'newline' },
+        { phrase: 'new line', action: 'newline' },
+        { phrase: '回车', action: 'enter' },
+        { phrase: 'enter', action: 'enter' },
+        { phrase: '撤销', action: 'undo' },
+        { phrase: 'undo', action: 'undo' },
+        { phrase: '取消', action: 'discard' },
+        { phrase: 'cancel', action: 'discard' }
+      ]
+    },
+    scenes: {
+      enabled: true,
+      rules: []
     }
   }
 }
@@ -100,6 +122,24 @@ export function configFromDict(data: unknown): AppConfig {
         }))
     : []
 
+  const commandsData = section(d.commands)
+  const commandItems: VoiceCommandItem[] = Array.isArray(commandsData.items)
+    ? (commandsData.items as unknown[])
+        .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
+        .map((item) => ({ phrase: coerceStr(item.phrase), action: coerceStr(item.action) }))
+        .filter((item) => item.phrase && item.action)
+    : def.commands.items
+
+  const scenesData = section(d.scenes)
+  const sceneRules: SceneRule[] = Array.isArray(scenesData.rules)
+    ? (scenesData.rules as unknown[])
+        .filter((rule): rule is Record<string, unknown> => typeof rule === 'object' && rule !== null)
+        .map((rule) => ({ match: coerceStr(rule.match), profile: coerceStr(rule.profile) }))
+        .filter((rule) => rule.match && rule.profile)
+    : []
+
+  const doubleTapAction = str(section(d.hotkey).double_tap_action, def.hotkey.double_tap_action)
+
   return {
     language: str(d.language, def.language),
     polish: {
@@ -124,7 +164,9 @@ export function configFromDict(data: unknown): AppConfig {
       denoise_strength: str(rec.denoise_strength, def.recording.denoise_strength),
       vad_enabled: bool(rec.vad_enabled, def.recording.vad_enabled),
       vad_silence_duration_ms: num(rec.vad_silence_duration_ms, def.recording.vad_silence_duration_ms),
-      vad_threshold: num(rec.vad_threshold, def.recording.vad_threshold)
+      vad_threshold: num(rec.vad_threshold, def.recording.vad_threshold),
+      archive_audio: bool(rec.archive_audio, def.recording.archive_audio),
+      archive_retention_days: num(rec.archive_retention_days, def.recording.archive_retention_days)
     },
     output: {
       paste_delay_ms: num(section(d.output).paste_delay_ms, def.output.paste_delay_ms),
@@ -137,11 +179,22 @@ export function configFromDict(data: unknown): AppConfig {
       show_on_start: bool(section(d.window).show_on_start, def.window.show_on_start),
       always_on_top: bool(section(d.window).always_on_top, def.window.always_on_top),
       auto_start: bool(section(d.window).auto_start, def.window.auto_start),
-      theme_mode: str(section(d.window).theme_mode, def.window.theme_mode)
+      theme_mode: str(section(d.window).theme_mode, def.window.theme_mode),
+      show_caption: bool(section(d.window).show_caption, def.window.show_caption)
     },
     hotkey: {
       toggle_enabled: bool(section(d.hotkey).toggle_enabled, def.hotkey.toggle_enabled),
-      toggle_hotkey: str(section(d.hotkey).toggle_hotkey, def.hotkey.toggle_hotkey)
+      toggle_hotkey: str(section(d.hotkey).toggle_hotkey, def.hotkey.toggle_hotkey),
+      double_tap_action: doubleTapAction === 'raw' ? 'raw' : 'none',
+      push_to_talk: bool(section(d.hotkey).push_to_talk, def.hotkey.push_to_talk)
+    },
+    commands: {
+      enabled: bool(commandsData.enabled, def.commands.enabled),
+      items: commandItems
+    },
+    scenes: {
+      enabled: bool(scenesData.enabled, def.scenes.enabled),
+      rules: sceneRules
     }
   }
 }

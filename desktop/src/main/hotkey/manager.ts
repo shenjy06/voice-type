@@ -1,9 +1,12 @@
 // Global hotkey manager — port of voicetype/ui/system_tray.py HotkeyManager.
 //
 // right_alt binding: a quick tap of Right Alt toggles recording; Right Alt+C
-// cancels; Right Alt + any other key is a combo and does nothing. A 4-state
-// machine (IDLE/WAITING/COMBO/CANCELLED) survives Windows reporting Right-Alt
-// release as generic Alt. Left Alt is ignored entirely.
+// cancels; Right Alt + any other key is a combo and does nothing. Two optional
+// gestures extend the tap (both off by default, gated by config): a double
+// tap within 350ms fires onRawToggle (record without polishing), and holding
+// the key for 300ms fires onPttStart/onPttStop (push-to-talk). A 5-state
+// machine (IDLE/WAITING/COMBO/CANCELLED/PTT) survives Windows reporting
+// Right-Alt release as generic Alt. Left Alt is ignored entirely.
 //
 // Single-key bindings (F9 etc.) use a low-level hook with repeat suppression.
 // Uses uiohook-napi; if the native module can't load, falls back to Electron
@@ -14,6 +17,18 @@ import { globalShortcut } from 'electron'
 export interface HotkeyEvents {
   onToggle: () => void
   onCancel: () => void
+  /** right_alt double-tap: record one take with polishing skipped. */
+  onRawToggle?: () => void
+  /** right_alt long-press push-to-talk: hold starts, release stops. */
+  onPttStart?: () => void
+  onPttStop?: () => void
+}
+
+export interface HotkeyGestures {
+  /** Enable the double-tap → onRawToggle gesture (config hotkey.double_tap_action). */
+  doubleTap?: boolean
+  /** Enable the long-press → push-to-talk gesture (config hotkey.push_to_talk). */
+  pushToTalk?: boolean
 }
 
 // Windows VK codes (libuiohook vcodes mirror VK codes on Windows).
@@ -22,11 +37,16 @@ const VK_MENU = 0x12 // generic Alt
 const VK_LMENU = 0xa4 // Left Alt
 const VK_C = 0x43
 
+// Gesture thresholds (kept in sync with the Python HotkeyManager).
+const DOUBLE_TAP_WINDOW_MS = 350
+const PTT_HOLD_MS = 300
+
 const enum RaState {
   IDLE = 0,
   WAITING,
   COMBO,
-  CANCELLED
+  CANCELLED,
+  PTT
 }
 
 type UiohookModule = {
@@ -40,6 +60,7 @@ type UiohookModule = {
 export class HotkeyManager {
   private events: HotkeyEvents
   private hotkey: string
+  private readonly gestures: Required<HotkeyGestures>
   private uiohook: UiohookModule | null = null
   private uiohookFailed = false
   private running = false
@@ -47,12 +68,19 @@ export class HotkeyManager {
   // Right-Alt state machine.
   private raState: RaState = RaState.IDLE
   private raLastVk: number | null = null
+  // Long-press detection: fires onPttStart when the key is still held.
+  private pttTimer: NodeJS.Timeout | null = null
+  // Double-tap detection: a completed first tap holds its onToggle back for
+  // the double-tap window; a second press inside the window cancels it.
+  private tapTimer: NodeJS.Timeout | null = null
+  private raSecondPress = false
   // Single-key repeat suppression.
   private singleKeyPressed = false
 
-  constructor(hotkey: string, events: HotkeyEvents) {
+  constructor(hotkey: string, events: HotkeyEvents, gestures: HotkeyGestures = {}) {
     this.hotkey = hotkey
     this.events = events
+    this.gestures = { doubleTap: gestures.doubleTap ?? false, pushToTalk: gestures.pushToTalk ?? false }
   }
 
   isRightAltBinding(): boolean {
@@ -100,6 +128,9 @@ export class HotkeyManager {
     }
     this.raState = RaState.IDLE
     this.raLastVk = null
+    this.raSecondPress = false
+    this.clearPttTimer()
+    this.clearTapTimer()
     this.singleKeyPressed = false
   }
 
@@ -159,21 +190,53 @@ export class HotkeyManager {
 
   // ---- Right-Alt state machine (ported from _RightAltState) -------------------
 
+  private clearPttTimer(): void {
+    if (this.pttTimer) {
+      clearTimeout(this.pttTimer)
+      this.pttTimer = null
+    }
+  }
+
+  private clearTapTimer(): void {
+    if (this.tapTimer) {
+      clearTimeout(this.tapTimer)
+      this.tapTimer = null
+    }
+  }
+
   private onPress(vk: number): void {
     if (vk === VK_RMENU) {
       if (this.raState === RaState.IDLE) {
+        // A second press inside the double-tap window cancels the pending
+        // single-tap toggle and becomes a double-tap / long-press candidate.
+        if (this.tapTimer) {
+          this.clearTapTimer()
+          this.raSecondPress = true
+        }
         this.raState = RaState.WAITING
         this.raLastVk = VK_RMENU
+        if (this.gestures.pushToTalk) {
+          this.pttTimer = setTimeout(() => {
+            this.pttTimer = null
+            if (this.raState === RaState.WAITING) {
+              this.raState = RaState.PTT
+              this.events.onPttStart?.()
+            }
+          }, PTT_HOLD_MS)
+        }
       }
       return
     }
     if (vk === VK_MENU || vk === VK_LMENU) {
       // Generic/Left Alt press: clear the tracker so a later left-Alt release
-      // can never toggle.
-      if (this.raLastVk === VK_RMENU) this.raLastVk = null
+      // can never toggle. During PTT the tracker must survive, or the
+      // Right-Alt release would no longer match and onPttStop would be lost.
+      if (this.raState === RaState.WAITING && this.raLastVk === VK_RMENU) this.raLastVk = null
       return
     }
     if (this.raState === RaState.WAITING) {
+      // A combo ends any long-press candidacy.
+      this.clearPttTimer()
       if (vk === VK_C) {
         this.raState = RaState.CANCELLED
         this.events.onCancel()
@@ -191,18 +254,44 @@ export class HotkeyManager {
     if (!matchingToggle) {
       if (isAlt && this.raState !== RaState.IDLE) {
         // Alt released mid-gesture without a matching press: reset so the
-        // machine can't get stuck in WAITING.
+        // machine can't get stuck — but don't strand an active PTT take.
+        const wasPtt = this.raState === RaState.PTT
         this.raState = RaState.IDLE
         this.raLastVk = null
+        this.raSecondPress = false
+        this.clearPttTimer()
+        if (wasPtt) this.events.onPttStop?.()
       }
       return
     }
 
     const state = this.raState
+    const secondPress = this.raSecondPress
     this.raState = RaState.IDLE
     this.raLastVk = null
+    this.raSecondPress = false
+    this.clearPttTimer()
+
+    if (state === RaState.PTT) {
+      // Long-press release ends push-to-talk; never counts as a tap.
+      this.events.onPttStop?.()
+      return
+    }
 
     if (state === RaState.WAITING) {
+      if (secondPress) {
+        // Second quick tap inside the window → double-tap gesture.
+        this.events.onRawToggle?.()
+        return
+      }
+      if (this.gestures.doubleTap) {
+        // Hold the toggle back until the double-tap window expires.
+        this.tapTimer = setTimeout(() => {
+          this.tapTimer = null
+          this.events.onToggle()
+        }, DOUBLE_TAP_WINDOW_MS)
+        return
+      }
       // Pure tap.
       this.events.onToggle()
     }

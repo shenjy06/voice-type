@@ -312,6 +312,194 @@ describe('previewSettings does not persist', () => {
   })
 })
 
+// Voice commands, scene presets and the raw-mode gesture all intercept the
+// pipeline between glossary and polish. These exercise them against a stubbed
+// transcription so no real API is contacted.
+describe('pipeline intercepts', () => {
+  interface Harness2 {
+    app: Application
+    config: AppConfig
+    added: Array<{ text: string; meta: unknown }>
+    actionKeys: Array<{ action: string; hwnd: unknown }>
+    sent: Array<{ win: string; msg: unknown }>
+    finishStop(): void
+  }
+
+  function makeHarness2(): Harness2 {
+    const config = defaultConfig()
+    config.asr.streaming_enabled = false
+    config.asr.api_key = 'test-key'
+    config.polish.api_key = 'test-key'
+    config.glossary = []
+
+    const added: Array<{ text: string; meta: unknown }> = []
+    const actionKeys: Array<{ action: string; hwnd: unknown }> = []
+    const sent: Array<{ win: string; msg: unknown }> = []
+    let pendingStop: (() => void) | null = null
+
+    const windows = {
+      send: (win: string, _channel: string, payload: unknown) => sent.push({ win, msg: payload }),
+      broadcast: () => undefined,
+      ensureOverlay: () => ({ showInactive: () => undefined }),
+      ensureFloating: () => undefined
+    } as never
+
+    const app = new Application({
+      store: {
+        get config() {
+          return config
+        },
+        replaceWith: () => undefined,
+        save: () => undefined,
+        loadProfile: () => {
+          throw new Error('no profiles in this harness')
+        }
+      } as never,
+      windows,
+      tray: {
+        setState: () => undefined,
+        setRetryAvailable: () => undefined,
+        showNotification: () => undefined,
+        retranslate: () => undefined,
+        applyConfig: () => undefined
+      } as never,
+      history: {
+        add: (text: string, meta?: unknown) => added.push({ text, meta }),
+        loadRecent: () => []
+      } as never,
+      typer: {
+        outputText: async () => true,
+        sendActionKey: async (action: string, hwnd: unknown) => {
+          actionKeys.push({ action, hwnd })
+          return true
+        }
+      } as never,
+      hotkey: {} as never,
+      audio: {
+        start: async () => true,
+        stop: () =>
+          new Promise<void>((resolve) => {
+            pendingStop = resolve
+          })
+      } as never,
+      debouncedSave: () => undefined
+    })
+
+    return {
+      app,
+      config,
+      added,
+      actionKeys,
+      sent,
+      finishStop: () => {
+        pendingStop?.()
+        pendingStop = null
+      }
+    }
+  }
+
+  /** Stub the ASR endpoint to return `text`; any further call fails loudly. */
+  function stubTranscript(text: string): void {
+    fetchStub.mockImplementation((url: unknown) => {
+      const u = String(url)
+      if (u.includes('/audio/transcriptions')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ text }) } as unknown as Response)
+      }
+      // Polish endpoint must never be hit in these tests.
+      return Promise.resolve({ ok: false, json: () => Promise.resolve({}) } as unknown as Response)
+    })
+  }
+
+  it('runs a discard command instead of pasting', async () => {
+    const h = makeHarness2()
+    h.config.commands.enabled = true
+    stubTranscript('取消')
+
+    await h.app.startRecording()
+    h.app.onAudioChunk(Buffer.alloc(2000, 3))
+    const stopping = h.app.stopRecording()
+    h.finishStop()
+    await stopping
+    await vi.waitFor(() => expect(h.app.getState()).toBe('idle'))
+
+    expect(h.added).toHaveLength(0)
+    expect(h.actionKeys).toHaveLength(0)
+  })
+
+  it('runs a key command instead of polishing', async () => {
+    const h = makeHarness2()
+    h.config.commands.enabled = true
+    stubTranscript('换行。') // glossary-free, punctuation-tolerant
+
+    await h.app.startRecording()
+    h.app.onAudioChunk(Buffer.alloc(2000, 4))
+    const stopping = h.app.stopRecording()
+    h.finishStop()
+    await stopping
+    await vi.waitFor(() => expect(h.app.getState()).toBe('idle'))
+
+    expect(h.actionKeys).toEqual([{ action: 'newline', hwnd: expect.any(Number) }])
+    expect(h.added).toHaveLength(0)
+  })
+
+  it('a transcript that is not a command flows to polish', async () => {
+    const h = makeHarness2()
+    h.config.commands.enabled = true
+    h.config.polish.enabled = false // simpler: assert history still gets the text
+    stubTranscript('今天天气不错')
+
+    await h.app.startRecording()
+    h.app.onAudioChunk(Buffer.alloc(2000, 6))
+    const stopping = h.app.stopRecording()
+    h.finishStop()
+    await stopping
+    await vi.waitFor(() => expect(h.app.getState()).toBe('idle'))
+
+    expect(h.added).toHaveLength(1)
+    expect(h.added[0].text).toBe('今天天气不错')
+  })
+
+  it('attaches archive metadata when archiving is enabled', async () => {
+    const h = makeHarness2()
+    h.config.recording.archive_audio = true
+    h.config.polish.enabled = false // isolate: no polish call in this take
+    stubTranscript('存档一句')
+
+    await h.app.startRecording()
+    h.app.onAudioChunk(Buffer.alloc(2000, 8))
+    const stopping = h.app.stopRecording()
+    h.finishStop()
+    await stopping
+    await vi.waitFor(() => expect(h.app.getState()).toBe('idle'))
+
+    // archiveDir is unset in this harness, so the file write is skipped but
+    // the timing metadata still rides along with the history entry.
+    expect(h.added).toHaveLength(1)
+    expect(h.added[0].meta).toMatchObject({ duration_ms: expect.any(Number), processing_ms: expect.any(Number) })
+    expect((h.added[0].meta as { audio_path?: string }).audio_path).toBeUndefined()
+  })
+
+  it('resolves the scene profile for the foreground process', async () => {
+    const h = makeHarness2()
+    const profile = defaultConfig()
+    profile.asr.model = 'profile-model'
+    ;(h.app as unknown as { deps: { store: { loadProfile: () => AppConfig } } }).deps.store.loadProfile = () => profile
+    h.config.scenes.rules = [{ match: 'Code.exe', profile: 'coding' }]
+
+    const app = h.app as unknown as { resolveSceneConfig(hwnd: number): AppConfig | null }
+    // getProcessName is unavailable in this environment (no win32 bindings),
+    // so stub it at the module level used by app.ts.
+    const detect = await import('../src/main/platform/win32/terminal-detect')
+    const spy = vi.spyOn(detect, 'getProcessName').mockReturnValue('windows_code.exe')
+
+    const resolved = app.resolveSceneConfig(1234)
+    spy.mockRestore()
+
+    expect(resolved).not.toBeNull()
+    expect(resolved?.asr.model).toBe('profile-model')
+  })
+})
+
 // The tray quick toggles bypass the settings dialog. They must invalidate the
 // glossary compile cache and trigger a debounced save.
 describe('handleQuickUpdate', () => {

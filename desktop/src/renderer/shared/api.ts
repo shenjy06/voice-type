@@ -1,6 +1,6 @@
 // Renderer-side typed access to the preload bridge.
 import type { EvtMessage } from '../../preload/index'
-import type { AppConfig, HistoryEntry } from '../../shared/types'
+import type { AppConfig, HistoryEntry, HistoryStats } from '../../shared/types'
 
 export type { EvtMessage }
 
@@ -33,6 +33,8 @@ export interface VoiceTypeApi {
   historyClear(): Promise<void>
   historyCopy(text: string): Promise<void>
   historyPaste(text: string): Promise<void>
+  historyAudio(index: number): Promise<{ ok: boolean; data?: Uint8Array; error?: string }>
+  statsSummary(): Promise<HistoryStats>
 
   exportGlossaryCsv(
     entries: Array<{ source: string; replacement: string }>
@@ -48,6 +50,7 @@ export interface VoiceTypeApi {
   cancelRecording(): Promise<void>
   showSettings(): Promise<void>
   showFloating(): Promise<void>
+  showCaption(): Promise<void>
   quitApp(): Promise<void>
   warmupApis(): Promise<void>
 

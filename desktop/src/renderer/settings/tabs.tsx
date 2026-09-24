@@ -6,7 +6,7 @@
 // Hotkeys (enable + recorder).
 
 import { useEffect, useRef, useState } from 'react'
-import type { AppConfig, GlossaryEntry, OutputDevice } from '../../shared/types'
+import type { AppConfig, GlossaryEntry, OutputDevice, SceneRule, VoiceCommandItem } from '../../shared/types'
 import { ASR_LANGUAGES, POLISH_STYLES, PASTE_MODES, THEME_MODES } from '../../shared/types'
 import { useApp } from '../shared/app-context'
 import { windowApi } from '../shared/api-binding'
@@ -464,6 +464,31 @@ export function RecordingTab({ draft, update }: TabProps): JSX.Element {
           </Field>
         )}
         <div className="hint">{t('settings.vad_hint')}</div>
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            checked={draft.recording.archive_audio}
+            onChange={(e) => update((d) => void (d.recording.archive_audio = e.target.checked))}
+          />
+          {t('settings.archive_enabled')}
+        </label>
+        {draft.recording.archive_audio && (
+          <Field label={t('settings.archive_retention')}>
+            <input
+              type="text"
+              value={draft.recording.archive_retention_days}
+              onChange={(e) => {
+                const v = Number(e.target.value.replace(/\D/g, '') || 1)
+                update((d) => void (d.recording.archive_retention_days = Math.max(1, Math.min(365, v))))
+              }}
+              style={{ width: 90 }}
+            />
+            <span className="hint" style={{ margin: 0 }}>
+              {t('settings.days')}
+            </span>
+          </Field>
+        )}
+        <div className="hint">{t('settings.archive_hint')}</div>
       </div>
 
       <div className="group">
@@ -712,6 +737,168 @@ export function GlossaryTab({ draft, update, showToast }: TabProps): JSX.Element
   )
 }
 
+// ---- Commands (voice commands) ------------------------------------------------------
+
+export function CommandsTab({ draft, update }: TabProps): JSX.Element {
+  const { t } = useApp()
+  const [selected, setSelected] = useState(-1)
+  const items = draft.commands.items
+
+  const setItem = (i: number, mutate: (e: VoiceCommandItem) => void): void => {
+    update((d) => {
+      const item = d.commands.items[i]
+      if (item) mutate(item)
+    })
+  }
+
+  return (
+    <div className="group">
+      <div className="group-title">{t('settings.commands_group')}</div>
+      <label className="checkbox-row">
+        <input
+          type="checkbox"
+          checked={draft.commands.enabled}
+          onChange={(e) => update((d) => void (d.commands.enabled = e.target.checked))}
+        />
+        {t('settings.commands_enabled')}
+      </label>
+      <table className="glossary-table">
+        <thead>
+          <tr>
+            <th style={{ width: '50%' }}>{t('settings.commands_phrase')}</th>
+            <th style={{ width: '50%' }}>{t('settings.commands_action')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((item, i) => (
+            <tr key={i} className={i === selected ? 'selected' : ''} onClick={() => setSelected(i)}>
+              <td>
+                <input
+                  type="text"
+                  value={item.phrase}
+                  onChange={(e) => setItem(i, (en) => void (en.phrase = e.target.value))}
+                />
+              </td>
+              <td>
+                <input
+                  type="text"
+                  value={item.action}
+                  onChange={(e) => setItem(i, (en) => void (en.action = e.target.value))}
+                />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="field">
+        <label />
+        <div className="control">
+          <button
+            onClick={() => {
+              update((d) => d.commands.items.push({ phrase: '', action: '' }))
+              setSelected(items.length)
+            }}
+          >
+            {t('settings.commands_add')}
+          </button>
+          <button
+            className="danger"
+            disabled={selected < 0}
+            onClick={() => {
+              update((d) => d.commands.items.splice(selected, 1))
+              setSelected(-1)
+            }}
+          >
+            {t('settings.commands_remove')}
+          </button>
+        </div>
+      </div>
+      <div className="hint">{t('settings.commands_hint')}</div>
+    </div>
+  )
+}
+
+// ---- Scenes (app-aware profiles) ----------------------------------------------------
+
+export function ScenesTab({ draft, update }: TabProps): JSX.Element {
+  const { t } = useApp()
+  const [selected, setSelected] = useState(-1)
+  const rules = draft.scenes.rules
+
+  const setRule = (i: number, mutate: (e: SceneRule) => void): void => {
+    update((d) => {
+      const rule = d.scenes.rules[i]
+      if (rule) mutate(rule)
+    })
+  }
+
+  return (
+    <div className="group">
+      <div className="group-title">{t('settings.scenes_group')}</div>
+      <label className="checkbox-row">
+        <input
+          type="checkbox"
+          checked={draft.scenes.enabled}
+          onChange={(e) => update((d) => void (d.scenes.enabled = e.target.checked))}
+        />
+        {t('settings.scenes_enabled')}
+      </label>
+      <table className="glossary-table">
+        <thead>
+          <tr>
+            <th style={{ width: '50%' }}>{t('settings.scenes_match')}</th>
+            <th style={{ width: '50%' }}>{t('settings.scenes_profile')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rules.map((rule, i) => (
+            <tr key={i} className={i === selected ? 'selected' : ''} onClick={() => setSelected(i)}>
+              <td>
+                <input
+                  type="text"
+                  value={rule.match}
+                  onChange={(e) => setRule(i, (en) => void (en.match = e.target.value))}
+                />
+              </td>
+              <td>
+                <input
+                  type="text"
+                  value={rule.profile}
+                  onChange={(e) => setRule(i, (en) => void (en.profile = e.target.value))}
+                />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="field">
+        <label />
+        <div className="control">
+          <button
+            onClick={() => {
+              update((d) => d.scenes.rules.push({ match: '', profile: '' }))
+              setSelected(rules.length)
+            }}
+          >
+            {t('settings.scenes_add')}
+          </button>
+          <button
+            className="danger"
+            disabled={selected < 0}
+            onClick={() => {
+              update((d) => d.scenes.rules.splice(selected, 1))
+              setSelected(-1)
+            }}
+          >
+            {t('settings.scenes_remove')}
+          </button>
+        </div>
+      </div>
+      <div className="hint">{t('settings.scenes_hint')}</div>
+    </div>
+  )
+}
+
 // ---- Output ------------------------------------------------------------------------
 
 export function OutputTab({ draft, update }: TabProps): JSX.Element {
@@ -759,6 +946,14 @@ export function OutputTab({ draft, update }: TabProps): JSX.Element {
         {t('settings.continuous_mode')}
       </label>
       <div className="hint">{t('settings.continuous_hint')}</div>
+      <label className="checkbox-row">
+        <input
+          type="checkbox"
+          checked={draft.window.show_caption}
+          onChange={(e) => update((d) => void (d.window.show_caption = e.target.checked))}
+        />
+        {t('settings.show_caption')}
+      </label>
     </div>
   )
 }
@@ -785,6 +980,25 @@ export function HotkeysTab({ draft, update }: TabProps): JSX.Element {
       )}
       <div className="hint">{t('settings.hotkey_hint')}</div>
       <div className="hint" dangerouslySetInnerHTML={{ __html: t('settings.hotkey_cancel') }} />
+      <label className="checkbox-row">
+        <input
+          type="checkbox"
+          checked={draft.hotkey.double_tap_action === 'raw'}
+          onChange={(e) => update((d) => void (d.hotkey.double_tap_action = e.target.checked ? 'raw' : 'none'))}
+        />
+        {t('settings.double_tap')}
+      </label>
+      <div className="hint">{t('settings.double_tap_hint')}</div>
+      <label className="checkbox-row">
+        <input
+          type="checkbox"
+          checked={draft.hotkey.push_to_talk}
+          onChange={(e) => update((d) => void (d.hotkey.push_to_talk = e.target.checked))}
+        />
+        {t('settings.push_to_talk')}
+      </label>
+      <div className="hint">{t('settings.push_to_talk_hint')}</div>
+      <div className="hint">{t('settings.gestures_binding_hint')}</div>
     </div>
   )
 }

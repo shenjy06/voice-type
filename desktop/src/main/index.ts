@@ -3,6 +3,7 @@
 // autostart, API warmup, clean shutdown.
 
 import { app, Menu, nativeTheme, session, safeStorage, clipboard } from 'electron'
+import { join } from 'node:path'
 import { ConfigStore } from './config/store'
 import { createAtRestCrypto } from './config/crypto'
 import { HistoryStore } from './services/history'
@@ -61,14 +62,18 @@ void app.whenReady().then(() => {
     onRetry: () => application.retry(),
     onOpenSettings: () => windows.ensureSettings(),
     onOpenHistory: () => windows.ensureHistory(),
+    onOpenCaption: () => windows.ensureCaption(),
     onQuit: () => quit(),
     onUpdateConfig: (mutate) => application.handleQuickUpdate(mutate)
   })
 
   hotkey = new HotkeyManager(store.config.hotkey.toggle_hotkey, {
     onToggle: () => application.toggle(),
-    onCancel: () => application.cancel()
-  })
+    onCancel: () => application.cancel(),
+    onRawToggle: () => application.toggleRaw(),
+    onPttStart: () => application.pttStart(),
+    onPttStop: () => application.pttStop()
+  }, hotkeyGestures())
 
   application = new Application({
     store,
@@ -78,6 +83,7 @@ void app.whenReady().then(() => {
     typer,
     hotkey,
     audio,
+    archiveDir: join(userData, 'audio-archive'),
     debouncedSave: () => {
       if (debouncedSaveTimer) clearTimeout(debouncedSaveTimer)
       debouncedSaveTimer = setTimeout(() => {
@@ -93,8 +99,11 @@ void app.whenReady().then(() => {
     if (store.config.hotkey.toggle_enabled) {
       hotkey = new HotkeyManager(store.config.hotkey.toggle_hotkey, {
         onToggle: () => application.toggle(),
-        onCancel: () => application.cancel()
-      })
+        onCancel: () => application.cancel(),
+        onRawToggle: () => application.toggleRaw(),
+        onPttStart: () => application.pttStart(),
+        onPttStop: () => application.pttStop()
+      }, hotkeyGestures())
       hotkey.start()
     }
     applyAutostart()
@@ -143,6 +152,14 @@ function applyAutostart(): void {
     app.setLoginItemSettings({ openAtLogin: store.config.window.auto_start })
   } catch (e) {
     console.warn('setLoginItemSettings failed:', String(e))
+  }
+}
+
+/** Gesture gates from config, read fresh at every hotkey manager restart. */
+function hotkeyGestures(): { doubleTap: boolean; pushToTalk: boolean } {
+  return {
+    doubleTap: store.config.hotkey.double_tap_action === 'raw',
+    pushToTalk: store.config.hotkey.push_to_talk
   }
 }
 

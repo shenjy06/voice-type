@@ -8,12 +8,14 @@ import { AppProvider, useApp } from '../shared/app-context'
 import type { AppConfig } from '../../shared/types'
 import { windowApi } from '../shared/api-binding'
 import {
+  CommandsTab,
   GeneralTab,
   GlossaryTab,
   HotkeysTab,
   OutputTab,
   PolishTab,
   RecordingTab,
+  ScenesTab,
   SttTab
 } from './tabs'
 import '../shared/global.css'
@@ -53,6 +55,19 @@ const ICONS: Record<string, JSX.Element> = {
       <path d="M20 4h-4a3 3 0 0 0-3 3v13a2.5 2.5 0 0 1 2.5-2.5H20z" />
     </>
   ),
+  commands: (
+    <>
+      <path d="M4 17l6-5-6-5" />
+      <path d="M12 19h8" />
+    </>
+  ),
+  scenes: (
+    <>
+      <rect x="3" y="4" width="18" height="14" rx="2" />
+      <path d="M8 21h8M12 18v3" />
+      <path d="M7 9h4M14 9h3M7 13h10" />
+    </>
+  ),
   output: (
     <>
       <path d="M9 9V5l-6 7 6 7v-4h6v-6z" />
@@ -73,6 +88,8 @@ const TABS = [
   { key: 'stt', labelKey: 'settings.stt_tab' },
   { key: 'polish', labelKey: 'settings.polish_tab' },
   { key: 'glossary', labelKey: 'settings.glossary_tab' },
+  { key: 'commands', labelKey: 'settings.commands_tab' },
+  { key: 'scenes', labelKey: 'settings.scenes_tab' },
   { key: 'output', labelKey: 'settings.output' },
   { key: 'hotkeys', labelKey: 'settings.hotkeys' }
 ] as const
@@ -167,6 +184,8 @@ function SettingsApp(): JSX.Element | null {
           {tab === 'stt' && <SttTab {...tabProps} />}
           {tab === 'polish' && <PolishTab {...tabProps} />}
           {tab === 'glossary' && <GlossaryTab {...tabProps} />}
+          {tab === 'commands' && <CommandsTab {...tabProps} />}
+          {tab === 'scenes' && <ScenesTab {...tabProps} />}
           {tab === 'output' && <OutputTab {...tabProps} />}
           {tab === 'hotkeys' && <HotkeysTab {...tabProps} />}
         </div>

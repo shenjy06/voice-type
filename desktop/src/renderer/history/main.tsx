@@ -2,27 +2,71 @@
 // copy / paste / clear actions.
 
 import { createRoot } from 'react-dom/client'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AppProvider, useApp } from '../shared/app-context'
 import { windowApi } from '../shared/api-binding'
-import type { HistoryEntry } from '../../shared/types'
+import type { HistoryEntry, HistoryStats } from '../../shared/types'
 import '../shared/global.css'
 import './history.css'
 
 function HistoryApp(): JSX.Element {
   const { t, format } = useApp()
   const [entries, setEntries] = useState<HistoryEntry[]>([])
+  const [stats, setStats] = useState<HistoryStats | null>(null)
   const [selected, setSelected] = useState<number>(-1)
   const [copied, setCopied] = useState(false)
+  const [playing, setPlaying] = useState(false)
+  const audioCtxRef = useRef<AudioContext | null>(null)
+  const sourceRef = useRef<AudioBufferSourceNode | null>(null)
+
+  const refreshStats = (): void => {
+    void windowApi.statsSummary().then(setStats)
+  }
 
   useEffect(() => {
     void windowApi.historyList().then((list) => {
       setEntries(list)
       setSelected(list.length ? 0 : -1)
     })
+    refreshStats()
+  }, [])
+
+  // Stop any playback when the window goes away.
+  useEffect(() => {
+    const stop = (): void => stopAudio()
+    window.addEventListener('beforeunload', stop)
+    return () => window.removeEventListener('beforeunload', stop)
   }, [])
 
   const current = selected >= 0 && selected < entries.length ? entries[selected] : null
+
+  const stopAudio = (): void => {
+    sourceRef.current?.stop()
+    sourceRef.current = null
+    setPlaying(false)
+  }
+
+  const onPlay = (): void => {
+    if (playing) {
+      stopAudio()
+      return
+    }
+    if (!current?.audio_path) return
+    void windowApi.historyAudio(selected).then((res) => {
+      if (!res.ok || !res.data) return
+      const ctx = audioCtxRef.current ?? new AudioContext()
+      audioCtxRef.current = ctx
+      void ctx.decodeAudioData(res.data.buffer as ArrayBuffer).then((buf) => {
+        const src = ctx.createBufferSource()
+        src.buffer = buf
+        src.connect(ctx.destination)
+        src.onended = () => setPlaying(false)
+        src.start()
+        sourceRef.current = src
+        setPlaying(true)
+      })
+    })
+  }
 
   const onCopy = (): void => {
     if (!current) return
@@ -40,6 +84,7 @@ function HistoryApp(): JSX.Element {
     void windowApi.historyClear().then(() => {
       setEntries([])
       setSelected(-1)
+      refreshStats()
     })
   }
 
@@ -49,6 +94,16 @@ function HistoryApp(): JSX.Element {
         <span className="history-title">{t('history.title')}</span>
         {entries.length > 0 && <span className="history-count">{entries.length}</span>}
       </div>
+      {stats && (
+        <div className="history-stats">
+          {format('history.stats_summary', {
+            total: stats.total,
+            chars: stats.total_chars,
+            today: stats.today_count,
+            minutes: stats.est_minutes_saved
+          })}
+        </div>
+      )}
       <div className="history-main">
         <div className="history-list">
           {entries.length === 0 && <div className="history-empty">{t('history.empty')}</div>}
@@ -73,6 +128,9 @@ function HistoryApp(): JSX.Element {
         </button>
         <button className="primary" disabled={!current} onClick={onPaste}>
           {t('history.paste')}
+        </button>
+        <button disabled={!current?.audio_path} onClick={onPlay}>
+          {playing ? t('history.stop') : t('history.play')}
         </button>
         <div className="spacer" />
         <button className="danger" disabled={!entries.length} onClick={onClear}>

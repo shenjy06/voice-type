@@ -2,6 +2,7 @@
 // surface plus an event bus — no Node primitives leak into the renderers.
 
 import { contextBridge, ipcRenderer } from 'electron'
+import type { HistoryEntry, HistoryStats } from '../shared/types'
 
 export interface EvtMessage {
   type: string
@@ -56,10 +57,15 @@ const api = {
     ipcRenderer.invoke('models:fetch', kind),
 
   // ---- history ----
-  historyList: (): Promise<Array<{ created_at: string; text: string }>> => ipcRenderer.invoke('history:list'),
+  historyList: (): Promise<HistoryEntry[]> => ipcRenderer.invoke('history:list'),
   historyClear: (): Promise<void> => ipcRenderer.invoke('history:clear'),
   historyCopy: (text: string): Promise<void> => ipcRenderer.invoke('history:copy', text),
   historyPaste: (text: string): Promise<void> => ipcRenderer.invoke('history:paste', text),
+  historyAudio: (index: number): Promise<{ ok: boolean; data?: Uint8Array; error?: string }> =>
+    ipcRenderer.invoke('history:audio', index),
+
+  // ---- stats ----
+  statsSummary: (): Promise<HistoryStats> => ipcRenderer.invoke('stats:summary'),
 
   // ---- glossary CSV ----
   exportGlossaryCsv: (
@@ -78,6 +84,7 @@ const api = {
   cancelRecording: (): Promise<void> => ipcRenderer.invoke('ui:cancel'),
   showSettings: (): Promise<void> => ipcRenderer.invoke('ui:show-settings'),
   showFloating: (): Promise<void> => ipcRenderer.invoke('ui:show-floating'),
+  showCaption: (): Promise<void> => ipcRenderer.invoke('ui:show-caption'),
   quitApp: (): Promise<void> => ipcRenderer.invoke('app:quit'),
   warmupApis: (): Promise<void> => ipcRenderer.invoke('warmup:apis'),
 

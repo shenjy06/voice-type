@@ -5,6 +5,8 @@
 // output, continuous dictation, retry, VAD auto-stop, and the 300s watchdog.
 
 import { clipboard, nativeTheme } from 'electron'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type { AppConfig, HistoryEntry, RecorderState } from '../shared/types'
 import { setLanguage, t, format } from '../shared/i18n'
 import { paletteForMode } from '../shared/theme'
@@ -13,11 +15,13 @@ import { isConfigured } from './config/store'
 import { HistoryStore } from './services/history'
 import { TextTyper } from './platform/typer'
 import { getForegroundWindow } from './platform/win32/windows'
+import { getProcessName } from './platform/win32/terminal-detect'
 import { getCursorContext } from './platform/context'
 import { Transcriber } from './services/asr'
 import { StreamingTranscriber } from './services/streaming-asr'
 import { TextPolisher } from './services/polisher'
 import { applyGlossary, invalidateGlossaryCache } from './services/glossary'
+import { matchVoiceCommand } from './services/voice-commands'
 import { encodeWavPcm16 } from './audio/wav'
 import { VadDetector } from './audio/vad'
 import type { WindowManager } from './windows'
@@ -44,6 +48,9 @@ export interface AppDeps {
   typer: TextTyper
   hotkey: HotkeyManager
   audio: AudioWindowBridge
+  /** Directory for archived WAVs (userData/audio-archive); archiving is
+   *  skipped when unset. */
+  archiveDir?: string
   /** Persist quick settings with a 500ms debounce. */
   debouncedSave(): void
 }
@@ -63,6 +70,11 @@ export class Application {
   private streamerUsable = false
   private vad: VadDetector | null = null
   private captureStopPromise: Promise<void> | null = null
+  /** Scene-preset override for the current take only (never persisted and
+   *  never written back to the active profile). */
+  private sessionConfig: AppConfig | null = null
+  /** Set by the double-tap gesture: the next take skips polishing. */
+  private rawOnce = false
   /**
    * True from the moment capture starts until the audio window confirms it
    * stopped. Kept separate from `state` because stopRecording() flips the
@@ -177,18 +189,69 @@ export class Application {
     this.streamerUsable = false
     this.pcmChunks = []
     this.pcmBytes = 0
+    this.sessionConfig = null
+    this.rawOnce = false
     if (gen === this.generation) {
       this.setState('idle')
       this.hideCaption()
     }
   }
 
+  // ---- hotkey gesture entry points ------------------------------------------------
+
+  /** Double-tap: start one recording whose output skips polishing. */
+  toggleRaw(): void {
+    if (this.state !== 'idle' && this.state !== 'error') return
+    this.rawOnce = true
+    this.showToast(t('msg.raw_once'))
+    void this.startRecording()
+  }
+
+  /** Push-to-talk: press starts recording (ignored while busy). */
+  pttStart(): void {
+    if (this.state !== 'idle' && this.state !== 'error') return
+    void this.startRecording()
+  }
+
+  /** Push-to-talk: release stops and processes the take. */
+  pttStop(): void {
+    if (this.state !== 'recording') return
+    void this.stopRecording()
+  }
+
   // ---- recording ---------------------------------------------------------------
+
+  /**
+   * Scene presets: match the foreground process against scenes.rules and load
+   * the named profile as this take's session config. The active profile is
+   * never modified; a failed profile load falls back to the stored config.
+   */
+  private resolveSceneConfig(hwnd: number): AppConfig | null {
+    const cfg = this.config
+    if (!cfg.scenes.enabled || !cfg.scenes.rules.length || !hwnd) return null
+    const procName = getProcessName(hwnd).toLowerCase()
+    if (!procName) return null
+    for (const rule of cfg.scenes.rules) {
+      const match = rule.match.trim().toLowerCase()
+      if (!match || !procName.includes(match)) continue
+      try {
+        const profile = this.deps.store.loadProfile(rule.profile)
+        this.showToast(format(t('msg.scene_applied'), { name: rule.profile }))
+        return profile
+      } catch (e) {
+        console.warn(`scene profile '${rule.profile}' failed to load:`, String(e))
+        return null
+      }
+    }
+    return null
+  }
 
   async startRecording(): Promise<boolean> {
     if (this.state === 'recording' || this.state === 'processing') return false
     const cfg = this.config
     this.savedHwnd = getForegroundWindow()
+    this.sessionConfig = this.resolveSceneConfig(this.savedHwnd)
+    const sessionCfg = this.sessionConfig ?? cfg
     this.pcmChunks = []
     this.pcmBytes = 0
     this.contextBefore = ''
@@ -221,14 +284,18 @@ export class Application {
     // Streaming ASR (non-fatal on failure — fall back to file mode).
     this.streamer = null
     this.streamerUsable = false
-    if (cfg.asr.streaming_enabled && cfg.asr.api_key) {
+    if (sessionCfg.asr.streaming_enabled && sessionCfg.asr.api_key) {
       const streamer = new StreamingTranscriber({
-        apiKey: cfg.asr.api_key,
-        model: cfg.asr.model,
-        language: cfg.asr.language,
-        sampleRate: cfg.recording.sample_rate,
+        apiKey: sessionCfg.asr.api_key,
+        model: sessionCfg.asr.model,
+        language: sessionCfg.asr.language,
+        sampleRate: sessionCfg.recording.sample_rate,
         onTextUpdate: (text) => {
-          this.deps.windows.send('overlay', 'evt', { type: 'caption', text })
+          if (this.config.window.show_caption) {
+            this.deps.windows.send('overlay', 'evt', { type: 'caption', text })
+          }
+          // Keep the standalone caption card in sync with the overlay layer.
+          this.deps.windows.send('caption', 'evt', { type: 'caption', text })
         },
         onError: (message) => console.warn('streaming:', message)
       })
@@ -310,8 +377,12 @@ export class Application {
     streamer: StreamingTranscriber | null,
     retry?: { wav: Buffer; before: string; after: string }
   ): Promise<void> {
-    const cfg = this.config
+    const cfg = this.sessionConfig ?? this.config
     const startedAt = Date.now()
+    // The double-tap raw flag applies to exactly one take — consume it up
+    // front so a failure can't leak it into a later recording.
+    const skipPolish = this.rawOnce
+    this.rawOnce = false
 
     // Watchdog: never let processing hang the UI (mirrors the 300s timer).
     this.watchdog = setTimeout(() => {
@@ -320,14 +391,16 @@ export class Application {
 
     try {
       let transcript: string
+      let wav: Buffer | null = null
       if (retry) {
+        wav = retry.wav
         transcript = await new Transcriber(cfg).transcribe(retry.wav, cfg.recording.sample_rate)
       } else if (streamer) {
         this.showBubble(t('status.transcribing'))
         transcript = await streamer.finalize(10_000)
       } else {
         this.showBubble(t('status.saving'))
-        const wav = encodeWavPcm16(Buffer.concat(this.pcmChunks), cfg.recording.sample_rate)
+        wav = encodeWavPcm16(Buffer.concat(this.pcmChunks), cfg.recording.sample_rate)
         this.pcmChunks = []
         if (wav.length <= 44) {
           throw new Error(t('error.no_audio_detail'))
@@ -346,14 +419,40 @@ export class Application {
 
       let text = applyGlossary(transcript, cfg.glossary)
 
-      if (cfg.polish.enabled && cfg.polish.api_key) {
+      // Voice commands run after glossary correction (fewer recognition
+      // artefacts) and before polishing: a command transcript is executed,
+      // never polished or pasted.
+      if (cfg.commands.enabled) {
+        const action = matchVoiceCommand(text, cfg.commands.items)
+        if (action) {
+          await this.runVoiceCommand(gen, action)
+          return
+        }
+      }
+
+      if (!skipPolish && cfg.polish.enabled && cfg.polish.api_key) {
         this.showBubble(t('status.polishing'))
         const polisher = new TextPolisher(cfg)
         text = await polisher.polish(text, this.contextBefore, this.contextAfter)
       }
       if (gen !== this.generation) return
 
-      this.deps.history.add(text)
+      const durationMs = Math.max(0, startedAt - this.recordingStartedAt)
+      let audioPath: string | undefined
+      if (cfg.recording.archive_audio) {
+        // Batch/retry runs already hold a WAV; streaming takes re-encode the
+        // buffered PCM on demand.
+        const archiveWav = wav ?? encodeWavPcm16(Buffer.concat(this.pcmChunks), cfg.recording.sample_rate)
+        audioPath = this.archiveAudio(archiveWav)
+      }
+      this.deps.history.add(text, {
+        audio_path: audioPath,
+        duration_ms: durationMs,
+        processing_ms: Date.now() - startedAt
+      })
+      if (cfg.recording.archive_audio && this.deps.archiveDir) {
+        this.deps.history.pruneArchive(cfg.recording.archive_retention_days, this.deps.archiveDir)
+      }
       await this.outputText(text)
       if (gen !== this.generation) return
 
@@ -373,9 +472,47 @@ export class Application {
           if (started) this.continuousActive = true
         })
       }
-      void startedAt
     } catch (err) {
       this.onProcessingError(gen, err, false, streamer)
+    }
+  }
+
+  /**
+   * Execute a matched voice command. 'discard' drops the take; key actions
+   * are injected into the saved foreground window. Either way nothing is
+   * polished, pasted, or added to history.
+   */
+  private async runVoiceCommand(gen: number, action: string): Promise<void> {
+    if (this.watchdog) {
+      clearTimeout(this.watchdog)
+      this.watchdog = null
+    }
+    if (action === 'discard') {
+      this.showToast(t('msg.command_discarded'))
+    } else {
+      const ok = await this.deps.typer.sendActionKey(action, this.savedHwnd)
+      if (gen !== this.generation) return
+      if (!ok) this.showToast(t('msg.command_key_failed'))
+    }
+    this.retryState = null
+    this.deps.tray.setRetryAvailable(false)
+    this.hideCaption()
+    this.setState('idle')
+  }
+
+  /** Write one take's WAV into the archive dir; non-fatal on failure. */
+  private archiveAudio(wav: Buffer): string | undefined {
+    const dir = this.deps.archiveDir
+    if (!dir) return undefined
+    try {
+      mkdirSync(dir, { recursive: true })
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+      const path = join(dir, `${stamp}.wav`)
+      writeFileSync(path, wav)
+      return path
+    } catch (e) {
+      console.warn('audio archive failed:', String(e))
+      return undefined
     }
   }
 
@@ -421,7 +558,7 @@ export class Application {
   // ---- output ---------------------------------------------------------------------
 
   private async outputText(text: string): Promise<void> {
-    const cfg = this.config
+    const cfg = this.sessionConfig ?? this.config
     if (cfg.output.auto_paste) {
       const ok = await this.deps.typer.outputText(text, this.savedHwnd, {
         pasteDelayMs: cfg.output.paste_delay_ms,
@@ -445,12 +582,17 @@ export class Application {
   }
 
   showCaption(text: string): void {
-    this.deps.windows.ensureOverlay().showInactive()
-    this.deps.windows.send('overlay', 'evt', { type: 'caption', text })
+    if (this.config.window.show_caption) {
+      this.deps.windows.ensureOverlay().showInactive()
+      this.deps.windows.send('overlay', 'evt', { type: 'caption', text })
+    }
+    // The standalone caption card stays synced regardless of the overlay toggle.
+    this.deps.windows.send('caption', 'evt', { type: 'caption', text })
   }
 
   hideCaption(): void {
     this.deps.windows.send('overlay', 'evt', { type: 'caption-hide' })
+    this.deps.windows.send('caption', 'evt', { type: 'caption-hide' })
   }
 
   showToast(message: string): void {

@@ -15,6 +15,7 @@ export interface TrayCallbacks {
   onRetry(): void
   onOpenSettings(): void
   onOpenHistory(): void
+  onOpenCaption(): void
   onQuit(): void
   /** Persist quick-setting toggles (already merged into the passed config). */
   onUpdateConfig(mutate: (config: AppConfig) => void): void
@@ -119,6 +120,12 @@ export class TrayController {
         click: (item) => this.quickUpdate((c) => void (c.polish.enabled = item.checked))
       },
       {
+        label: t('tray.caption'),
+        type: 'checkbox',
+        checked: this.config.window.show_caption,
+        click: (item) => this.quickUpdate((c) => void (c.window.show_caption = item.checked))
+      },
+      {
         label: t('tray.polish_style'),
         submenu: POLISH_STYLES.map((style) => ({
           label: t(`settings.polish_style_${style}`),
@@ -148,6 +155,7 @@ export class TrayController {
       { type: 'separator' },
       { label: t('tray.settings'), click: () => this.cb.onOpenSettings() },
       { label: t('tray.history'), click: () => this.cb.onOpenHistory() },
+      { label: t('tray.caption_window'), click: () => this.cb.onOpenCaption() },
       { type: 'separator' },
       { label: t('tray.quit'), click: () => this.cb.onQuit() }
     ])

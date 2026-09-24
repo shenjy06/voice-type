@@ -27,6 +27,14 @@
   margin-left: var(--vt-space-xs);
 }
 
+.history-stats {
+  padding: var(--vt-space-xs) var(--vt-space-lg);
+  border-bottom: 1px solid var(--vt-border-subtle);
+  font-size: var(--vt-font-sm);
+  color: var(--vt-text-secondary);
+  flex-shrink: 0;
+}
+
 .history-main {
   flex: 1;
   display: flex;

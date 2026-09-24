@@ -1,0 +1,94 @@
+/* Standalone live caption window — an interactive card variant of the overlay
+   caption. Shares the design tokens (--vt-*) so it follows the theme. */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--vt-font-stack);
+  color: var(--vt-text-primary);
+  background: transparent;
+  user-select: none;
+}
+
+.caption-window {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  border-radius: var(--vt-radius-lg);
+  background: var(--vt-bg-card);
+  border: 1px solid var(--vt-border);
+  box-shadow: var(--vt-shadow-3);
+  overflow: hidden;
+}
+
+.caption-header {
+  display: flex;
+  align-items: center;
+  gap: var(--vt-space-sm);
+  padding: var(--vt-space-sm) var(--vt-space-md);
+  border-bottom: 1px solid var(--vt-border);
+  -webkit-app-region: drag;
+}
+
+.caption-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--vt-text-secondary);
+}
+
+.caption-dot.live {
+  background: var(--vt-danger);
+  animation: caption-pulse 1.2s var(--vt-motion-ease) infinite;
+}
+
+@keyframes caption-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.caption-title {
+  flex: 1;
+  font-size: var(--vt-font-sm);
+  color: var(--vt-text-secondary);
+}
+
+.caption-copy {
+  padding: 2px var(--vt-space-sm);
+  border: 1px solid var(--vt-border);
+  border-radius: var(--vt-radius-sm);
+  background: transparent;
+  color: var(--vt-text-secondary);
+  font-size: var(--vt-font-sm);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.caption-copy:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.caption-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--vt-space-md);
+  user-select: text;
+}
+
+.caption-text {
+  font-size: var(--vt-font-md);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

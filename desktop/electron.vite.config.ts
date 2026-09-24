@@ -5,6 +5,7 @@ import { resolve } from 'path'
 const rendererInput = {
   floating: resolve(__dirname, 'src/renderer/floating/index.html'),
   overlay: resolve(__dirname, 'src/renderer/overlay/index.html'),
+  caption: resolve(__dirname, 'src/renderer/caption/index.html'),
   settings: resolve(__dirname, 'src/renderer/settings/index.html'),
   history: resolve(__dirname, 'src/renderer/history/index.html'),
   audio: resolve(__dirname, 'src/renderer/audio/index.html')

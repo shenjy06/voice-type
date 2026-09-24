@@ -32,6 +32,8 @@ export interface RecordingConfig {
   vad_enabled: boolean
   vad_silence_duration_ms: number
   vad_threshold: number
+  archive_audio: boolean
+  archive_retention_days: number
 }
 
 export interface OutputConfig {
@@ -51,11 +53,37 @@ export interface WindowConfig {
   always_on_top: boolean
   auto_start: boolean
   theme_mode: string
+  /** Show the live caption panel while streaming ASR is active. */
+  show_caption: boolean
 }
 
 export interface HotkeyConfig {
   toggle_enabled: boolean
   toggle_hotkey: string
+  /** Double-tap gesture on right_alt: 'none' | 'raw' (skip polish once). */
+  double_tap_action: 'none' | 'raw'
+  /** Long-press gesture on right_alt: hold-to-talk. */
+  push_to_talk: boolean
+}
+
+export interface VoiceCommandItem {
+  phrase: string
+  action: string
+}
+
+export interface CommandsConfig {
+  enabled: boolean
+  items: VoiceCommandItem[]
+}
+
+export interface SceneRule {
+  match: string
+  profile: string
+}
+
+export interface ScenesConfig {
+  enabled: boolean
+  rules: SceneRule[]
 }
 
 export interface AppConfig {
@@ -67,6 +95,8 @@ export interface AppConfig {
   glossary: GlossaryEntry[]
   window: WindowConfig
   hotkey: HotkeyConfig
+  commands: CommandsConfig
+  scenes: ScenesConfig
 }
 
 // ---- enum-ish constants (mirror voicetype/constants.py) ---------------------
@@ -98,6 +128,20 @@ export interface OutputDevice {
 export interface HistoryEntry {
   created_at: string
   text: string
+  audio_path?: string
+  duration_ms?: number
+  processing_ms?: number
+}
+
+export interface HistoryStats {
+  total: number
+  total_chars: number
+  total_duration_ms: number
+  today_count: number
+  today_chars: number
+  week_count: number
+  week_chars: number
+  est_minutes_saved: number
 }
 
 export interface ConfigSummary {
