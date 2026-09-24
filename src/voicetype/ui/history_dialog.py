@@ -1,6 +1,10 @@
 """History dialog for recent recognized text."""
 
+import threading
+
 import pyperclip
+import sounddevice as sd
+import soundfile as sf
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtWidgets import (
     QDialog,
@@ -51,12 +55,20 @@ class HistoryDialog(QDialog):
         self._copy_feedback_timer = QTimer(self)
         self._copy_feedback_timer.setSingleShot(True)
         self._copy_feedback_timer.timeout.connect(self._restore_copy_label)
+        self._play_check_timer = QTimer(self)
+        self._play_check_timer.setInterval(500)
+        self._play_check_timer.timeout.connect(self._update_play_button)
         self._init_ui()
         self.reload()
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
         layout.setSpacing(8)
+
+        # Usage summary (totals + rough time saved), refreshed on reload.
+        self.stats_label = QLabel()
+        self.stats_label.setObjectName("hintLabel")
+        layout.addWidget(self.stats_label)
 
         body = QHBoxLayout()
         body.setSpacing(8)
@@ -74,15 +86,18 @@ class HistoryDialog(QDialog):
         self.copy_btn = QPushButton(t("history.copy"))
         self.copy_btn.setToolTip(t("history.copy"))
         self.paste_btn = QPushButton(t("history.paste"))
+        self.play_btn = QPushButton(t("history.play"))
         self.clear_btn = QPushButton(t("history.clear"))
         # Clearing all history is destructive - style it as a danger button
         # so it reads as distinct from the safe copy/paste actions.
         self.clear_btn.setObjectName("dangerButton")
         self.copy_btn.clicked.connect(self._copy_current)
         self.paste_btn.clicked.connect(self._paste_current)
+        self.play_btn.clicked.connect(self._play_current)
         self.clear_btn.clicked.connect(self._clear_history)
         actions.addWidget(self.copy_btn)
         actions.addWidget(self.paste_btn)
+        actions.addWidget(self.play_btn)
         actions.addStretch()
         actions.addWidget(self.clear_btn)
         preview_layout.addLayout(actions)
@@ -111,11 +126,25 @@ class HistoryDialog(QDialog):
         self.paste_btn.setEnabled(has_entries)
         self.clear_btn.setEnabled(has_entries)
         self.empty_label.setVisible(not has_entries)
+        self._refresh_stats()
+        self._update_play_button()
 
         if has_entries:
             self.list_widget.setCurrentRow(0)
         else:
             self.preview.clear()
+
+    def _refresh_stats(self):
+        """Fill the summary bar with aggregate history statistics."""
+        stats = self.history_store.stats()
+        self.stats_label.setText(
+            t("history.stats_summary").format(
+                total=stats["total"],
+                chars=stats["total_chars"],
+                today=stats["today_count"],
+                minutes=stats["est_minutes_saved"],
+            )
+        )
 
     def _label_for(self, entry: HistoryEntry) -> str:
         first_line = entry.text.splitlines()[0].strip()
@@ -134,6 +163,46 @@ class HistoryDialog(QDialog):
     def _show_entry(self, row: int):
         entry = self._current_entry()
         self.preview.setPlainText(entry.text if entry else "")
+        self._update_play_button()
+
+    def _play_current(self):
+        """Play or stop the current entry's archived audio (no-op if archived
+        audio is off or the file is missing)."""
+        if self._is_playing():
+            sd.stop()
+            self._play_check_timer.stop()
+            self.play_btn.setText(t("history.play"))
+            return
+
+        entry = self._current_entry()
+        if not entry or not entry.audio_path:
+            return
+        try:
+            data, samplerate = sf.read(entry.audio_path, dtype="float32")
+        except Exception:
+            return
+        if data.size == 0:
+            return
+        sd.play(data, samplerate)
+        self._play_check_timer.start()
+
+    def _update_play_button(self):
+        entry = self._current_entry()
+        has_audio = bool(entry and entry.audio_path)
+        if not has_audio:
+            self._play_check_timer.stop()
+        self.play_btn.setVisible(has_audio)
+        self.play_btn.setText(t("history.stop") if self._is_playing() else t("history.play"))
+
+    @staticmethod
+    def _is_playing() -> bool:
+        """True while a playback stream is active (never raises: sounddevice
+        raises when no stream has ever been created)."""
+        try:
+            stream = sd.get_stream()
+        except RuntimeError:
+            return False
+        return stream is not None and stream.active
 
     def _copy_current(self):
         entry = self._current_entry()
@@ -164,6 +233,7 @@ class HistoryDialog(QDialog):
         self.paste_btn.setText(t("history.paste"))
         self.clear_btn.setText(t("history.clear"))
         self.empty_label.setText(t("history.empty"))
+        self._refresh_stats()
 
     def apply_theme(self):
         """Re-skin the dialog after a light/dark theme switch.

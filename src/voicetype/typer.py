@@ -21,6 +21,23 @@ logger = logging.getLogger(__name__)
 KEYEVENTF_KEYUP = 0x0002
 user32 = ctypes.windll.user32
 
+# Voice-command action -> key sequence. Each entry is a list of
+# (virtual-key, key-up?) steps sent in order via keybd_event, mirroring the
+# desktop port: newline = Shift+Enter, enter = Return, undo = Ctrl+Z,
+# tab = Tab.
+VK_SHIFT = 0x10
+VK_CONTROL = 0x11
+VK_RETURN = 0x0D
+VK_TAB = 0x09
+VK_Z = 0x5A
+
+_ACTION_KEY_SEQUENCES: dict[str, tuple[int, ...]] = {
+    "newline": (VK_SHIFT, VK_RETURN),
+    "enter": (VK_RETURN,),
+    "undo": (VK_CONTROL, VK_Z),
+    "tab": (VK_TAB,),
+}
+
 
 class TextTyper:
     def __init__(self, config: AppConfig):
@@ -107,6 +124,49 @@ class TextTyper:
 
         logger.info("Paste successful (%d chars) in %.1fms", len(text), (time.monotonic() - paste_start) * 1000)
         return True
+
+    def send_action_key(self, action: str, saved_hwnd: int = 0) -> bool:
+        """Inject a voice-command key sequence into the saved window.
+
+        Mirrors :meth:`output_text`'s focus handling (restore the saved
+        foreground window, wait for focus to settle, clear stuck modifiers)
+        but sends a command keystroke instead of a paste. Unknown actions
+        return False without touching the keyboard.
+        """
+        sequence = _ACTION_KEY_SEQUENCES.get(action)
+        if not sequence:
+            logger.warning("Unknown action key: %r", action)
+            return False
+
+        if saved_hwnd and saved_hwnd != 0:
+            if not set_foreground_window(saved_hwnd):
+                logger.warning("Failed to restore foreground window (hwnd=%s)", saved_hwnd)
+
+        time.sleep(self.config.output.paste_delay_ms / 1000.0)
+
+        try:
+            # Release any modifiers left over from the foreground-restore
+            # Alt tap so they don't turn the action into a menu shortcut.
+            for vk in (0x12, VK_SHIFT, VK_CONTROL):  # 0x12 = VK_MENU (Alt)
+                user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
+            time.sleep(0.02)
+
+            # Press modifiers first, then the main key; release in reverse.
+            modifiers, main_key = sequence[:-1], sequence[-1]
+            for vk in modifiers:
+                user32.keybd_event(vk, 0, 0, 0)
+                time.sleep(0.02)
+            user32.keybd_event(main_key, 0, 0, 0)
+            time.sleep(0.02)
+            user32.keybd_event(main_key, 0, KEYEVENTF_KEYUP, 0)
+            for vk in reversed(modifiers):
+                time.sleep(0.02)
+                user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
+            logger.info("Action key sent: %s (hwnd=%s)", action, saved_hwnd)
+            return True
+        except Exception as e:
+            logger.warning("Action key injection raised: %s", e, exc_info=True)
+            return False
 
     def _schedule_clipboard_restore(self, original: str) -> None:
         """Restore the original clipboard in a background thread after a short delay."""

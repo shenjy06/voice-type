@@ -36,6 +36,11 @@ class ProcessingController(QObject):
     # from the worker thread to the UI thread for progress feedback.
     progress = Signal(str)
 
+    # Public signal — emitted with a voice-command action (newline/enter/
+    # undo/tab/discard) when the transcript matched a configured command.
+    # Delivered in place of on_done; the application performs the action.
+    command = Signal(str)
+
     def __init__(
         self,
         config: AppConfig,
@@ -54,6 +59,10 @@ class ProcessingController(QObject):
         self._worker: ProcessingWorker | None = None
         self._timeout_timer: QTimer | None = None
         self._completed = False
+        # Archive metadata of the most recent successful cycle (set by the
+        # worker when audio archiving is enabled); read by the application
+        # in on_done to attach it to the history entry.
+        self.last_archive_info: dict | None = None
 
         self._done.connect(self._on_worker_done)
         self._error.connect(self._on_worker_error)
@@ -79,6 +88,8 @@ class ProcessingController(QObject):
         context_after: str = "",
         audio_path: str | None = None,
         streaming_transcriber=None,
+        config: AppConfig | None = None,
+        skip_polish: bool = False,
     ) -> None:
         """Start a new processing cycle for the given recorder.
 
@@ -94,17 +105,24 @@ class ProcessingController(QObject):
         When ``streaming_transcriber`` is provided (streaming mode), the
         worker calls ``finalize()`` on it to collect the transcript instead
         of saving + transcribing a file.
+
+        ``config`` overrides the controller's config for this cycle only —
+        used by scene presets to apply a per-session profile without
+        touching the active config. ``skip_polish`` forces raw output for
+        this cycle (double-tap gesture).
         """
         if self.is_running():
             return
 
         self._completed = False
+        self.last_archive_info = None
 
         thread = QThread()
         worker = ProcessingWorker(
-            self._config, recorder, context_before, context_after,
+            config or self._config, recorder, context_before, context_after,
             audio_path=audio_path,
             streaming_transcriber=streaming_transcriber,
+            skip_polish=skip_polish,
         )
         worker.moveToThread(thread)
 
@@ -113,8 +131,12 @@ class ProcessingController(QObject):
         worker.finished.connect(self._done)
         worker.error.connect(self._error)
         worker.progress.connect(self.progress)
+        worker.command_detected.connect(self.command)
         worker.finished.connect(thread.quit)
         worker.error.connect(thread.quit)
+        worker.command_detected.connect(thread.quit)
+        # A command outcome also completes the cycle (in place of done/error).
+        worker.command_detected.connect(self._on_worker_command)
 
         # Cleanly delete the QObject wrappers once the thread exits.  This is
         # required for QObjects that were moved to the worker thread; without
@@ -142,6 +164,8 @@ class ProcessingController(QObject):
             return
         self._completed = True
         self._stop_timeout()
+        if self._worker is not None:
+            self.last_archive_info = self._worker.archive_info
         self._on_done(refined_text)
 
     def _on_worker_error(self, error_msg: str) -> None:
@@ -150,6 +174,18 @@ class ProcessingController(QObject):
         self._completed = True
         self._stop_timeout()
         self._on_error(error_msg)
+
+    def _on_worker_command(self, _action: str) -> None:
+        """Mark the cycle complete on a voice-command outcome.
+
+        The public ``command`` signal (connected before this) delivers the
+        action to the application; here we only guard the watchdog so the
+        timeout doesn't fire for an already-finished cycle.
+        """
+        if self._completed:
+            return
+        self._completed = True
+        self._stop_timeout()
 
     def _on_thread_finished(self) -> None:
         """Clear references when the QThread exits.

@@ -33,6 +33,12 @@ Licensed under [GPL-3.0](LICENSE).
 - **Model Discovery**: Click the refresh button in settings to fetch all available models from your API provider — no need to copy model IDs manually
 - **Named Profiles**: Save and switch between multiple named configurations (work, personal, etc.) from the settings General tab
 - **Encrypted Config Export**: Export config files with password protection to keep API keys secure when sharing or migrating
+- **Voice Commands**: Say a configured command phrase (e.g. "换行"/"new line", "撤销"/"undo", "取消"/"cancel") and the action runs instead of the text being polished and pasted — phrases are editable in the settings Commands tab
+- **Scene Presets (App-Aware)**: Rules map a foreground process name (e.g. Code.exe) to a saved profile, so dictation in a terminal can skip polishing while chat apps keep it on — applied per recording, never changing your active profile
+- **Hotkey Gestures**: Right Alt supports optional gestures — double-tap for a polish-free take, hold for push-to-talk (both configurable in the Hotkeys tab)
+- **Usage Statistics**: The history window's summary bar shows totals, today's count, and estimated minutes saved
+- **Audio Archive**: Optionally keep each recording's WAV (`~/.voice-type/audio-archive/`) with a retention period; archived entries can be replayed from the history dialog
+- **Live Caption Window**: A standalone, resizable always-on-top caption card mirrors the streaming transcript with copy support (tray → "Caption window..."); the overlay caption panel can be toggled in settings
 
 ## Tech Stack
 

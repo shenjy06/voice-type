@@ -37,13 +37,14 @@ from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QObject, QTimer, Signal
 
 from voicetype._logging import setup_logging
-from voicetype.audio import AudioRecorder, cleanup_stale_audio
-from voicetype.config import AppConfig
+from voicetype.audio import AudioRecorder, cleanup_stale_audio, get_archive_dir
+from voicetype.config import AppConfig, load_profile
 from voicetype.context import get_cursor_context
 from voicetype.hotkey_parser import HotkeyBinding
 from voicetype.history import HistoryStore
 from voicetype.processing_controller import ProcessingController
 from voicetype.recording_controller import RecordingController
+from voicetype.scenes import match_scene_profile
 from voicetype.streaming_asr import StreamingTranscriber
 from voicetype.typer import TextTyper
 from voicetype.ui.history_dialog import HistoryDialog
@@ -52,6 +53,8 @@ from voicetype.ui.settings_dialog import SettingsDialog
 from voicetype.ui.system_tray import HotkeyManager, TrayIcon
 from voicetype.ui.theme import apply_theme_mode
 from voicetype.i18n import init_language, t
+from voicetype.voice_commands import DISCARD_ACTION
+from voicetype.window_detect import get_process_name
 from voicetype.window_manager import get_foreground_window
 
 logger = logging.getLogger(__name__)
@@ -69,6 +72,7 @@ class _PasteBridge(QObject):
 
     paste_finished = Signal(bool)  # True = pasted/copied OK, False = failed
     paste_continue_ready = Signal(bool)  # per-operation: only connected for continuous sessions
+    action_key_finished = Signal(bool)  # voice-command key injection result
 
 
 class _SilenceBridge(QObject):
@@ -117,6 +121,13 @@ class Application:
 
         self.config = AppConfig.load()
         init_language(self.config.language)
+        # Prune expired archived recordings (same background-thread rationale).
+        if self.config.recording.archive_audio:
+            threading.Thread(
+                target=HistoryStore.prune_archive,
+                args=(get_archive_dir(), self.config.recording.archive_retention_days),
+                daemon=True,
+            ).start()
         # Apply the configured UI theme (dark/light/system) before any window
         # or dialog is constructed so they pick up the right palette at build
         # time. FloatingRecordingWindow/Toast/StatusBubble read the palette in
@@ -131,10 +142,14 @@ class Application:
             vad_threshold=self.config.recording.vad_threshold,
             streaming_enabled=self.config.asr.streaming_enabled,
             device=self.config.recording.device,
+            archive_enabled=self.config.recording.archive_audio,
         )
         self.typer = TextTyper(self.config)
         self.history_store = HistoryStore()
         self._quitting = False
+        # Raw mode flag set by the double-tap gesture: the next processing
+        # cycle skips polishing. Consumed at recording stop.
+        self._raw_once = False
         # Track paste threads so we can join them at quit, preventing
         # ctypes calls from daemon threads after Qt objects are destroyed.
         self._paste_threads: list[threading.Thread] = []
@@ -176,6 +191,7 @@ class Application:
         # thread (created here so it lives on the UI/main thread).
         self._paste_bridge = _PasteBridge()
         self._paste_bridge.paste_finished.connect(self._on_paste_finished)
+        self._paste_bridge.action_key_finished.connect(self._on_action_key_finished)
         self._paste_bridge.paste_continue_ready.connect(self._on_continue_ready)
 
         # Bridge for marshaling VAD silence detection from the audio thread to
@@ -284,6 +300,7 @@ class Application:
             bubble=self._status_bubble,
             level_timer=self._audio_level_timer,
             context_provider=self._capture_cursor_context,
+            scene_resolver=self._resolve_scene_config,
         )
         self._processing_controller = ProcessingController(
             config=self.config,
@@ -292,12 +309,21 @@ class Application:
             parent=self.app,
         )
         self._processing_controller.progress.connect(self._on_processing_progress)
+        self._processing_controller.command.connect(self._on_voice_command)
 
     def _init_hotkey(self):
         binding = HotkeyBinding.from_string(self.config.hotkey.toggle_hotkey)
-        self.hotkey_manager = HotkeyManager(self.window, binding=binding)
+        self.hotkey_manager = HotkeyManager(
+            self.window,
+            binding=binding,
+            double_tap_action=self.config.hotkey.double_tap_action,
+            push_to_talk=self.config.hotkey.push_to_talk,
+        )
         self.hotkey_manager.toggle_recording.connect(self._toggle_recording)
         self.hotkey_manager.cancel_recording.connect(self._cancel_recording)
+        self.hotkey_manager.raw_toggle.connect(self._toggle_raw_recording)
+        self.hotkey_manager.ptt_start.connect(self._ptt_start)
+        self.hotkey_manager.ptt_stop.connect(self._ptt_stop)
         self.window.set_hotkey_manager(self.hotkey_manager)
         if self.config.hotkey.toggle_enabled:
             self.hotkey_manager.start()
@@ -306,6 +332,31 @@ class Application:
 
     def _toggle_recording(self):
         self._recording_controller.toggle()
+
+    def _toggle_raw_recording(self):
+        """Double-tap gesture: mark this cycle raw (no polish) and record.
+
+        When idle, starts recording (the first tap of the double-tap already
+        toggled, so here we only mark the raw flag); when already recording,
+        the flag still applies to the in-progress cycle — the gesture never
+        stops a recording, so it can never discard audio by accident.
+        """
+        self._raw_once = True
+        self._show_toast(t("msg.raw_once"))
+        if not self._recording_controller.is_recording:
+            self._recording_controller.toggle()
+
+    def _ptt_start(self):
+        """Push-to-talk: Right-Alt held — start recording (with state guards)."""
+        if self._recording_controller.is_recording:
+            return
+        self._recording_controller.toggle()
+
+    def _ptt_stop(self):
+        """Push-to-talk: Right-Alt released — stop and process."""
+        if not self._recording_controller.is_recording:
+            return
+        self._recording_controller.stop()
 
     def _cancel_recording(self):
         # Cancel ends any active continuous session — the user explicitly
@@ -339,8 +390,9 @@ class Application:
         if self._streaming_transcriber is not None:
             self._status_bubble.show_status(t("status.streaming"))
             # Show the caption panel with a placeholder until the first
-            # transcript fragment arrives.
-            self._caption_panel.show_text(t("caption.listening"))
+            # transcript fragment arrives (unless the user disabled it).
+            if self.config.window.show_caption:
+                self._caption_panel.show_text(t("caption.listening"))
         else:
             self._caption_panel.dismiss()
 
@@ -348,6 +400,11 @@ class Application:
         if not self._recording_controller.stop_recording_event():
             return  # cancelled; UI already reset to idle
         context_before, context_after = self._recording_controller.cursor_context
+        # Consume per-cycle overrides: scene-resolved session config (scene
+        # presets) and the raw-mode flag (double-tap gesture).
+        session_config = self._recording_controller.session_config
+        skip_polish = self._raw_once
+        self._raw_once = False
         logger.debug(
             "Recording stopped — context: before=%d chars, after=%d chars",
             len(context_before),
@@ -360,10 +417,16 @@ class Application:
                 context_before=context_before,
                 context_after=context_after,
                 streaming_transcriber=self._streaming_transcriber,
+                config=session_config,
+                skip_polish=skip_polish,
             )
         else:
             self._processing_controller.start(
-                self.audio_recorder, context_before, context_after
+                self.audio_recorder,
+                context_before,
+                context_after,
+                config=session_config,
+                skip_polish=skip_polish,
             )
 
     def _capture_cursor_context(self, hwnd: int = 0) -> tuple[str, str]:
@@ -379,6 +442,30 @@ class Application:
             return get_cursor_context(hwnd)
         except Exception:
             return ("", "")
+
+    def _resolve_scene_config(self, hwnd: int) -> AppConfig | None:
+        """Scene presets: return the profile config matching this window.
+
+        Matches the foreground window's process name against
+        ``config.scenes.rules`` and loads the winning profile as the session
+        config for this recording cycle. The active profile is never
+        modified. Returns None when scenes are disabled, no rule matches, or
+        the profile fails to load.
+        """
+        scenes = self.config.scenes
+        if not scenes.enabled or not scenes.rules or not hwnd:
+            return None
+        process_name = get_process_name(hwnd)
+        profile_name = match_scene_profile(process_name, scenes.rules)
+        if not profile_name:
+            return None
+        try:
+            session_config = load_profile(profile_name)
+        except Exception as e:
+            logger.warning("Scene profile %r failed to load: %s", profile_name, e)
+            return None
+        self._show_toast(t("msg.scene_applied").format(name=profile_name))
+        return session_config
 
     # ---- processing progress + result handlers ----------------------------
 
@@ -420,7 +507,8 @@ class Application:
 
         if refined_text:
             logger.info("Processing done: %d chars", len(refined_text))
-            self.history_store.add(refined_text)
+            meta = self._processing_controller.last_archive_info or {}
+            self.history_store.add(refined_text, **meta)
             self._output_text_async(
                 refined_text,
                 self._recording_controller.saved_hwnd,
@@ -430,6 +518,41 @@ class Application:
             # Empty transcript: nothing to paste, but keep the continuous
             # session going so the user can re-dictate immediately.
             self._toggle_recording()
+
+    def _on_voice_command(self, action: str):
+        """Handle a matched voice command: run its key action (or drop the
+        take for 'discard') instead of polishing/pasting.
+
+        Mirrors the desktop app's runVoiceCommand. Key injection runs on a
+        background thread — it moves the foreground window and sleeps.
+        """
+        self._stop_polish_timer()
+        self._caption_panel.dismiss()
+        self._recording_controller.reset_after_processing()
+        self._cleanup_streaming()
+        self._abandon_retry_state()
+        if self._retry_audio_path is not None:
+            self._retry_audio_path = None
+            self._retry_context = ("", "")
+            self.tray.set_retry_available(False)
+
+        if action == "discard":
+            self._show_toast(t("msg.command_discarded"))
+            return
+
+        hwnd = self._recording_controller.saved_hwnd
+
+        def _work():
+            ok = self.typer.send_action_key(action, hwnd)
+            self._paste_bridge.action_key_finished.emit(ok)
+
+        t = threading.Thread(target=_work, daemon=True)
+        self._paste_threads.append(t)
+        t.start()
+
+    def _on_action_key_finished(self, success: bool):
+        if not success:
+            self._show_toast(t("msg.command_key_failed"))
 
     def _output_text_async(self, text: str, hwnd: int, continue_session: bool = False) -> None:
         """Output text on a background thread — paste (auto_paste on) or copy
@@ -608,7 +731,8 @@ class Application:
         logger.debug("Streaming text -> caption/bubble: %d chars: %r", len(text), text[:50])
         # Full transcript goes to the caption panel; the bubble keeps the
         # one-line truncated preview.
-        self._caption_panel.show_text(text)
+        if self.config.window.show_caption:
+            self._caption_panel.show_text(text)
         display = text if len(text) <= 40 else text[:39] + "…"
         self._status_bubble.show_status(display)
 

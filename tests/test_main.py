@@ -436,7 +436,7 @@ class TestApplication:
         app._on_recording_stopped()
 
         app._processing_controller.start.assert_called_once_with(
-            app.audio_recorder, "hi ", " bye"
+            app.audio_recorder, "hi ", " bye", config=None, skip_polish=False
         )
 
     def test_on_processing_done_with_auto_paste(self, qtbot, mocker):

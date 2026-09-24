@@ -1,6 +1,8 @@
 """System tray icon with menu and global hotkeys."""
 
 import logging
+import threading
+import time
 from enum import Enum, auto
 
 from PySide6.QtCore import QObject, Signal
@@ -243,6 +245,7 @@ class _RightAltState(Enum):
     WAITING = auto()        # Right-Alt is held; waiting for release or combo
     COMBO = auto()          # Another key was pressed while Right-Alt was held
     CANCELLED = auto()      # Right-Alt+C was detected (cancel, not toggle)
+    PTT = auto()            # Long-press threshold crossed (push-to-talk active)
 
 
 class HotkeyManager(QObject):
@@ -254,6 +257,13 @@ class HotkeyManager(QObject):
       Holding Right Alt with another key (e.g. Right Alt+C) is treated as a
       combo and does NOT toggle. Right Alt+C cancels an in-progress recording.
       Left Alt is ignored entirely so it stays free for normal typing.
+      Two optional gestures extend the tap (only for this binding):
+        - double-tap (``double_tap_action == "raw"``): two taps within
+          ``DOUBLE_TAP_WINDOW_S`` emit ``raw_toggle`` instead of a second
+          toggle — the application starts a polish-free recording.
+        - long-press (``push_to_talk``): holding Right Alt for at least
+          ``PTT_HOLD_S`` emits ``ptt_start``; releasing emits ``ptt_stop``
+          (and never a tap toggle).
     * ``key`` (e.g. F9) — pressing the bound key toggles recording. Releasing
       it does nothing, so holding the key does not repeat.
 
@@ -264,18 +274,41 @@ class HotkeyManager(QObject):
 
     toggle_recording = Signal()
     cancel_recording = Signal()
+    raw_toggle = Signal()
+    ptt_start = Signal()
+    ptt_stop = Signal()
 
     _RIGHT_ALT_TOGGLE_KEYS = ("alt_r", "alt_gr")
+    # Gesture thresholds (mirrors the desktop port). Stored on the instance
+    # at construction so tests can shorten them.
+    DOUBLE_TAP_WINDOW_S = 0.35
+    PTT_HOLD_S = 0.30
 
-    def __init__(self, parent=None, binding: HotkeyBinding | None = None):
+    def __init__(
+        self,
+        parent=None,
+        binding: HotkeyBinding | None = None,
+        double_tap_action: str = "none",
+        push_to_talk: bool = False,
+    ):
         super().__init__(parent)
         self._binding = binding or HotkeyBinding.right_alt()
+        self.double_tap_action = double_tap_action
+        self.push_to_talk = push_to_talk
         self._listener = None
         self._running = False
         # Right-Alt state machine — single source of truth for tap/combo
         # detection. See _RightAltState docstring.
         self._ra_state = _RightAltState.IDLE
         self._ra_last_key: str | None = None
+        # Double-tap tracking: monotonic timestamp of the last tap release.
+        self._ra_last_tap = 0.0
+        # Push-to-talk hold timer, armed on Right-Alt press.
+        self._ptt_timer: threading.Timer | None = None
+        # Injectable clock (tests drive the state machine with fake time).
+        self._now = time.monotonic
+        self._double_tap_window_s = self.DOUBLE_TAP_WINDOW_S
+        self._ptt_hold_s = self.PTT_HOLD_S
         # Single-key binding (e.g. F9) — suppress repeat while held.
         self._single_key_pressed = False
 
@@ -322,9 +355,38 @@ class HotkeyManager(QObject):
                 logger.debug("Skipping listener join from callback thread")
             self._listener = None
         logger.info("Hotkey listener stopped")
+        self._cancel_ptt_timer()
         self._ra_state = _RightAltState.IDLE
         self._ra_last_key = None
+        self._ra_last_tap = 0.0
         self._single_key_pressed = False
+
+    # ---- gesture helpers -----------------------------------------------------
+
+    def _arm_ptt_timer(self) -> None:
+        """Arm the push-to-talk hold timer for the current Right-Alt press."""
+        self._cancel_ptt_timer()
+        timer = threading.Timer(self._ptt_hold_s, self._on_ptt_timeout)
+        timer.daemon = True
+        self._ptt_timer = timer
+        timer.start()
+
+    def _cancel_ptt_timer(self) -> None:
+        timer = self._ptt_timer
+        self._ptt_timer = None
+        if timer is not None:
+            timer.cancel()
+
+    def _on_ptt_timeout(self) -> None:
+        """Fires when Right-Alt has been held past the PTT threshold.
+
+        Runs on a threading.Timer thread; emitting a Qt signal from here is
+        thread-safe (queued delivery to receivers).
+        """
+        self._ptt_timer = None
+        if self._ra_state == _RightAltState.WAITING:
+            self._ra_state = _RightAltState.PTT
+            self.ptt_start.emit()
 
     # ---- event dispatch ------------------------------------------------------
 
@@ -361,6 +423,8 @@ class HotkeyManager(QObject):
                 if self._ra_state == _RightAltState.IDLE:
                     self._ra_state = _RightAltState.WAITING
                     self._ra_last_key = "alt_r" if is_alt_r else "alt_gr"
+                    if self.push_to_talk:
+                        self._arm_ptt_timer()
             elif is_alt:
                 # Generic Alt press (likely left): clear any stale Right-Alt
                 # tracker so a later left-Alt release doesn't toggle.
@@ -369,6 +433,8 @@ class HotkeyManager(QObject):
 
         # A non-Alt key was pressed while Right-Alt is held.
         if self._ra_state == _RightAltState.WAITING:
+            # The gesture turned into a combo — no push-to-talk.
+            self._cancel_ptt_timer()
             if self._is_cancel_key(key):
                 self._ra_state = _RightAltState.CANCELLED
                 self.cancel_recording.emit()
@@ -405,6 +471,7 @@ class HotkeyManager(QObject):
                 # tracker; otherwise every subsequent Right-Alt tap would be
                 # silently ignored until the listener restarts. The current
                 # gesture is swallowed, which is safe.
+                self._cancel_ptt_timer()
                 self._ra_state = _RightAltState.IDLE
                 self._ra_last_key = None
             return
@@ -415,5 +482,22 @@ class HotkeyManager(QObject):
 
         if state == _RightAltState.WAITING:
             # Pure tap: Right-Alt pressed and released without any other key.
-            self.toggle_recording.emit()
+            self._cancel_ptt_timer()
+            now = self._now()
+            if (
+                self.double_tap_action == "raw"
+                and now - self._ra_last_tap <= self._double_tap_window_s
+            ):
+                # Second tap inside the double-tap window: raw (polish-free)
+                # recording instead of a plain toggle. Reset the tracker so a
+                # third tap starts a fresh window instead of re-triggering.
+                self._ra_last_tap = 0.0
+                self.raw_toggle.emit()
+            else:
+                self._ra_last_tap = now
+                self.toggle_recording.emit()
+        elif state == _RightAltState.PTT:
+            # Long-press released: end the push-to-talk recording. No tap
+            # toggle — the press already started recording via ptt_start.
+            self.ptt_stop.emit()
         # COMBO / CANCELLED: no toggle — the combo was handled in _on_press.

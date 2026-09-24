@@ -4,8 +4,9 @@ import logging
 import queue
 import sqlite3
 import threading
+import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from voicetype.config import CONFIG_DIR
@@ -15,11 +16,19 @@ logger = logging.getLogger(__name__)
 HISTORY_DB_FILE = CONFIG_DIR / "history.sqlite3"
 DEFAULT_HISTORY_LIMIT = 20
 
+# Rough typing-speed estimate used for the "minutes saved" stat: an average
+# dictation user types about 40 characters per minute.
+_CHARS_PER_MINUTE = 40
+
 
 @dataclass
 class HistoryEntry:
     created_at: str
     text: str
+    # Audio-archive metadata (None when archiving is off / pre-migration rows).
+    audio_path: str | None = None
+    duration_ms: int | None = None
+    processing_ms: int | None = None
 
 
 class HistoryStore:
@@ -30,11 +39,12 @@ class HistoryStore:
     ``check_same_thread=False`` (which was a workaround for cross-thread
     access) and uses WAL mode for better concurrent read performance.
 
-    Public methods (``add``, ``load``, ``clear``) enqueue work on the DB
-    thread and then block on a ``threading.Event`` until that thread has
-    finished the operation — callers get ordering and durability guarantees,
-    while all SQLite access stays single-threaded. After ``shutdown()`` the
-    methods degrade to safe no-ops instead of blocking forever.
+    Public methods (``add``, ``load``, ``clear``, ``stats``) enqueue work on
+    the DB thread and then block on a ``threading.Event`` until that thread
+    has finished the operation — callers get ordering and durability
+    guarantees, while all SQLite access stays single-threaded. After
+    ``shutdown()`` the methods degrade to safe no-ops instead of blocking
+    forever.
     """
 
     def __init__(self, path: Path = HISTORY_DB_FILE, limit: int = DEFAULT_HISTORY_LIMIT):
@@ -51,23 +61,34 @@ class HistoryStore:
         self._stopped = False
 
         # Command queue for the dedicated DB thread. Each item is a tuple:
-        #   ("add", text, event)   — insert a new entry; event is set on completion
-        #   ("load", event)        — reload the cache; event is set on completion
-        #   ("clear", event)       — delete all rows; event is set on completion
-        #   ("stop",)              — shut down the thread
+        #   ("add", entry, event)          — insert a new entry
+        #   ("load", event)                — reload the cache
+        #   ("clear", event)               — delete all rows
+        #   ("stats", event, result_box)   — aggregate stats into result_box
+        #   ("stop",)                      — shut down the thread
+        # Events are set on completion so callers get durability guarantees.
         self._queue: queue.Queue = queue.Queue()
         self._thread = threading.Thread(target=self._db_loop, daemon=True)
         self._thread.start()
 
     # ---- public API ----------------------------------------------------------
 
-    def add(self, text: str) -> HistoryEntry | None:
+    def add(
+        self,
+        text: str,
+        audio_path: str | None = None,
+        duration_ms: int | None = None,
+        processing_ms: int | None = None,
+    ) -> HistoryEntry | None:
         clean_text = text.strip()
         if not clean_text:
             return None
         entry = HistoryEntry(
             created_at=datetime.now().isoformat(timespec="seconds"),
             text=clean_text,
+            audio_path=audio_path,
+            duration_ms=duration_ms,
+            processing_ms=processing_ms,
         )
         if self._stopped:
             return entry
@@ -97,6 +118,56 @@ class HistoryStore:
         self._queue.put(("clear", done))
         done.wait()
         logger.info("History cleared")
+
+    def stats(self) -> dict:
+        """Aggregate usage statistics over the whole history table.
+
+        Returns a dict with keys: total, total_chars, total_duration_ms,
+        today_count, today_chars, week_count, week_chars, est_minutes_saved.
+        Degrades to zeroed stats after shutdown or on DB failure.
+        """
+        empty = {
+            "total": 0,
+            "total_chars": 0,
+            "total_duration_ms": 0,
+            "today_count": 0,
+            "today_chars": 0,
+            "week_count": 0,
+            "week_chars": 0,
+            "est_minutes_saved": 0.0,
+        }
+        if self._stopped or not self.path.exists():
+            return empty
+        done = threading.Event()
+        result_box: dict = {}
+        self._queue.put(("stats", done, result_box))
+        done.wait()
+        return result_box.get("stats", empty)
+
+    @staticmethod
+    def prune_archive(archive_dir: Path, retention_days: int) -> int:
+        """Delete expired archived WAV files; return the deleted count.
+
+        ``archive_dir`` is swept for WAV files older than ``retention_days``
+        days (by mtime). History entries whose ``audio_path`` no longer
+        exists on disk are NOT rewritten (the dialog simply hides the play
+        button). Runs synchronously on the caller's thread — intended for a
+        startup background thread, not the UI.
+        """
+        if not archive_dir.exists():
+            return 0
+        cutoff = time.time() - retention_days * 86400
+        deleted = 0
+        for f in archive_dir.glob("*.wav"):
+            try:
+                if f.stat().st_mtime < cutoff:
+                    f.unlink()
+                    deleted += 1
+            except OSError:
+                pass
+        if deleted:
+            logger.info("Pruned %d expired archived audio files", deleted)
+        return deleted
 
     def shutdown(self) -> None:
         """Signal the DB thread to exit and join it (call at application quit)."""
@@ -135,6 +206,9 @@ class HistoryStore:
                     elif action == "clear":
                         _, done = cmd
                         self._do_clear(conn, done)
+                    elif action == "stats":
+                        _, done, result_box = cmd
+                        self._do_stats(conn, done, result_box)
                     else:
                         logger.warning("Unknown history DB command: %r", action)
                 except Exception:
@@ -145,8 +219,17 @@ class HistoryStore:
     def _do_add(self, conn: sqlite3.Connection, entry: HistoryEntry, done: threading.Event) -> None:
         try:
             conn.execute(
-                "INSERT INTO history (created_at, text) VALUES (?, ?)",
-                (entry.created_at, entry.text),
+                """
+                INSERT INTO history (created_at, text, audio_path, duration_ms, processing_ms)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    entry.created_at,
+                    entry.text,
+                    entry.audio_path,
+                    entry.duration_ms,
+                    entry.processing_ms,
+                ),
             )
             conn.commit()
             count = conn.execute("SELECT COUNT(*) FROM history").fetchone()[0]
@@ -159,10 +242,22 @@ class HistoryStore:
     def _do_load(self, conn: sqlite3.Connection, done: threading.Event) -> None:
         try:
             rows = conn.execute(
-                "SELECT created_at, text FROM history ORDER BY rowid DESC LIMIT ?",
+                """
+                SELECT created_at, text, audio_path, duration_ms, processing_ms
+                FROM history ORDER BY rowid DESC LIMIT ?
+                """,
                 (self.limit,),
             ).fetchall()
-            self._cached_entries = [HistoryEntry(created_at=row[0], text=row[1]) for row in rows]
+            self._cached_entries = [
+                HistoryEntry(
+                    created_at=row[0],
+                    text=row[1],
+                    audio_path=row[2],
+                    duration_ms=row[3],
+                    processing_ms=row[4],
+                )
+                for row in rows
+            ]
             self._dirty = False
             logger.debug("History loaded from DB: %d entries", len(self._cached_entries))
         finally:
@@ -173,6 +268,42 @@ class HistoryStore:
             conn.execute("DELETE FROM history")
             conn.commit()
             self._dirty = True
+        finally:
+            done.set()
+
+    def _do_stats(
+        self, conn: sqlite3.Connection, done: threading.Event, result_box: dict
+    ) -> None:
+        try:
+            today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            week_start = today_start - timedelta(days=7)
+            today_iso = today_start.isoformat()
+            week_iso = week_start.isoformat()
+            total, total_chars, total_duration = conn.execute(
+                """
+                SELECT COUNT(*), COALESCE(SUM(LENGTH(text)), 0),
+                       COALESCE(SUM(duration_ms), 0)
+                FROM history
+                """
+            ).fetchone()
+            today_count, today_chars = conn.execute(
+                "SELECT COUNT(*), COALESCE(SUM(LENGTH(text)), 0) FROM history WHERE created_at >= ?",
+                (today_iso,),
+            ).fetchone()
+            week_count, week_chars = conn.execute(
+                "SELECT COUNT(*), COALESCE(SUM(LENGTH(text)), 0) FROM history WHERE created_at >= ?",
+                (week_iso,),
+            ).fetchone()
+            result_box["stats"] = {
+                "total": total,
+                "total_chars": total_chars,
+                "total_duration_ms": total_duration,
+                "today_count": today_count,
+                "today_chars": today_chars,
+                "week_count": week_count,
+                "week_chars": week_chars,
+                "est_minutes_saved": round(total_chars / _CHARS_PER_MINUTE, 1),
+            }
         finally:
             done.set()
 
@@ -187,6 +318,17 @@ class HistoryStore:
             )
             """
         )
+        # Migrate pre-archive databases: add the audio metadata columns to
+        # tables created before they existed. Old rows keep NULLs, which
+        # load() surfaces as None.
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(history)")}
+        for column, ddl in (
+            ("audio_path", "ALTER TABLE history ADD COLUMN audio_path TEXT"),
+            ("duration_ms", "ALTER TABLE history ADD COLUMN duration_ms INTEGER"),
+            ("processing_ms", "ALTER TABLE history ADD COLUMN processing_ms INTEGER"),
+        ):
+            if column not in existing:
+                conn.execute(ddl)
         conn.commit()
 
     def _trim(self, conn: sqlite3.Connection) -> None:

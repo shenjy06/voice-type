@@ -62,6 +62,12 @@ class AsrConfig:
 class HotkeyConfig:
     toggle_enabled: bool = True
     toggle_hotkey: str = "right_alt"
+    # Right-Alt double-tap gesture: "none" (disabled) or "raw" (next
+    # dictation skips polishing). Only meaningful for the right_alt binding.
+    double_tap_action: str = "none"
+    # Right-Alt long-press gesture: hold to record, release to stop
+    # (push-to-talk). Only meaningful for the right_alt binding.
+    push_to_talk: bool = False
 
 
 @dataclass
@@ -85,6 +91,12 @@ class RecordingConfig:
     # RMS level (0.0-1.0, same scale as input_level) below which audio
     # counts as silence. 0.02 matches the mic-test silent threshold.
     vad_threshold: float = 0.02
+    # Audio archive — keep the WAV of each processed recording under
+    # ~/.voice-type/audio-archive/ so history entries can be replayed.
+    # Off by default (disk usage); old files are pruned after
+    # ``archive_retention_days`` days.
+    archive_audio: bool = False
+    archive_retention_days: int = 7
 
 
 @dataclass
@@ -106,6 +118,60 @@ class GlossaryEntry:
 
 
 @dataclass
+class VoiceCommandEntry:
+    """A voice command: exact-phrase transcript triggers an action.
+
+    ``action`` is one of: newline, enter, undo, tab, discard.
+    """
+
+    phrase: str = ""
+    action: str = ""
+
+
+def _default_command_items() -> list[VoiceCommandEntry]:
+    """Built-in voice commands (Chinese + English phrases)."""
+    return [
+        VoiceCommandEntry(phrase="换行", action="newline"),
+        VoiceCommandEntry(phrase="new line", action="newline"),
+        VoiceCommandEntry(phrase="回车", action="enter"),
+        VoiceCommandEntry(phrase="enter", action="enter"),
+        VoiceCommandEntry(phrase="撤销", action="undo"),
+        VoiceCommandEntry(phrase="undo", action="undo"),
+        VoiceCommandEntry(phrase="取消", action="discard"),
+        VoiceCommandEntry(phrase="cancel", action="discard"),
+    ]
+
+
+@dataclass
+class CommandsConfig:
+    """Voice commands — an exact-match transcript runs an action instead
+    of being polished/pasted. Matching happens after glossary replacement,
+    before polishing."""
+
+    enabled: bool = True
+    items: list[VoiceCommandEntry] = field(default_factory=_default_command_items)
+
+
+@dataclass
+class SceneRule:
+    """Map a foreground-process name substring to a config profile."""
+
+    match: str = ""
+    profile: str = ""
+
+
+@dataclass
+class ScenesConfig:
+    """Scene presets — when recording starts, the foreground window's
+    process name is matched against ``rules``; the first hit loads that
+    profile as the session config for this recording cycle only (the
+    active profile is never modified)."""
+
+    enabled: bool = False
+    rules: list[SceneRule] = field(default_factory=list)
+
+
+@dataclass
 class WindowConfig:
     show_on_start: bool = True
     always_on_top: bool = True
@@ -113,6 +179,9 @@ class WindowConfig:
     # UI theme mode: "dark" | "light" | "system" (follows OS).
     # Default "dark" preserves the pre-theme-switch look for existing users.
     theme_mode: str = "dark"
+    # Live caption panel during streaming ASR. Default True preserves the
+    # pre-toggle behaviour (panel shows while streaming).
+    show_caption: bool = True
 
 
 @dataclass
@@ -125,6 +194,8 @@ class AppConfig:
     glossary: list[GlossaryEntry] = field(default_factory=list)
     window: WindowConfig = field(default_factory=WindowConfig)
     hotkey: HotkeyConfig = field(default_factory=HotkeyConfig)
+    commands: CommandsConfig = field(default_factory=CommandsConfig)
+    scenes: ScenesConfig = field(default_factory=ScenesConfig)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -166,6 +237,34 @@ class AppConfig:
                     )
                 )
 
+        commands_data = _safe_dict(data.get("commands"))
+        command_items = None
+        if "items" in commands_data:
+            command_items = [
+                VoiceCommandEntry(
+                    phrase=str(item.get("phrase", "")),
+                    action=str(item.get("action", "")),
+                )
+                for item in commands_data.get("items", [])
+                if isinstance(item, dict)
+            ]
+        commands_kwargs = _filtered(CommandsConfig, commands_data)
+        # ``items`` needs the VoiceCommandEntry conversion above; the
+        # filtered raw dicts would not survive CommandsConfig.__init__.
+        commands_kwargs.pop("items", None)
+        if command_items is not None:
+            commands_kwargs["items"] = command_items
+
+        scenes_data = _safe_dict(data.get("scenes"))
+        scene_rules = [
+            SceneRule(
+                match=str(item.get("match", "")),
+                profile=str(item.get("profile", "")),
+            )
+            for item in scenes_data.get("rules", [])
+            if isinstance(item, dict)
+        ]
+
         # For polish, fall back to legacy "api" section if "polish" is missing
         polish_data = _safe_dict(data.get("polish", data.get("api")))
 
@@ -178,6 +277,8 @@ class AppConfig:
             glossary=glossary_entries,
             window=WindowConfig(**_filtered(WindowConfig, _safe_dict(data.get("window")))),
             hotkey=HotkeyConfig(**_filtered(HotkeyConfig, hotkey_data)),
+            commands=CommandsConfig(**commands_kwargs),
+            scenes=ScenesConfig(enabled=bool(scenes_data.get("enabled", False)), rules=scene_rules),
         )
 
     @classmethod
@@ -300,6 +401,8 @@ class AppConfig:
             and self.glossary == default.glossary
             and self.window == default.window
             and self.hotkey == default.hotkey
+            and self.commands == default.commands
+            and self.scenes == default.scenes
         )
 
     def summary(self) -> str:

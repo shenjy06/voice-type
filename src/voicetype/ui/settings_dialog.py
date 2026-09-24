@@ -23,6 +23,7 @@ from voicetype.config import (
     EncryptedConfigError, InvalidPasswordError,
     list_profiles, save_profile, load_profile, delete_profile,
     get_active_profile, set_active_profile,
+    SceneRule, VoiceCommandEntry,
 )
 from voicetype.constants import PASTE_MODES, ASR_LANGUAGES, DENOISE_STRENGTHS, THEME_MODES
 from voicetype.network import check_network_available
@@ -454,6 +455,20 @@ class SettingsDialog(QDialog):
         self.vad_hint_label.setObjectName("hintLabel")
         stt_misc_layout.addRow("", self.vad_hint_label)
 
+        # Audio archive — persist recordings so history entries can replay.
+        self.archive_check = QCheckBox(t("settings.archive_enabled"))
+        stt_misc_layout.addRow("", self.archive_check)
+
+        self.archive_retention_spin = QSpinBox()
+        self.archive_retention_spin.setRange(1, 365)
+        self.archive_retention_spin.setSuffix(f" {t('settings.days')}")
+        stt_misc_layout.addRow(t("settings.archive_retention"), self.archive_retention_spin)
+
+        self.archive_hint_label = QLabel(t("settings.archive_hint"))
+        self.archive_hint_label.setWordWrap(True)
+        self.archive_hint_label.setObjectName("hintLabel")
+        stt_misc_layout.addRow("", self.archive_hint_label)
+
         stt_misc_group.setLayout(stt_misc_layout)
         recording_layout.addWidget(stt_misc_group)
         recording_layout.addStretch()
@@ -582,6 +597,80 @@ class SettingsDialog(QDialog):
         glossary_layout.addWidget(glossary_group)
         self._tabs.addTab(glossary_tab, t("settings.glossary_tab"))
 
+        # === Tab: Commands (voice commands) ===
+        commands_tab = QWidget()
+        commands_layout = QVBoxLayout(commands_tab)
+        commands_layout.setSpacing(12)
+
+        commands_group = QGroupBox(t("settings.commands_group"))
+        commands_group_layout = QVBoxLayout()
+
+        self.commands_enabled_check = QCheckBox(t("settings.commands_enabled"))
+        commands_group_layout.addWidget(self.commands_enabled_check)
+
+        self.commands_table = QTableWidget(0, 2)
+        self.commands_table.setHorizontalHeaderLabels([
+            t("settings.commands_phrase"),
+            t("settings.commands_action"),
+        ])
+        self.commands_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.commands_table.verticalHeader().setVisible(False)
+        self.commands_table.setSelectionBehavior(QTableWidget.SelectRows)
+        commands_group_layout.addWidget(self.commands_table)
+
+        commands_buttons = QHBoxLayout()
+        self.commands_add_btn = QPushButton(t("settings.commands_add"))
+        self.commands_remove_btn = QPushButton(t("settings.commands_remove"))
+        self.commands_remove_btn.setObjectName("dangerButton")
+        self.commands_add_btn.clicked.connect(lambda: self._add_command_row())
+        self.commands_remove_btn.clicked.connect(self._remove_selected_command_rows)
+        commands_buttons.addWidget(self.commands_add_btn)
+        commands_buttons.addWidget(self.commands_remove_btn)
+        commands_buttons.addStretch()
+        commands_buttons.addWidget(QLabel(t("settings.commands_hint")))
+        commands_group_layout.addLayout(commands_buttons)
+
+        commands_group.setLayout(commands_group_layout)
+        commands_layout.addWidget(commands_group)
+        self._tabs.addTab(commands_tab, t("settings.commands_tab"))
+
+        # === Tab: Scenes (app-aware profiles) ===
+        scenes_tab = QWidget()
+        scenes_layout = QVBoxLayout(scenes_tab)
+        scenes_layout.setSpacing(12)
+
+        scenes_group = QGroupBox(t("settings.scenes_group"))
+        scenes_group_layout = QVBoxLayout()
+
+        self.scenes_enabled_check = QCheckBox(t("settings.scenes_enabled"))
+        scenes_group_layout.addWidget(self.scenes_enabled_check)
+
+        self.scenes_table = QTableWidget(0, 2)
+        self.scenes_table.setHorizontalHeaderLabels([
+            t("settings.scenes_match"),
+            t("settings.scenes_profile"),
+        ])
+        self.scenes_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.scenes_table.verticalHeader().setVisible(False)
+        self.scenes_table.setSelectionBehavior(QTableWidget.SelectRows)
+        scenes_group_layout.addWidget(self.scenes_table)
+
+        scenes_buttons = QHBoxLayout()
+        self.scenes_add_btn = QPushButton(t("settings.scenes_add"))
+        self.scenes_remove_btn = QPushButton(t("settings.scenes_remove"))
+        self.scenes_remove_btn.setObjectName("dangerButton")
+        self.scenes_add_btn.clicked.connect(lambda: self._add_scene_row())
+        self.scenes_remove_btn.clicked.connect(self._remove_selected_scene_rows)
+        scenes_buttons.addWidget(self.scenes_add_btn)
+        scenes_buttons.addWidget(self.scenes_remove_btn)
+        scenes_buttons.addStretch()
+        scenes_buttons.addWidget(QLabel(t("settings.scenes_hint")))
+        scenes_group_layout.addLayout(scenes_buttons)
+
+        scenes_group.setLayout(scenes_group_layout)
+        scenes_layout.addWidget(scenes_group)
+        self._tabs.addTab(scenes_tab, t("settings.scenes_tab"))
+
         # === Tab: Output ===
         output_tab = QWidget()
         output_tab_layout = QVBoxLayout(output_tab)
@@ -610,6 +699,9 @@ class SettingsDialog(QDialog):
         self.continuous_hint_label.setWordWrap(True)
         self.continuous_hint_label.setObjectName("hintLabel")
         output_layout.addRow("", self.continuous_hint_label)
+
+        self.show_caption_check = QCheckBox(t("settings.show_caption"))
+        output_layout.addRow("", self.show_caption_check)
 
         output_group.setLayout(output_layout)
         output_tab_layout.addWidget(output_group)
@@ -643,6 +735,29 @@ class SettingsDialog(QDialog):
         self._cancel_label.setWordWrap(True)
         self._cancel_label.setObjectName("hintLabel")
         hotkey_layout.addWidget(self._cancel_label)
+
+        # Right-Alt gestures (double-tap / push-to-talk) — only apply to the
+        # right_alt binding; single-key bindings ignore them.
+        self.double_tap_check = QCheckBox(t("settings.double_tap"))
+        hotkey_layout.addWidget(self.double_tap_check)
+
+        self.double_tap_hint_label = QLabel(t("settings.double_tap_hint"))
+        self.double_tap_hint_label.setWordWrap(True)
+        self.double_tap_hint_label.setObjectName("hintLabel")
+        hotkey_layout.addWidget(self.double_tap_hint_label)
+
+        self.push_to_talk_check = QCheckBox(t("settings.push_to_talk"))
+        hotkey_layout.addWidget(self.push_to_talk_check)
+
+        self.push_to_talk_hint_label = QLabel(t("settings.push_to_talk_hint"))
+        self.push_to_talk_hint_label.setWordWrap(True)
+        self.push_to_talk_hint_label.setObjectName("hintLabel")
+        hotkey_layout.addWidget(self.push_to_talk_hint_label)
+
+        self.gestures_hint_label = QLabel(t("settings.gestures_binding_hint"))
+        self.gestures_hint_label.setWordWrap(True)
+        self.gestures_hint_label.setObjectName("hintLabel")
+        hotkey_layout.addWidget(self.gestures_hint_label)
 
         hotkey_group.setLayout(hotkey_layout)
         hotkey_tab_layout.addWidget(hotkey_group)
@@ -703,6 +818,8 @@ class SettingsDialog(QDialog):
 
         self.vad_check.setChecked(self.config.recording.vad_enabled)
         self.vad_silence_spin.setValue(self.config.recording.vad_silence_duration_ms)
+        self.archive_check.setChecked(self.config.recording.archive_audio)
+        self.archive_retention_spin.setValue(self.config.recording.archive_retention_days)
 
         # Polish tab
         self.polish_api_key_input.setText(self.config.polish.api_key)
@@ -726,15 +843,30 @@ class SettingsDialog(QDialog):
         self.paste_mode_combo.setCurrentIndex(idx)
         self.auto_paste_check.setChecked(self.config.output.auto_paste)
         self.continuous_mode_check.setChecked(self.config.output.continuous_mode)
+        self.show_caption_check.setChecked(self.config.window.show_caption)
 
         # Glossary
         self.glossary_table.setRowCount(0)
         for entry in self.config.glossary:
             self._add_glossary_row(entry.source, entry.replacement)
 
+        # Commands
+        self.commands_enabled_check.setChecked(self.config.commands.enabled)
+        self.commands_table.setRowCount(0)
+        for item in self.config.commands.items:
+            self._add_command_row(item.phrase, item.action)
+
+        # Scenes
+        self.scenes_enabled_check.setChecked(self.config.scenes.enabled)
+        self.scenes_table.setRowCount(0)
+        for rule in self.config.scenes.rules:
+            self._add_scene_row(rule.match, rule.profile)
+
         # Hotkeys
         self.hotkey_toggle_check.setChecked(self.config.hotkey.toggle_enabled)
         self.hotkey_recorder.set_hotkey(self.config.hotkey.toggle_hotkey)
+        self.double_tap_check.setChecked(self.config.hotkey.double_tap_action == "raw")
+        self.push_to_talk_check.setChecked(self.config.hotkey.push_to_talk)
         self._load_mic_devices()
 
     def _snapshot_api_state(self) -> dict:
@@ -942,6 +1074,8 @@ class SettingsDialog(QDialog):
         self.config.recording.denoise_strength = self.denoise_strength_combo.currentData()
         self.config.recording.vad_enabled = self.vad_check.isChecked()
         self.config.recording.vad_silence_duration_ms = self.vad_silence_spin.value()
+        self.config.recording.archive_audio = self.archive_check.isChecked()
+        self.config.recording.archive_retention_days = self.archive_retention_spin.value()
 
         # Polish
         self.config.polish.api_key = self.polish_api_key_input.text().strip()
@@ -955,13 +1089,24 @@ class SettingsDialog(QDialog):
         self.config.output.paste_mode = self.paste_mode_combo.currentData()
         self.config.output.auto_paste = self.auto_paste_check.isChecked()
         self.config.output.continuous_mode = self.continuous_mode_check.isChecked()
+        self.config.window.show_caption = self.show_caption_check.isChecked()
 
         # Glossary
         self.config.glossary = self._collect_glossary_entries()
 
+        # Commands
+        self.config.commands.enabled = self.commands_enabled_check.isChecked()
+        self.config.commands.items = self._collect_command_entries()
+
+        # Scenes
+        self.config.scenes.enabled = self.scenes_enabled_check.isChecked()
+        self.config.scenes.rules = self._collect_scene_rules()
+
         # Hotkeys
         self.config.hotkey.toggle_enabled = self.hotkey_toggle_check.isChecked()
         self.config.hotkey.toggle_hotkey = self.hotkey_recorder.hotkey()
+        self.config.hotkey.double_tap_action = "raw" if self.double_tap_check.isChecked() else "none"
+        self.config.hotkey.push_to_talk = self.push_to_talk_check.isChecked()
 
         self.config.save()
         self.settings_saved.emit()
@@ -1283,6 +1428,58 @@ class SettingsDialog(QDialog):
             if source and replacement:
                 entries.append(GlossaryEntry(source=source, replacement=replacement))
         return entries
+
+    # ---- commands / scenes tables -------------------------------------------
+
+    def _add_command_row(self, phrase: str = "", action: str = ""):
+        row = self.commands_table.rowCount()
+        self.commands_table.insertRow(row)
+        self.commands_table.setItem(row, 0, QTableWidgetItem(phrase.strip()))
+        self.commands_table.setItem(row, 1, QTableWidgetItem(action.strip()))
+
+    def _remove_selected_command_rows(self):
+        rows = sorted(
+            {index.row() for index in self.commands_table.selectedIndexes()},
+            reverse=True,
+        )
+        for row in rows:
+            self.commands_table.removeRow(row)
+
+    def _collect_command_entries(self) -> list[VoiceCommandEntry]:
+        entries = []
+        for row in range(self.commands_table.rowCount()):
+            phrase_item = self.commands_table.item(row, 0)
+            action_item = self.commands_table.item(row, 1)
+            phrase = phrase_item.text().strip() if phrase_item else ""
+            action = action_item.text().strip() if action_item else ""
+            if phrase and action:
+                entries.append(VoiceCommandEntry(phrase=phrase, action=action))
+        return entries
+
+    def _add_scene_row(self, match: str = "", profile: str = ""):
+        row = self.scenes_table.rowCount()
+        self.scenes_table.insertRow(row)
+        self.scenes_table.setItem(row, 0, QTableWidgetItem(match.strip()))
+        self.scenes_table.setItem(row, 1, QTableWidgetItem(profile.strip()))
+
+    def _remove_selected_scene_rows(self):
+        rows = sorted(
+            {index.row() for index in self.scenes_table.selectedIndexes()},
+            reverse=True,
+        )
+        for row in rows:
+            self.scenes_table.removeRow(row)
+
+    def _collect_scene_rules(self) -> list[SceneRule]:
+        rules = []
+        for row in range(self.scenes_table.rowCount()):
+            match_item = self.scenes_table.item(row, 0)
+            profile_item = self.scenes_table.item(row, 1)
+            match = match_item.text().strip() if match_item else ""
+            profile = profile_item.text().strip() if profile_item else ""
+            if match and profile:
+                rules.append(SceneRule(match=match, profile=profile))
+        return rules
 
     def _on_hotkey_captured(self, hotkey: str):
         """Update the recorder display when a key is captured."""

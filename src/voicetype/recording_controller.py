@@ -38,6 +38,7 @@ class RecordingController:
         level_timer,
         hwnd_provider=None,
         context_provider=None,
+        scene_resolver=None,
     ):
         self._recorder = recorder
         self._ui = ui
@@ -46,6 +47,11 @@ class RecordingController:
         self._level_timer = level_timer
         self._hwnd_provider = hwnd_provider or get_foreground_window
         self._context_provider = context_provider or (lambda hwnd: ("", ""))
+        # Optional callable(hwnd) -> AppConfig | None. Called after the HWND
+        # is captured; a non-None return becomes the session config for this
+        # recording cycle (scene presets). None falls back to the app config.
+        self._scene_resolver = scene_resolver
+        self._session_config = None
         self._saved_hwnd = 0
         self._cursor_context: tuple[str, str] = ("", "")
         self._context_thread: threading.Thread | None = None
@@ -75,6 +81,11 @@ class RecordingController:
     @property
     def is_cancelled(self) -> bool:
         return self._cancelled
+
+    @property
+    def session_config(self):
+        """The scene-resolved config for the current cycle (None = default)."""
+        return self._session_config
 
     @property
     def is_recording(self) -> bool:
@@ -124,6 +135,15 @@ class RecordingController:
         """
         self._cancelled = False
         self._saved_hwnd = self._hwnd_provider()
+        # Scene presets: resolve the per-session config from the foreground
+        # window's process BEFORE recording starts. Failures are swallowed by
+        # the resolver itself; None means "use the app config".
+        self._session_config = None
+        if self._scene_resolver is not None:
+            try:
+                self._session_config = self._scene_resolver(self._saved_hwnd)
+            except Exception:
+                self._session_config = None
         if not self._recorder.start():
             self._saved_hwnd = 0
             self._cursor_context = ("", "")

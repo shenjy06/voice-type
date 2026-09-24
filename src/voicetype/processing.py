@@ -11,6 +11,7 @@ from voicetype.config import AppConfig
 from voicetype.glossary import apply_glossary
 from voicetype.i18n import t
 from voicetype.polisher import TextPolisher
+from voicetype.voice_commands import match_voice_command
 
 logger = logging.getLogger(__name__)
 
@@ -105,12 +106,16 @@ class ProcessingWorker(QObject):
         started()    — emitted before any work begins
         finished(str)— emitted with the refined text (empty string for no transcript)
         error(str)   — emitted on any failure (incl. save failure), with a message
+        command_detected(str) — emitted instead of ``finished`` when the
+            transcript exactly matches a voice command; carries the action
+            (newline/enter/undo/tab/discard). The UI performs the action.
     """
 
     started = Signal()
     progress = Signal(str)  # stage text, e.g. "转写中..." / "润色中..."
     finished = Signal(str)  # refined text
     error = Signal(str)
+    command_detected = Signal(str)  # voice-command action
 
     def __init__(
         self,
@@ -120,6 +125,7 @@ class ProcessingWorker(QObject):
         context_after: str = "",
         audio_path: str | None = None,
         streaming_transcriber=None,
+        skip_polish: bool = False,
     ):
         super().__init__()
         self.config = config
@@ -128,6 +134,9 @@ class ProcessingWorker(QObject):
         # polishing. Empty strings fall back to standalone polishing.
         self.context_before = context_before
         self.context_after = context_after
+        # Raw mode (double-tap gesture): emit the transcript as-is for this
+        # cycle, skipping the polish stage even when it is enabled.
+        self._skip_polish = skip_polish
         # When set, the worker reuses this existing audio file (retained from
         # a previous failed run) instead of calling recorder.save(). Used by
         # retry; in that case ``recorder`` is not touched.
@@ -135,6 +144,13 @@ class ProcessingWorker(QObject):
         # When set, the worker is in streaming mode — audio was piped to
         # this transcriber during recording; finalize() collects the text.
         self._streaming_transcriber = streaming_transcriber
+        # Audio duration for history metadata (from the recorder in normal
+        # mode, probed from the WAV header in retry mode, None for streaming).
+        self._duration_ms: int | None = None
+        # Populated on success when audio archiving is enabled:
+        # {"audio_path", "duration_ms", "processing_ms"} — consumed by the
+        # controller to attach archive metadata to the history entry.
+        self.archive_info: dict | None = None
 
     def run(self):
         """Dispatch to the appropriate processing path based on constructor args.
@@ -181,6 +197,7 @@ class ProcessingWorker(QObject):
             self.started.emit()
             self.progress.emit(t("status.transcribing"))
             logger.debug("Retrying with retained audio: %s", os.path.basename(audio_path))
+            self._duration_ms = _probe_wav_duration_ms(audio_path)
             transcriber = get_transcriber(self.config)
             transcript = transcriber.transcribe(audio_path)
             self._finish(transcript, pipeline_start, audio_path=audio_path)
@@ -203,6 +220,7 @@ class ProcessingWorker(QObject):
             save_start = time.monotonic()
             self.progress.emit(t("status.saving"))
             audio_path = str(self.recorder.save())
+            self._duration_ms = self.recorder.last_duration_ms
             self.recorder = None  # release reference; buffer freed in save()
             logger.debug("Processing pipeline started: %s", os.path.basename(audio_path))
             logger.info("Audio saved in %.0fms", (time.monotonic() - save_start) * 1000)
@@ -217,12 +235,13 @@ class ProcessingWorker(QObject):
     # ---- shared pipeline tail ------------------------------------------------
 
     def _finish(self, transcript: str, pipeline_start: float, *, audio_path: str | None = None) -> None:
-        """Apply glossary, optionally polish, and emit finished.
+        """Apply glossary, match voice commands, optionally polish, emit result.
 
         ``audio_path``, when set, is the temp WAV file that should be deleted
         on success. It is NOT deleted on the error path (the caller retains the
         file for retry), but this method only runs on the success path — errors
-        are handled in the per-mode ``_run_*`` methods.
+        are handled in the per-mode ``_run_*`` methods. Archived files (in the
+        audio-archive dir) are never deleted.
         """
         if not transcript:
             logger.info(
@@ -233,11 +252,26 @@ class ProcessingWorker(QObject):
             self.finished.emit("")
             return
         transcript = apply_glossary(transcript, self.config.glossary)
-        if not self.config.polish.enabled:
+        # Voice commands run after glossary (so corrections apply) and before
+        # polishing (a command phrase must not be rewritten by the LLM).
+        if self.config.commands.enabled:
+            action = match_voice_command(transcript, self.config.commands.items)
+            if action is not None:
+                logger.info(
+                    "Voice command %r — skipping polish/paste (pipeline %.1fs)",
+                    action,
+                    time.monotonic() - pipeline_start,
+                )
+                self._cleanup_audio(audio_path)
+                self.command_detected.emit(action)
+                return
+        if not self.config.polish.enabled or self._skip_polish:
             logger.info(
-                "Polishing disabled — emitting transcript directly (pipeline %.1fs)",
+                "Polishing %s — emitting transcript directly (pipeline %.1fs)",
+                "skipped (raw mode)" if self._skip_polish and self.config.polish.enabled else "disabled",
                 time.monotonic() - pipeline_start,
             )
+            self._capture_archive_info(audio_path, pipeline_start)
             self._cleanup_audio(audio_path)
             self.finished.emit(transcript)
             return
@@ -249,8 +283,38 @@ class ProcessingWorker(QObject):
             context_after=self.context_after,
         )
         logger.info("Processing pipeline finished in %.1fs", time.monotonic() - pipeline_start)
+        self._capture_archive_info(audio_path, pipeline_start)
         self._cleanup_audio(audio_path)
         self.finished.emit(refined)
+
+    def _capture_archive_info(self, audio_path: str | None, pipeline_start: float) -> None:
+        """Record archive metadata for the controller to attach to history.
+
+        Only files that live in the audio-archive dir (i.e. saved while
+        ``archive_audio`` was on) qualify — temp files are deleted on success
+        and would dangle in the history entry.
+        """
+        if not audio_path or not self.config.recording.archive_audio:
+            return
+        if not self._is_archived(audio_path):
+            return
+        self.archive_info = {
+            "audio_path": audio_path,
+            "duration_ms": self._duration_ms,
+            "processing_ms": int((time.monotonic() - pipeline_start) * 1000),
+        }
+
+    @staticmethod
+    def _is_archived(audio_path: str) -> bool:
+        """Return True when ``audio_path`` lives in the audio-archive dir."""
+        from voicetype.audio import get_archive_dir
+
+        try:
+            return os.path.dirname(os.path.abspath(audio_path)) == os.path.abspath(
+                str(get_archive_dir())
+            )
+        except OSError:
+            return False
 
     @staticmethod
     def _cleanup_audio(audio_path: str | None) -> None:
@@ -258,11 +322,32 @@ class ProcessingWorker(QObject):
 
         Called only on success paths (empty transcript, polish disabled, or
         full success) — never on the exception path, where the file is kept
-        for retry.
+        for retry. Archived recordings are kept for history replay.
         """
         if audio_path is None:
+            return
+        if ProcessingWorker._is_archived(audio_path):
             return
         try:
             os.remove(audio_path)
         except OSError:
             pass
+
+
+def _probe_wav_duration_ms(audio_path: str) -> int | None:
+    """Read the duration of a WAV file from its header (stdlib only).
+
+    Used in retry mode, where the recorder (and its last_duration_ms) is no
+    longer available. Returns None on any failure — duration is metadata,
+    never worth failing the pipeline over.
+    """
+    import wave
+
+    try:
+        with wave.open(audio_path, "rb") as wf:
+            rate = wf.getframerate()
+            if rate <= 0:
+                return None
+            return int(wf.getnframes() / rate * 1000)
+    except Exception:
+        return None

@@ -425,3 +425,89 @@ class TestHotkeyManager:
         mgr._on_press(keyboard.Key.alt_r)
         mgr._on_release(keyboard.Key.alt_r)
         assert emitted == [True]
+
+
+class TestHotkeyGestures:
+    """Right-Alt double-tap / push-to-talk gestures (opt-in)."""
+
+    def _tap(self, mgr):
+        mgr._on_press(keyboard.Key.alt_r)
+        mgr._on_release(keyboard.Key.alt_r)
+
+    def test_double_tap_emits_raw_toggle(self, qtbot):
+        mgr = HotkeyManager(double_tap_action="raw")
+        raw = []
+        toggles = []
+        mgr.raw_toggle.connect(lambda: raw.append(True))
+        mgr.toggle_recording.connect(lambda: toggles.append(True))
+
+        self._tap(mgr)
+        self._tap(mgr)
+
+        assert raw == [True]
+        # The first tap toggled immediately; the second became raw.
+        assert toggles == [True]
+
+    def test_slow_second_tap_is_two_toggles(self, qtbot):
+        mgr = HotkeyManager(double_tap_action="raw")
+        # Monotonic clocks start large in reality; a 0 start would
+        # make the first tap look like a double-tap (0 sentinel collision).
+        clock = [100.0]
+        mgr._now = lambda: clock[0]
+        raw = []
+        toggles = []
+        mgr.raw_toggle.connect(lambda: raw.append(True))
+        mgr.toggle_recording.connect(lambda: toggles.append(True))
+
+        self._tap(mgr)
+        clock[0] += 0.5  # outside the double-tap window
+        self._tap(mgr)
+
+        assert raw == []
+        assert toggles == [True, True]
+
+    def test_single_tap_toggles_when_gestures_off(self, qtbot):
+        mgr = HotkeyManager()
+        raw = []
+        mgr.raw_toggle.connect(lambda: raw.append(True))
+        with qtbot.waitSignal(mgr.toggle_recording):
+            self._tap(mgr)
+        assert raw == []
+
+    def test_combo_cancels_ptt_candidacy(self, qtbot):
+        from pynput.keyboard import KeyCode
+
+        mgr = HotkeyManager(push_to_talk=True)
+        ptt_starts = []
+        mgr.ptt_start.connect(lambda: ptt_starts.append(True))
+
+        mgr._on_press(keyboard.Key.alt_r)
+        with qtbot.waitSignal(mgr.cancel_recording):
+            mgr._on_press(KeyCode.from_char("c"))
+
+        assert ptt_starts == []
+
+    def test_long_press_starts_and_release_ends_ptt(self, qtbot):
+        mgr = HotkeyManager(push_to_talk=True)
+        mgr._ptt_hold_s = 0.05
+        toggles = []
+        stops = []
+        mgr.toggle_recording.connect(lambda: toggles.append(True))
+        mgr.ptt_stop.connect(lambda: stops.append(True))
+
+        mgr._on_press(keyboard.Key.alt_r)
+        with qtbot.waitSignal(mgr.ptt_start, timeout=1000):
+            pass  # the background hold timer fires the signal
+
+        mgr._on_release(keyboard.Key.alt_r)
+        assert stops == [True]
+        assert toggles == []  # a long press never toggles
+
+    def test_release_before_hold_is_a_normal_tap(self, qtbot):
+        mgr = HotkeyManager(push_to_talk=True)
+        mgr._ptt_hold_s = 0.2
+        starts = []
+        mgr.ptt_start.connect(lambda: starts.append(True))
+        with qtbot.waitSignal(mgr.toggle_recording):
+            self._tap(mgr)
+        assert starts == []

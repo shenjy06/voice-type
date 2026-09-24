@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-Voice Type is a Python 3.10+ Windows desktop dictation app. Application code lives in `src/voicetype/`, with the entry point in `src/voicetype/__main__.py`. Core modules include audio capture (`src/voicetype/audio.py`), ASR and polishing clients (`src/voicetype/asr.py`, `src/voicetype/polisher.py`, `src/voicetype/api_client.py`), glossary post-processing (`src/voicetype/glossary.py`), configuration/history storage (`src/voicetype/config.py`, `src/voicetype/history.py`), and text injection (`src/voicetype/typer.py`). Qt UI code is under `src/voicetype/ui/`. Tests live in `tests/`, with UI tests in `tests/ui/`. Packaging files are `VoiceType.spec`, `build.bat`, and the generated `build/` and `dist/` directories.
+Voice Type is a Python 3.10+ Windows desktop dictation app. Application code lives in `src/voicetype/`, with the entry point in `src/voicetype/__main__.py`. Core modules include audio capture (`src/voicetype/audio.py`), ASR and polishing clients (`src/voicetype/asr.py`, `src/voicetype/polisher.py`, `src/voicetype/api_client.py`), glossary post-processing (`src/voicetype/glossary.py`), voice commands and scene presets (`src/voicetype/voice_commands.py`, `src/voicetype/scenes.py`), configuration/history storage (`src/voicetype/config.py`, `src/voicetype/history.py`), and text injection (`src/voicetype/typer.py`). Qt UI code is under `src/voicetype/ui/`. Tests live in `tests/`, with UI tests in `tests/ui/`. Packaging files are `VoiceType.spec`, `build.bat`, and the generated `build/` and `dist/` directories. The Electron desktop port lives in `desktop/` (branch `desktop`) and mirrors the same config schema field-for-field.
 
 ## Build, Test, and Development Commands
 

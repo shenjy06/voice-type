@@ -19,8 +19,24 @@ logger = logging.getLogger(__name__)
 # Use a leading dot prefix on POSIX and the Windows hidden attribute on Windows
 # to discourage other users on a shared box from browsing recordings.
 TEMP_AUDIO_DIR_NAME = ".voice_type"
+# Subdirectory of the config dir where archived recordings are kept when
+# ``archive_audio`` is enabled.
+ARCHIVE_DIR_NAME = "audio-archive"
 # Delete temp audio files older than this on startup (1 hour)
 STALE_AUDIO_MAX_AGE_SECONDS = 3600
+
+
+def get_archive_dir() -> Path:
+    """Return the audio-archive directory (created on demand).
+
+    Resolved at call time (not import time) so tests that redirect
+    ``voicetype.config.CONFIG_DIR`` are honoured.
+    """
+    from voicetype import config as _config
+
+    archive_dir = _config.CONFIG_DIR / ARCHIVE_DIR_NAME
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    return archive_dir
 
 
 def _tighten_dir_permissions(directory: Path) -> None:
@@ -215,6 +231,7 @@ class AudioRecorder:
         vad_threshold: float = 0.02,
         streaming_enabled: bool = False,
         device: int | None = None,
+        archive_enabled: bool = False,
     ):
         self.sample_rate = sample_rate
         self.denoise_enabled = denoise_enabled
@@ -224,6 +241,9 @@ class AudioRecorder:
         self.vad_threshold = vad_threshold
         self.streaming_enabled = streaming_enabled
         self.device = device
+        # When True, save() writes into the persistent audio-archive dir
+        # instead of %TEMP% so the recording survives processing for replay.
+        self.archive_enabled = archive_enabled
         self._recording = False
         self._frames: list[np.ndarray] = []
         self._stream: sd.InputStream | None = None
@@ -243,6 +263,9 @@ class AudioRecorder:
         # Streaming ASR hook — invoked on the audio thread with 16-bit PCM
         # bytes when set. See StreamingTranscriber.
         self.on_audio_chunk = None
+        # Duration of the last save() in milliseconds; read by the processing
+        # worker for history/archive metadata.
+        self.last_duration_ms: int | None = None
 
     @property
     def is_recording(self) -> bool:
@@ -341,12 +364,21 @@ class AudioRecorder:
         # raw byte copy, so it cannot crash regardless of duration. The
         # larger file (~1 MB per 33 s vs ~185 KB for OGG) is well within
         # ASR providers' upload limits.
-        temp_file = self._temp_dir / f"recording_{uuid.uuid4().hex}.wav"
+        if self.archive_enabled:
+            # Archive mode: the file must survive processing (history replay),
+            # so it goes to the persistent archive dir with a sortable
+            # timestamp name instead of the volatile temp dir.
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            temp_file = get_archive_dir() / f"recording_{timestamp}_{uuid.uuid4().hex[:8]}.wav"
+        else:
+            temp_file = self._temp_dir / f"recording_{uuid.uuid4().hex}.wav"
         try:
             sf.write(str(temp_file), data, self.sample_rate, format="WAV", subtype="PCM_16")
         except Exception as e:
             logger.error("Failed to save audio: %s", e, exc_info=True)
             raise ValueError(f"Failed to save audio: {e}") from e
+
+        self.last_duration_ms = int(duration_ms)
 
         with self._lock:
             self._temp_file = temp_file
